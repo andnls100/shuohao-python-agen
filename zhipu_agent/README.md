@@ -26,17 +26,19 @@
 pip install -r requirements.txt     # 只需要 openai 包
 node --version                      # 需要 Node 18 及以上
 cp .env.example .env                # 填 ZHIPU_API_KEY 和 ZHIPU_MODEL
-python -m zhipu_agent.main doctor --ping
+python run_agent.py doctor --ping
 ```
 
 ## 使用
 
 ```
-python -m zhipu_agent.main run --book input/novel.txt --episodes 6 --minutes 2 --genre 都市
-python -m zhipu_agent.main run --stages script,staging,storyboard --eps 1-3
-python -m zhipu_agent.main run --stages refs --refs-names 沈知微
-python -m zhipu_agent.main status
+python run_agent.py run --book input/novel.txt --episodes 6 --minutes 2 --genre 都市
+python run_agent.py run --stages script,staging,storyboard --eps 1-3
+python run_agent.py run --stages refs --refs-names 沈知微
+python run_agent.py status
 ```
+
+如果 `python -m zhipu_agent.main` 报找不到模块（Python 被设成了隔离模式），就使用根目录的 `run_agent.py`，参数完全一样。
 
 原文是 UTF-8 或 GBK 都可以，会先转成 UTF-8 放到 `output/source/`。
 骨架拍板点默认会暂停等你回复；加 `--yes` 自动确认。
