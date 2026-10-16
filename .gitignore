@@ -35,3 +35,9 @@ node_modules/
 
 # 各 skill 的本机配置（character-refs 的出图模型选择等），每台机器不同
 skills/*/config.local.json
+
+# Python 智能体
+.env
+__pycache__/
+*.pyc
+/output/
