@@ -1,0 +1,30 @@
+小说
+ │
+ ▼
+novel-outline       大纲
+ │
+ ├──► novel-characters   角色设定
+ │
+ ├──► novel-art          场景/道具设定
+ │
+ └──► novel-script       剧本
+          │
+          ▼
+     novel-staging       场面调度
+          │
+          ▼
+     novel-storyboard    分镜
+          
+另外：
+character-refs          角色参考图
+
+
+7 个 Skill 分别干什么
+Skill	作用	主要产物
+novel-outline	小说 → 短剧大纲	outline.json
+novel-characters	大纲/小说 → 人物设定	cast.json
+novel-art	场景、道具 → 美术设定	art.json
+novel-script	大纲 → 正式短剧剧本	script.json
+novel-staging	剧本 → 每场戏开场时人物站位	staging.json
+novel-storyboard	剧本 → 分镜、镜头、关键帧	storyboard.json
+character-refs	人物设定 → 真正生成角色参考图	角色参考图片
