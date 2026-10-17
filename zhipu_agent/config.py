@@ -94,6 +94,7 @@ class Settings:
     node_bin: str
     skills_dir: Path
     direct_chars: int          # 原文不超过这个字数就整本直接喂给模型，跳过分卷摘要
+    stream: bool               # 流式调用：边生成边收，能看到进度，也避免长时间无响应被断开
     json_mode: bool            # 是否传 response_format=json_object（部分模型不支持，默认关）
 
     def require(self) -> None:
@@ -126,6 +127,7 @@ def load_settings(**overrides) -> Settings:
         node_bin=_get("NODE_BIN", default="node"),
         skills_dir=Path(_get("SKILLS_DIR", default=str(REPO_ROOT / "skills"))),
         direct_chars=_int("AGENT_DIRECT_CHARS", 60000),
+        stream=_bool("ZHIPU_STREAM", True),
         json_mode=_bool("ZHIPU_JSON_MODE", False),
     )
     return replace(settings, **overrides) if overrides else settings

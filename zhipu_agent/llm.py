@@ -12,6 +12,7 @@ import base64
 import json
 import mimetypes
 import re
+import sys
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
@@ -93,17 +94,26 @@ def chat(
         params["response_format"] = {"type": "json_object"}
 
     for attempt in range(s.retries + 1):
+        started = time.time()
+        _say(f"调用模型 {use_model}（第 {attempt + 1} 次尝试，{'流式' if s.stream else '非流式'}）…")
         try:
-            response = _client(s).chat.completions.create(**params)
+            if s.stream:
+                text, finish = _stream_call(_client(s), params, started)
+            else:
+                response = _client(s).chat.completions.create(**params)
+                choice = response.choices[0]
+                text, finish = choice.message.content or "", choice.finish_reason
         except Exception as exc:  # noqa: BLE001 - 统一包装
+            waited = time.time() - started
             if attempt < s.retries and _retryable(exc):
-                time.sleep(min(2 ** (attempt + 1), 30))
+                pause = min(2 ** (attempt + 1), 30)
+                _say(f"⚠ {type(exc).__name__}（已等 {waited:.0f}s）：{str(exc)[:200]}；{pause}s 后重试")
+                time.sleep(pause)
                 continue
             raise LLMError(f"模型调用失败：{type(exc).__name__}: {exc}") from exc
 
-        choice = response.choices[0]
-        text = choice.message.content or ""
-        if choice.finish_reason == "length":
+        _say(f"模型返回完毕：{len(text)} 字，用时 {time.time() - started:.0f}s，finish_reason={finish}")
+        if finish == "length":
             raise LLMTruncated(
                 "模型输出被长度上限截断。可以设置环境变量 ZHIPU_MAX_TOKENS 调大上限，"
                 "或减小每批处理的集数后重试。"
@@ -112,9 +122,40 @@ def chat(
             if attempt < s.retries:
                 time.sleep(2)
                 continue
-            raise LLMError(f"模型返回了空内容（finish_reason={choice.finish_reason}）")
+            raise LLMError(f"模型返回了空内容（finish_reason={finish}）")
         return text
     raise LLMError("模型调用失败：超过最大重试次数")  # pragma: no cover
+
+
+def _say(message: str) -> None:
+    print(f"[{time.strftime('%H:%M:%S')}]   [llm] {message}", file=sys.stderr, flush=True)
+
+
+def _stream_call(client, params: dict, started: float):
+    """流式调用：边收边累积，每隔约 15 秒报一次进度（思考型模型会先吐一段思考内容，也算进度）。"""
+    stream = client.chat.completions.create(stream=True, **params)
+    parts: list = []
+    thought = 0
+    finish = None
+    last_report = time.time()
+    for chunk in stream:
+        if not getattr(chunk, "choices", None):
+            continue
+        choice = chunk.choices[0]
+        delta = choice.delta
+        piece = getattr(delta, "content", None)
+        if piece:
+            parts.append(piece)
+        reasoning = getattr(delta, "reasoning_content", None)
+        if reasoning:
+            thought += len(reasoning)
+        if choice.finish_reason:
+            finish = choice.finish_reason
+        if time.time() - last_report >= 15:
+            got = sum(len(x) for x in parts)
+            _say(f"生成中…已 {time.time() - started:.0f}s，已收到 {got} 字" + (f"（另有思考 {thought} 字）" if thought else ""))
+            last_report = time.time()
+    return "".join(parts), finish
 
 
 def extract_json(text: str) -> Any:

@@ -150,6 +150,68 @@ ln -s "$PWD/skills/novel-characters" ~/.claude/skills/novel-characters
 ln -s "$PWD/skills/novel-characters" ~/.codex/skills/novel-characters
 ```
 
+## Without Codex: the Python agent (zhipu_agent)
+
+No Codex or Claude Code quota? Use `zhipu_agent/`: Python plus any OpenAI-compatible LLM API (Zhipu or an aggregator) drives the seven skills in order. The skills are unchanged: the model reads each skill's `references/*-pass.md` and `schema.md` as instructions, and the skills' own Node scripts (`validate`, `merge`, `assemble`, `render`, …) act as quality gates. When validation fails, each violation is routed to the episode, scene or character it names, and only those items are regenerated with the error attached.
+
+> Status: offline tests (fake model + the real validators) pass the six stages on the bundled sample. Real-model writing quality, how many repair rounds are needed, the vision-model image format and real image generation are **not yet verified** — start with a short text and `--eps`.
+
+### Setup
+
+```bash
+git clone -b master https://github.com/andnls100/shuohao-python-agen.git
+cd shuohao-python-agen
+pip install -r requirements.txt        # only the openai package
+node --version                         # Node 18+
+cp .env.example .env                   # Windows: copy .env.example .env
+```
+
+Fill at least these in `.env`:
+
+```
+ZHIPU_API_KEY=your-key
+ZHIPU_MODEL=model-name
+ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4/
+```
+
+For an aggregator, set `ZHIPU_BASE_URL` to its OpenAI-compatible endpoint and use its model names. `.env` is git-ignored.
+
+### Run
+
+The entry point is `run_agent.py` (same as `python -m zhipu_agent.main`; use it if `-m` cannot find the package, e.g. when Python runs in isolated mode):
+
+```bash
+python run_agent.py doctor --ping      # check the environment and make one real model call
+python run_agent.py run --book input/novel.txt --episodes 6 --minutes 2 --genre urban
+python run_agent.py status             # which stages exist and pass validation
+```
+
+Put the novel at `input/novel.txt` (UTF-8 or GBK). Outputs go to `output/`, with a `*-report.html` per stage.
+
+### Stages and common commands
+
+Stages: `outline` → `characters` → `art` → `script` → `staging` → `storyboard`, plus the optional `refs` (character-refs, not run by default). Finished stages that pass validation are skipped.
+
+```bash
+python run_agent.py run --stages outline --book input/novel.txt --episodes 6 --minutes 2 --genre urban
+python run_agent.py run --stages characters,art
+python run_agent.py run --stages script,staging,storyboard --eps 1-2     # small trial first
+python run_agent.py run --stages storyboard --aspect 9:16 --prompt-lang zh
+python run_agent.py run --stages refs --refs-names Alice --refs-gen      # --refs-gen needs an image model configured
+python run_agent.py run --yes ...                                        # no pause at the outline checkpoint
+python run_agent.py run --stages script --force                          # ignore existing output and cache
+```
+
+Other options: `--out`, `--adapt-mode`, `--images` (scene images, needs a vision model), `--concurrency` (default 3), `--fix-rounds` (default 3).
+
+### Resume and troubleshooting
+
+- Every item is cached under `output/work/`; re-running the same command resumes.
+- Model calls print `[llm]` progress lines (each call, progress every ~15 s, retry reasons). If nothing appears for a long time, check the endpoint and your network/proxy.
+- Streaming is on by default; set `ZHIPU_STREAM=0` in `.env` if your platform does not support it.
+- If a stage still fails after the repair rounds, the run stops and lists the violations; the file stays in `output/` so you can edit it by hand and re-run.
+- See `.env.example` for all options and [`zhipu_agent/README.md`](zhipu_agent/README.md) for design notes.
+
 ## Requirements
 
 | | Required? | Notes |

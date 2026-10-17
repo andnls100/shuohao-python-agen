@@ -151,6 +151,108 @@ ln -s "$PWD/skills/novel-characters" ~/.claude/skills/novel-characters
 ln -s "$PWD/skills/novel-characters" ~/.codex/skills/novel-characters
 ```
 
+## 不使用 Codex：Python 智能体（zhipu_agent）
+
+没有 Codex 或 Claude Code 额度时，可以使用仓库里的 `zhipu_agent/`：Python 加任意 OpenAI 兼容的大模型接口（智谱官方或聚合平台），按顺序驱动这七个技能包。技能包本身没有改动：模型读取各技能的 `references/*-pass.md` 和 `schema.md` 当作指令，技能自带的 Node 脚本（`validate`、`merge`、`assemble`、`render` 等）当作质量门。校验不过时，报错会按集号、场景名、角色名对到具体条目，只让出错的条目带着报错回炉。
+
+> 状态：离线测试（模拟模型加真实校验器）已跑通《渡口》样例的六个阶段。真实模型的写作质量、回炉几轮能过、视觉模型的图片格式、真实出图都还没有验证，第一次运行请先使用短文本和 `--eps` 小范围试跑。
+
+### 安装与配置
+
+```bash
+git clone -b master https://github.com/andnls100/shuohao-python-agen.git
+cd shuohao-python-agen
+pip install -r requirements.txt        # 只需要 openai 包
+node --version                         # 需要 Node 18 及以上
+cp .env.example .env                   # Windows：copy .env.example .env
+```
+
+使用记事本打开 `.env`，至少填写三项：
+
+```
+ZHIPU_API_KEY=你的key
+ZHIPU_MODEL=模型名
+ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4/
+```
+
+聚合平台把 `ZHIPU_BASE_URL` 换成它提供的 OpenAI 兼容地址，模型名写它平台上的名字。`.env` 已被 `.gitignore` 忽略，不会提交。
+
+### 运行
+
+统一入口是根目录的 `run_agent.py`（等价于 `python -m zhipu_agent.main`；部分机器的 Python 被设成隔离模式，`-m` 会找不到包，这时就使用 `run_agent.py`）：
+
+```bash
+python run_agent.py doctor --ping      # 检查环境，并真的调用一次模型
+python run_agent.py run --book input/novel.txt --episodes 6 --minutes 2 --genre 都市
+python run_agent.py status             # 各阶段产物是否存在、是否通过校验
+```
+
+小说文本放在 `input/novel.txt`，UTF-8 或 GBK 都可以。产物都在 `output/`，每个阶段有一份 `*-report.html`。
+
+### 流水线
+
+| 阶段 | 命令里的名字 | 对应技能 |
+| --- | --- | --- |
+| 1 | `outline` | novel-outline：先出骨架，暂停等你确认，再分批写每集 |
+| 2 | `characters` | novel-characters：扫描、归并、逐个角色出卡 |
+| 3 | `art` | novel-art：场景和叙事道具 |
+| 4 | `script` | novel-script：三集一批 |
+| 5 | `staging` | novel-staging：先出地点平面，再按地点写场景 |
+| 6 | `storyboard` | novel-storyboard：三集一批，最后导出投产包 |
+| 7 | `refs` | character-refs：可选，默认不跑 |
+
+不加 `--stages` 时跑前六个阶段。已经完成并通过校验的阶段会被跳过。
+
+### 常用命令
+
+```bash
+# 只跑大纲（outline 必须给出总集数、单集分钟数、题材）
+python run_agent.py run --stages outline --book input/novel.txt --episodes 6 --minutes 2 --genre 都市
+
+# 大纲通过后，一次跑角色和美术
+python run_agent.py run --stages characters,art
+
+# 只处理前两集的剧本、站位、分镜（先小范围试跑，省额度）
+python run_agent.py run --stages script,staging,storyboard --eps 1-2
+
+# 竖屏分镜、中文提示词
+python run_agent.py run --stages storyboard --aspect 9:16 --prompt-lang zh
+
+# 角色参考图：只建档案；加 --refs-gen 才真的出图（需先配置出图模型）
+python run_agent.py run --stages refs --refs-names 沈知微 --refs-look 动漫
+
+# 不暂停，骨架自动确认
+python run_agent.py run --yes ...
+
+# 忽略已有产物和缓存，全部重做
+python run_agent.py run --stages script --force
+```
+
+主要参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `--book` | 小说文本，默认 `input/novel.txt` |
+| `--out` | 输出目录，默认 `output` |
+| `--stages` | 阶段，逗号分隔，默认前六个 |
+| `--episodes` `--minutes` `--genre` | outline 阶段必填：总集数、单集分钟数、题材 |
+| `--adapt-mode` | 改编幅度：忠实、抽核、借壳，默认抽核 |
+| `--eps` | 只处理这些集，如 `1-3` 或 `1,3,5` |
+| `--aspect` | 分镜画幅 `16:9` 或 `9:16` |
+| `--prompt-lang` | H3 提示词语言 `en` 或 `zh`，默认 `en` |
+| `--images` | 场景设定图目录（staging 认图，需要视觉模型） |
+| `--yes` | 不暂停，骨架拍板点自动确认 |
+| `--force` | 忽略已有产物和缓存 |
+| `--concurrency` `--fix-rounds` | 同时进行的调用数（默认 3）、最多回炉几轮（默认 3） |
+
+### 中断、续跑和排错
+
+- 每个条目的结果缓存在 `output/work/`，中断后重新运行同一条命令会接着做。
+- 调用模型时终端会打印 `[llm]` 进度行：每次调用、每隔约 15 秒的生成进度、重试原因。长时间没有进度行，先检查接口地址和网络（国内访问海外接口需要代理）。
+- 默认使用流式调用。平台不支持流式时，在 `.env` 里设置 `ZHIPU_STREAM=0`。
+- 阶段回炉次数用完仍未通过，程序会停下并列出违规项，文件保留在 `output/`，手工修改后重跑即可。
+- 其他可选配置见 `.env.example`；更详细的设计说明见 [`zhipu_agent/README.md`](zhipu_agent/README.md)。
+
 ## 前置条件
 
 | | 必需？ | 说明 |
