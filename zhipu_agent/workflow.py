@@ -73,16 +73,38 @@ def build_context(
     interactive: bool = True,
     force: bool = False,
     images_dir: Optional[Path] = None,
+    skip_source: bool = False,
 ) -> Context:
     version = check_node(settings)
     pack = load_pack(settings)
-    book_file, final_title = prepare_source(book, out, title)
+    if skip_source:
+        out = Path(out)
+        final_title = title
+        if not final_title:
+            candidates = set()
+            for folder, suffix in ((out / "characters", "-cast.json"), (out / "art", "-art.json")):
+                if folder.is_dir():
+                    for candidate in folder.glob("*" + suffix):
+                        candidates.add(candidate.name[:-len(suffix)])
+            if len(candidates) == 1:
+                final_title = next(iter(candidates))
+        if not final_title:
+            raise ValueError("只运行 images 阶段且不读取小说时，请用 --title 指定书名，或确保 output 中只有一套 cast/art JSON")
+        # The images stage only consumes cast.json and art.json. Do not read or copy the novel.
+        book_file = out / "source" / f"{safe_name(final_title)}.txt"
+        source_chars = None
+    else:
+        book_file, final_title = prepare_source(book, out, title)
+        source_chars = len(book_file.read_text(encoding="utf-8"))
     ctx = Context(
         settings=settings, pack=pack, out=Path(out), book_file=book_file, title=final_title,
         lang=lang, interactive=interactive, force=force,
         images_dir=Path(images_dir) if images_dir else None,
     )
-    ctx.log(f"《{final_title}》 · 原文 {len(book_file.read_text(encoding='utf-8'))} 字 · Node {version} · 输出到 {ctx.out}")
+    if source_chars is None:
+        ctx.log(f"《{final_title}》 · 使用已有 JSON 资产（跳过小说读取） · Node {version} · 输出到 {ctx.out}")
+    else:
+        ctx.log(f"《{final_title}》 · 原文 {source_chars} 字 · Node {version} · 输出到 {ctx.out}")
     return ctx
 
 
