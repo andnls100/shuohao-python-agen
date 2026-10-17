@@ -545,10 +545,22 @@ export function gateReport(board, ctx = {}) {
   // 视频提示词禁人名：outline 的名字 + cast 的名字与别名。这是 H3 与 Seedance 官方规范的要求，
   // 不跟着语言变；分镜图提示词反过来直呼其名——名字指向挂上去的那张设定图
   const banned = [];
-  for (const c of ctx.outline?.characters ?? []) if (c?.name) banned.push(c.name);
+  // Role descriptions are not proper names. Some cast generators put these in aliases;
+  // treating them as names creates false positives for perfectly valid generic identities.
+  const genericAliases = new Set([
+    '男修', '女修', '男修士', '女修士', '奶娃', '奶娃们', '小崽子',
+    '男子', '女子', '男人', '女人', '中年男子', '年轻男子', '老者', '老人',
+    '少年', '少女', '孩子', '孩童', '婴儿', '妇人', '侍卫', '修士',
+    '黑衣人', '白衣人', '众人', '一名男子', '一名女子',
+  ]);
+  const addName = (value) => {
+    const name = String(value ?? '').trim();
+    if (name && !genericAliases.has(name)) banned.push(name);
+  };
+  for (const c of ctx.outline?.characters ?? []) addName(c?.name);
   for (const c of ctx.cast?.characters ?? []) {
-    if (c?.name) banned.push(c.name);
-    for (const a of c?.aliases ?? []) banned.push(a);
+    addName(c?.name);
+    for (const a of c?.aliases ?? []) addName(a);
   }
 
   for (const ep of eps) {

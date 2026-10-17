@@ -1,9 +1,12 @@
 import unittest
 
 from zhipu_agent.stages.storyboard_repair import (
+    balance_episode_durations,
     cut_violation_refs,
     extract_h3_cut_text,
+    repair_deterministic_storyboard,
     repair_minor_cut_durations,
+    segment_h3_violation_refs,
     replace_h3_cut_text,
     sync_segment_timing,
 )
@@ -44,6 +47,64 @@ class StoryboardRepairTest(unittest.TestCase):
         self.assertTrue(sync_segment_timing(segment, "zh"))
         self.assertTrue(segment["h3Prompt"].startswith("参考图与目标视频的对齐——"))
         self.assertIn("[镜头 2] 于 00:03.000，", segment["h3Prompt"])
+
+
+    def test_missing_shot_block_is_inserted_without_losing_neighbours(self):
+        segment = {
+            "h3Prompt": (
+                "How the reference pictures align with the target video — line\\n"
+                "integrated_multimodal_description:\\n"
+                "[Shot 1] first\\n[Shot 3] At 00:06.000, third\\n"
+                "overall_soundscape: sound\\nnon_diegetic_music: N/A"
+            )
+        }
+        self.assertTrue(replace_h3_cut_text(segment, 2, "[Shot 2] At 00:03.000, repaired second", "en"))
+        self.assertIn("[Shot 2] At 00:03.000, repaired second", segment["h3Prompt"])
+        self.assertLess(segment["h3Prompt"].index("[Shot 2]"), segment["h3Prompt"].index("[Shot 3]"))
+        self.assertIn("[Shot 1] first", segment["h3Prompt"])
+
+    def test_frame_size_and_alignment_repairs_are_deterministic(self):
+        doc = {
+            "promptLang": "zh",
+            "episodes": [{"segments": [{
+                "id": "E01-01",
+                "cuts": [{"seconds": 3.0, "size": "close", "frame": "人物面部占据画面中心"}],
+                "h3Prompt": "旧对齐行\\n整体视听描述：\\n[镜头 1] 人物静止\\n整体音景：安静\\n非叙事配乐：无",
+            }]}],
+        }
+        fixes = repair_deterministic_storyboard(doc, "zh")
+        segment = doc["episodes"][0]["segments"][0]
+        self.assertIn("特写", segment["cuts"][0]["frame"])
+        self.assertTrue(segment["h3Prompt"].startswith("目标视频在 0.00 秒处完全参照图 1"))
+        self.assertGreaterEqual(len(fixes), 2)
+
+    def test_episode_overrun_only_trims_action_cuts(self):
+        doc = {
+            "promptLang": "en",
+            "params": {"tolerance": 0.15, "minCutSeconds": 2},
+            "episodes": [{"ep": 1, "segments": [
+                {"id": "E01-01", "sceneIndex": 1, "cuts": [
+                    {"seconds": 8.0, "beats": [1, 1]},
+                    {"seconds": 8.0, "beats": [2, 2]},
+                ], "h3Prompt": "old"},
+            ]}],
+        }
+        script = {"episodes": [{"ep": 1, "targetSeconds": 10, "scenes": [
+            {"flow": [{"action": "move"}, {"action": "turn"}]}
+        ]}]}
+        fixes = balance_episode_durations(doc, script)
+        cuts = doc["episodes"][0]["segments"][0]["cuts"]
+        self.assertTrue(fixes)
+        self.assertLessEqual(sum(c["seconds"] for c in cuts), 11.5)
+        self.assertGreaterEqual(min(c["seconds"] for c in cuts), 2.0)
+
+    def test_segment_h3_errors_are_grouped(self):
+        found = segment_h3_violation_refs([
+            "E01-01 首行对齐指令和分镜结构对不上",
+            "E01-02 的 h3Prompt 设定中文却写成英文",
+            "E01-03#2 的景别缺失",
+        ])
+        self.assertEqual(set(found), {"E01-01", "E01-02"})
 
     def test_only_explicit_cut_errors_are_routed(self):
         found = cut_violation_refs([

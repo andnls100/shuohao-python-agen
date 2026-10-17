@@ -113,6 +113,122 @@ def repair_minor_cut_durations(doc: Dict[str, Any], lang: str = "en",
     return repaired
 
 
+def repair_deterministic_storyboard(doc: Dict[str, Any], lang: str = "en") -> List[str]:
+    """Apply safe, deterministic repairs that do not invent story content."""
+    shot_size_terms = {
+        "extreme-wide": "大远景",
+        "wide": "全景",
+        "medium": "中景",
+        "close": "特写",
+        "extreme-close": "大特写",
+    }
+
+    repaired: List[str] = []
+    for segment in _segments(doc):
+        for index, cut in enumerate(segment.get("cuts", []), 1):
+            size = cut.get("size")
+            term = shot_size_terms.get(size)
+            frame = str(cut.get("frame") or "")
+            if term and frame.strip() and term not in frame:
+                cut["frame"] = f"{term}，{frame.lstrip()}"
+                repaired.append(f"{segment.get('id', '?')}#{index}: 补齐景别词「{term}」")
+        if sync_segment_timing(segment, lang):
+            repaired.append(f"{segment.get('id', '?')}: 重建 H3 对齐行与切点时间")
+    return repaired
+
+
+def balance_episode_durations(doc: Dict[str, Any], script: Dict[str, Any],
+                              tolerance: float = 0.15, min_cut_seconds: float = 2.0) -> List[str]:
+    """Trim only action-only cuts, in 0.1s steps, when an episode exceeds its target window."""
+    params = doc.get("params") or {}
+    try:
+        tolerance = float(params.get("tolerance", tolerance))
+        min_cut_seconds = float(params.get("minCutSeconds", min_cut_seconds))
+    except (TypeError, ValueError):
+        pass
+    script_eps = {ep.get("ep"): ep for ep in script.get("episodes", [])}
+    fixes: List[str] = []
+    for episode in doc.get("episodes", []):
+        source_ep = script_eps.get(episode.get("ep"))
+        try:
+            target = float(source_ep.get("targetSeconds", 0)) if source_ep else 0.0
+        except (TypeError, ValueError):
+            target = 0.0
+        if target <= 0:
+            continue
+        segments = episode.get("segments", [])
+        total = sum(float(c.get("seconds", 0) or 0) for seg in segments for c in seg.get("cuts", []))
+        excess_ticks = int(round(max(0.0, total - target * (1 + tolerance)) * 10))
+        if excess_ticks <= 0:
+            continue
+
+        eligible: List[Tuple[Dict[str, Any], Dict[str, Any], int, float]] = []
+        scenes = source_ep.get("scenes", []) if source_ep else []
+        for segment in segments:
+            scene_index = int(segment.get("sceneIndex", 0) or 0)
+            scene = scenes[scene_index - 1] if 1 <= scene_index <= len(scenes) else {}
+            beats = scene.get("flow", []) if isinstance(scene, dict) else []
+            for cut_index, cut in enumerate(segment.get("cuts", []), 1):
+                bounds = cut.get("beats", [])
+                if not isinstance(bounds, list) or len(bounds) != 2:
+                    continue
+                try:
+                    start, end = int(bounds[0]), int(bounds[1])
+                    seconds = float(cut.get("seconds", 0) or 0)
+                except (TypeError, ValueError):
+                    continue
+                claimed = beats[start - 1:end] if 1 <= start <= end <= len(beats) else []
+                if not claimed or any(isinstance(beat, dict) and isinstance(beat.get("line"), str) for beat in claimed):
+                    continue
+                capacity = max(0, int(round((seconds - min_cut_seconds) * 10)))
+                if capacity:
+                    eligible.append((segment, cut, cut_index, capacity))
+
+        original_excess = excess_ticks
+        while excess_ticks > 0:
+            changed = False
+            # Trim the longest action-only cuts first; never touch dialogue-bearing cuts.
+            eligible.sort(key=lambda item: float(item[1].get("seconds", 0) or 0), reverse=True)
+            for segment, cut, cut_index, capacity in eligible:
+                seconds = float(cut.get("seconds", 0) or 0)
+                if capacity <= 0 or seconds <= min_cut_seconds + 0.001:
+                    continue
+                cut["seconds"] = round(seconds - 0.1, 1)
+                excess_ticks -= 1
+                eligible[eligible.index((segment, cut, cut_index, capacity))] = (
+                    segment, cut, cut_index, capacity - 1
+                )
+                fixes.append(f"{segment.get('id', '?')}#{cut_index}: 动作镜头时长 -0.1s")
+                changed = True
+                if excess_ticks <= 0:
+                    break
+            if not changed:
+                break
+
+        if excess_ticks < original_excess:
+            for segment in segments:
+                sync_segment_timing(segment, doc.get("promptLang", "zh"))
+            fixes.append(
+                f"E{int(episode.get('ep', 0)):02d}: 总时长减少 {(original_excess - excess_ticks) / 10:.1f}s"
+            )
+    return fixes
+
+
+def segment_h3_violation_refs(lines: Iterable[str]) -> Dict[str, List[str]]:
+    """Collect segment-level H3 language/structure errors for a prompt-only repair."""
+    found: Dict[str, List[str]] = {}
+    markers = (
+        "首行对齐指令", "核心字段", "描述正文缺", "缺「[镜头", "缺「[Shot",
+        "h3Prompt", "promptLang=", "整体视听描述", "integrated_multimodal_description",
+        "整体音景", "overall_soundscape", "非叙事配乐", "non_diegetic_music",
+    )
+    for line in lines:
+        match = re.search(r"\b(E\d{2}-\d{2})\b", line)
+        if match and any(marker in line for marker in markers):
+            found.setdefault(match.group(1), []).append(line)
+    return found
+
+
 def cut_violation_refs(lines: Iterable[str]) -> Dict[Tuple[str, int], List[str]]:
     """Group only errors with an explicit segment/cut id; episode-wide errors are not routed."""
     found: Dict[Tuple[str, int], List[str]] = {}
@@ -162,7 +278,20 @@ def replace_h3_cut_text(segment: Dict[str, Any], index: int, text: str, lang: st
 
     start_match = re.search(marker, prompt)
     if not start_match:
-        return False
+        # Missing [Shot k]/[镜头 k] marker: insert this block before the next shot,
+        # or before the soundscape field for the final shot. Do not discard neighbours.
+        next_match = re.search(next_marker, prompt)
+        field_pos = prompt.find(field_marker)
+        candidates = [m.start() for m in (next_match,) if m]
+        if field_pos >= 0:
+            candidates.append(field_pos)
+        if not candidates:
+            return False
+        insert_at = min(candidates)
+        prefix = prompt[:insert_at].rstrip()
+        suffix = prompt[insert_at:].lstrip("\\n")
+        segment["h3Prompt"] = prefix + "\\n" + text.strip() + "\\n" + suffix
+        return True
     end_candidates = []
     next_match = re.search(next_marker, prompt[start_match.end():])
     if next_match:
