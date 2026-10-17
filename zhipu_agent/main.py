@@ -173,7 +173,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     opts: Dict[str, Any] = {
         "params": params, "aspect": args.aspect, "prompt_lang": args.prompt_lang,
         "visual_style": args.visual_style,
-        "max_chars": args.max_chars, "refs_look": args.refs_look, "refs_gen": args.refs_gen,
+        "max_chars": args.max_chars, "refs_look": args.refs_look or ("写实" if args.visual_style == "live-action" else "动漫"), "refs_gen": args.refs_gen,
         "images_gen": args.images_gen,
         "images_only": [n.strip() for n in args.images_only.split(",") if n.strip()] if args.images_only else None,
         "video_protocol": args.video_protocol, "video_submit": args.video_submit,
