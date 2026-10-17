@@ -241,6 +241,8 @@ python run_agent.py run --stages script,staging,storyboard --eps 1-2
 
 # 竖屏分镜、中文提示词
 python run_agent.py run --stages storyboard --aspect 9:16 --prompt-lang zh
+python run_agent.py run --stages storyboard --fight-enhancement auto --eps 1  # 默认：仅强化重要打戏
+python run_agent.py run --stages storyboard --fight-enhancement enhanced --eps 1 --force  # 强化所有打戏
 
 # 从已有提示词整理批量生图清单，不调用图片 API
 python run_agent.py run --stages images
