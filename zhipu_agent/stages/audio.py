@@ -54,7 +54,8 @@ def _load_audio_config() -> list[dict]:
             raise ValueError(f"models.json 的 audio[{i}]（{name}）speech_url 必须是 HTTP(S) URL")
         result.append({
             "name": name, "url": url, "model": model, "key": key,
-            "voice": str(item.get("voice") or "alloy"),\n            "voice_map": item.get("voice_map") if isinstance(item.get("voice_map"), dict) else {},
+            "voice": str(item.get("voice") or "alloy"),
+            "voice_map": item.get("voice_map") if isinstance(item.get("voice_map"), dict) else {},
             "response_format": str(item.get("response_format") or "mp3"),
             "timeout": max(10, int(item.get("timeout", 120))),
             "instructions_field": str(item.get("instructions_field") or "instructions"),
