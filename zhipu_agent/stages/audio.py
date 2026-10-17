@@ -93,6 +93,16 @@ def _collect(ctx: Context, eps: Optional[list]) -> dict:
         for alias in c.get("aliases", []):
             by_name[str(alias)] = c
 
+    # Script speakers are commonly C01/C02; use outline IDs as fallback if cast cards omit IDs.
+    outline_path = ctx.artifact("outline")
+    if outline_path.is_file():
+        for entry in read_json(outline_path).get("characters", []):
+            cid, name = str(entry.get("id") or ""), str(entry.get("name") or "")
+            if cid and name and cid not in by_id:
+                match = by_name.get(name)
+                if match:
+                    by_id[cid] = match
+
     wanted, items = set(eps or []), []
     for episode in script.get("episodes", []):
         ep = int(episode.get("ep", 0))
