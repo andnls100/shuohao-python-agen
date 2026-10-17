@@ -259,7 +259,7 @@ def run(ctx: Context, generate: bool = False) -> Path:
             and (ctx.out / output_path).is_file()
         )
         output_base = task.pop("output_base")
-        if old_ok and not ctx.force:
+        if old_ok and not (ctx.force and generate):
             task.update(old)
         else:
             task.update({
