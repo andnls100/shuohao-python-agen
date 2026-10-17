@@ -42,8 +42,8 @@ const ANIME = {
 };
 
 export const LOOKS = [REALISTIC, ANIME];
-// 默认动漫（用户 2026-09-26 定）；写实用 --look 写实
-export const DEFAULT_LOOK_ID = 'anime';
+// 默认真人写实照片；动漫仍可通过 --look anime / --look 动漫 显式选择
+export const DEFAULT_LOOK_ID = 'realistic-photo';
 
 const norm = (s) => String(s ?? '').trim().toLowerCase();
 
