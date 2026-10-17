@@ -53,7 +53,7 @@ def _build_parser() -> argparse.ArgumentParser:
             s.add_argument("--images-gen", action="store_true", help="从已保存的 cast.json / art.json 提示词批量出角色、场景和道具图；需配置 models.json 的 image 号池")
             s.add_argument("--images-only", help="只出这几张图：写任务名、角色名、场景名或编号，逗号分隔，如 徐今朝 或 C03,S01；配合 --images-gen")
             s.add_argument("--video-protocol", default="h3", choices=["h3", "seedance"], help="视频提示词协议（默认 h3）")
-            s.add_argument("--video-submit", action="store_true", help="明确提交云端视频生成任务；不加此参数只生成提示词和清单")
+            s.add_argument("--video-submit", action="store_true", help="明确提交云端视频生成任务；不加此参数只生成提示词和清单")\n            s.add_argument("--audio-submit", action="store_true", help="明确调用 TTS API 生成角色对白音频；不加此参数只生成音频清单")
             s.add_argument("--force", action="store_true", help="忽略已有产物和缓存，全部重做")
             s.add_argument("--yes", action="store_true", help="不暂停：骨架拍板点自动确认")
             s.add_argument("--concurrency", type=int, help="同时进行的模型调用数（默认 3）")
@@ -149,7 +149,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     settings = load_settings(**overrides)
     stages = workflow.parse_stages(args.stages)
     # Images/video consume saved production JSON and do not need a text-model credential.
-    if any(stage not in ("images", "video") for stage in stages):
+    if any(stage not in ("images", "video", "audio") for stage in stages):
         settings.require()
 
     interactive = not args.yes and sys.stdin.isatty()
@@ -176,7 +176,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         "max_chars": args.max_chars, "refs_look": args.refs_look or ("写实" if args.visual_style == "live-action" else "动漫"), "refs_gen": args.refs_gen,
         "images_gen": args.images_gen,
         "images_only": [n.strip() for n in args.images_only.split(",") if n.strip()] if args.images_only else None,
-        "video_protocol": args.video_protocol, "video_submit": args.video_submit,
+        "video_protocol": args.video_protocol, "video_submit": args.video_submit,\n        "audio_submit": args.audio_submit,
         "refs_names": [n.strip() for n in args.refs_names.split(",")] if args.refs_names else None,
     }
     if args.eps:
