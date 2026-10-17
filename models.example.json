@@ -52,6 +52,18 @@
     "character_mode": "portrait",
     "negative": "omit"
   },
+  "audio": [
+    {
+      "name": "TTS 主用",
+      "speech_url": "https://你的TTS平台/v1/audio/speech",
+      "api_key_env": "AUDIO_PRIMARY_API_KEY",
+      "model": "支持语音合成的模型名",
+      "voice": "alloy",
+      "response_format": "mp3",
+      "instructions_field": "instructions",
+      "timeout": 120
+    }
+  ],
   "video": [
     {
       "name": "视频平台主用",
