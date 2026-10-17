@@ -155,7 +155,7 @@ node --version                         # 需要 Node 18 及以上
 copy models.example.json models.json   # Windows；Linux/macOS 可用 cp
 ```
 
-**模型 API 配置统一使用 `models.json` 号池**，不需要把模型地址、模型名和 API Key 配置在 `.env`。在 `models.json` 的 `text` 列表中配置文本模型，在 `vision` 列表中按需配置视觉模型；视频生成 API 则配置在可选的 `video` 列表。每项分别填写自己的平台地址、模型名和 Key，也可以用 `api_key_env` 从系统环境变量读取 Key。真实的 `models.json` 已被 `.gitignore` 忽略，不会提交。
+**模型 API 配置统一使用 `models.json` 号池**，不需要把模型地址、模型名和 API Key 配置在 `.env`。在 `models.json` 的 `text` 列表中配置文本模型，在 `vision` 列表中按需配置视觉模型；批量生图使用 `image` 列表；视频生成 API 使用可选的 `video` 列表。每项分别填写自己的平台地址、模型名和 Key，也可以用 `api_key_env` 从系统环境变量读取 Key。真实的 `models.json` 已被 `.gitignore` 忽略，不会提交。
 
 ### 多模型与备用平台（号池）
 
@@ -167,7 +167,7 @@ copy models.example.json models.json   # Windows；Linux/macOS 可用 cp
 - `.env` 仅用于并发、回炉轮数等运行参数；若使用 `api_key_env`，密钥需提前设置为相应的系统环境变量。
 - `python run_agent.py doctor --ping` 会逐个测试配置的文本和视觉模型。
 
-视频生成号池格式、故障转移和任务续查规则见 [视频生成说明](docs/video-generation.md)。
+图片生成使用 OpenAI Images 兼容的 `/images/generations` 端点，支持按 `image` 列表顺序故障转移；具体模型、分辨率和平台兼容性以供应商文档为准。视频生成号池格式、故障转移和任务续查规则见 [视频生成说明](docs/video-generation.md)。
 
 ### 运行
 
@@ -188,13 +188,14 @@ python run_agent.py status             # 各阶段产物是否存在、是否通
 | 1 | `outline` | novel-outline：先出骨架，暂停等你确认，再分批写每集 |
 | 2 | `characters` | novel-characters：扫描、归并、逐个角色出卡 |
 | 3 | `art` | novel-art：场景和叙事道具 |
-| 4 | `script` | novel-script：三集一批 |
-| 5 | `staging` | novel-staging：先出地点平面，再按地点写场景 |
-| 6 | `storyboard` | novel-storyboard：三集一批，最后导出投产包 |
-| 7 | `refs` | character-refs：可选，默认不跑；可生成角色参考图 |
-| 8 | `video` | 视频阶段：读取分镜，生成逐段提示词、任务清单和人工质检清单；配置 API 并显式指定 `--video-submit` 后才会调用云端生成 |
+| 4（可选） | `images` | 从已有 cast.json / art.json 读取提示词，批量生成角色设定图、场景设定图和道具图，不重新分析小说 |
+| 5 | `script` | novel-script：三集一批 |
+| 6 | `staging` | novel-staging：优先使用已生成的场景设定图认图，再按地点写场景 |
+| 7 | `storyboard` | novel-storyboard：三集一批，最后导出投产包 |
+| 8（可选） | `refs` | character-refs：可生成角色锚点和派生参考图 |
+| 9（可选） | `video` | 视频阶段：读取分镜，生成逐段提示词、任务清单和人工质检清单；配置 API 并显式指定 `--video-submit` 后才会调用云端生成 |
 
-不加 `--stages`（或使用 `--stages all`）时只跑前六个制作阶段；`refs` 和 `video` 都需显式指定。视频阶段依赖已经生成的 `storyboard`。已经完成并通过校验的阶段会被跳过；视频阶段可以通过 `--eps` 按集执行。
+不加 `--stages`（或使用 `--stages all`）时仍只跑六个文本制作阶段；`images`、`refs` 和 `video` 都需显式指定，避免意外产生图片或视频费用。`images` 只读取已保存的 `cast.json` / `art.json`，不会重新读取小说或调用文本模型；成功图片会跳过，失败项可在重跑时续做。视频阶段依赖已经生成的 `storyboard`。
 
 ### 各步骤的输出文件
 
@@ -205,7 +206,8 @@ python run_agent.py status             # 各阶段产物是否存在、是否通
 | 1 | `outline` | `outline/<书名>-outline.json`：改编说明、人物表、爽点表、分集梗概、资产清单 | `<书名>-outline.md`、`outline-report.html` | `work/outline/eps-*.json`（分批写的每集梗概） |
 | 2 | `characters` | `characters/<书名>-cast.json`：每个角色的人物画像、形象提示词、音色提示词 | `<书名>-cast.md`、`report.html` | `work/characters/`：`seed.json`（大纲预填的角色清单）、`merged.json`（归并结果）、`card-<角色名>.json`（每个角色的卡）、`summary.txt`（故事摘要） |
 | 3 | `art` | `art/<书名>-art.json`：场景设定和叙事道具的设定集，含无人无手的白底提示词 | `<书名>-art.md`、`art-report.html` | `work/art/scene-S01.json`、`prop-P01.json`（每个场景、每件道具一个） |
-| 4 | `script` | `script/<书名>-script.json`：分集剧本，场次加节拍，含台词本 | `<书名>-script.md`、`script-report.html` | `work/script/ep-001.json`（每集一个）、`script-batch.json` |
+| 4（可选） | `images` | `images/image-manifest.json`：每张图的提示词摘要、状态、模型平台和输出路径 | 角色图在 `images/characters/`，道具图在 `images/props/`，场景图在 `art/images/`（站位阶段可直接识别） | 清单保存成功记录；重跑跳过成功图片，只重试未成功任务 |
+| 5 | `script` | `script/<书名>-script.json`：分集剧本，场次加节拍，含台词本 | `<书名>-script.md`、`script-report.html` | `work/script/ep-001.json`（每集一个）、`script-batch.json` |
 | 5 | `staging` | `staging/staging.json`：每个地点能站能坐的东西，以及每场的开场站位 | `blocking.txt`（每场一句开场走位句，分镜照抄）、`staging-report.html`（可拖动调整的俯视平面） | `work/staging/location-S01.json`（认图结果）、`scenes-*.json` |
 | 6 | `storyboard` | `storyboard/<书名>-storyboard.json`：段、分镜、分镜图提示词、H3 提示词 | `<书名>-storyboard.md`、`storyboard-report.html` | `storyboard/.gates.jsonl`（质量门失败的累积记录） |
 | 7 | `refs`（可选） | `character-refs/<角色名>/asset.json`：角色描述加每张参考图的全部版本 | 配了出图模型并加 `--refs-gen` 时，另有 `character-refs/character-refs.html` | `work/refs/<角色名>-intake.json`（模型整理出的角色描述） |
@@ -238,7 +240,13 @@ python run_agent.py run --stages script,staging,storyboard --eps 1-2
 # 竖屏分镜、中文提示词
 python run_agent.py run --stages storyboard --aspect 9:16 --prompt-lang zh
 
-# 角色参考图：只建档案；加 --refs-gen 才真的出图（需先配置出图模型）
+# 从已有提示词整理批量生图清单，不调用图片 API
+python run_agent.py run --stages images
+
+# 真正批量生成角色、场景、道具设定图（先配置 models.json 的 image 号池）
+python run_agent.py run --stages images --images-gen
+
+# 角色参考图：只建档案；加 --refs-gen 才真的出图（需先配置 character-refs 出图模型）
 python run_agent.py run --stages refs --refs-names 沈知微 --refs-look 动漫
 
 # 不暂停，骨架自动确认
@@ -269,7 +277,8 @@ python run_agent.py run --stages script --force
 | `--eps` | 只处理这些集，如 `1-3` 或 `1,3,5` |
 | `--aspect` | 分镜画幅 `16:9` 或 `9:16` |
 | `--prompt-lang` | H3 提示词语言 `en` 或 `zh`，默认 `en` |
-| `--images` | 场景设定图目录（staging 认图，需要视觉模型） |
+| `--images` | 自定义场景设定图目录（staging 认图，需要视觉模型） |
+| `--images-gen` | 明确允许调用 `models.json` 的 `image` 号池批量生成角色、场景和道具图；不加只生成任务清单 |
 | `--refs-names` `--refs-look` `--refs-gen` | refs 阶段要处理的角色、画风，以及是否真正调用出图模型 |
 | `--video-protocol` | 视频提示词协议：`h3`（默认，沿用分镜中的 H3 提示词）或 `seedance`（根据结构化分镜字段拼接提示词） |
 | `--video-submit` | 明确授权调用配置好的视频 API；不加此参数只生成预览文件 |
