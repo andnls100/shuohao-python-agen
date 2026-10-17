@@ -215,6 +215,24 @@ python run_agent.py run --stages script --force                          # ignor
 
 Other options: `--out`, `--adapt-mode`, `--images` (scene images, needs a vision model), `--concurrency` (default 3), `--fix-rounds` (default 3).
 
+### Output files per step
+
+Everything goes under `--out` (default `output/`), one sub-folder per stage. In the names below, `<title>` is inferred from the novel. **Each stage's main file is the `.json`**, which later stages read; the `.md` and `.html` files are rendered from it for reading.
+
+| Step | Stage | Main file | For reading | Intermediate files (cache, for resume) |
+| --- | --- | --- | --- | --- |
+| 1 | `outline` | `outline/<title>-outline.json` — adaptation, cast table, hook table, episode synopses, asset list | `<title>-outline.md`, `outline-report.html` | `work/outline/eps-*.json` |
+| 2 | `characters` | `characters/<title>-cast.json` — per-character profile, image prompt, voice prompt | `<title>-cast.md`, `report.html` | `work/characters/` — `seed.json`, `merged.json`, `card-<name>.json`, `summary.txt` |
+| 3 | `art` | `art/<title>-art.json` — scene and narrative-prop bible | `<title>-art.md`, `art-report.html` | `work/art/scene-S01.json`, `prop-P01.json` |
+| 4 | `script` | `script/<title>-script.json` — episode scripts (scenes + beats, dialogue book) | `<title>-script.md`, `script-report.html` | `work/script/ep-001.json`, `script-batch.json` |
+| 5 | `staging` | `staging/staging.json` — standable/sittable things per location and each scene's opening positions | `blocking.txt` (one opening-blocking sentence per scene), `staging-report.html` | `work/staging/location-S01.json`, `scenes-*.json` |
+| 6 | `storyboard` | `storyboard/<title>-storyboard.json` — segments, shots, frame prompts, H3 prompts | `<title>-storyboard.md`, `storyboard-report.html` | `storyboard/.gates.jsonl` |
+| 7 | `refs` (optional) | `character-refs/<name>/asset.json` — description plus all versions of each reference image | `character-refs/character-refs.html` (with an image model configured and `--refs-gen`) | `work/refs/<name>-intake.json` |
+
+Step 6 also exports a production package: `storyboard/E01-01/prompt.md`, `E01-02/prompt.md`, … (one folder per segment with its H3 prompt and the Picture-order list), and `storyboard/manifest.json` (per-segment duration, cut times, prompt and picture paths, and which pictures are missing). **The storyboard images (`f1.png`, `f2.png`, …) are not produced by this pipeline** — generate them with your image tool from the frame prompts and drop them into the segment folders, then export again.
+
+Other files: `source/` (UTF-8 copy of the novel), `agent.log` (run log), and `work/` (all caches — re-running resumes from them; delete a cache file or use `--force` to redo an item). With an image model configured and `--refs-gen`, step 7 also writes the reference PNGs (`default/front-full.v1.png`, …) under each character folder; otherwise it only writes `asset.json`.
+
 ### Resume and troubleshooting
 
 - Every item is cached under `output/work/`; re-running the same command resumes.
