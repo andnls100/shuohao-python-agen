@@ -186,6 +186,10 @@ def _config(model_key: Optional[str] = None) -> list:
             "resolution": str(entry.get("resolution") or "480P"), "ratio": str(entry.get("ratio") or ""),
             "prompt_extend": entry.get("prompt_extend", True), "request_template": entry.get("request_template"),
             "headers": entry.get("headers", {}),
+            "video_url_keys": entry.get("video_url_keys", ["video_url", "videoUrl", "output_url", "download_url"]),
+            "task_id_keys": entry.get("task_id_keys", ["task_id", "taskId", "job_id", "jobId", "id"]),
+            "status_keys": entry.get("status_keys", ["status", "state", "task_status"]),
+            "failed_states": entry.get("failed_states", ["failed", "error", "cancelled", "canceled", "rejected"]),
         })
     if not providers:
         raise ValueError("models.json 的 video 配置没有启用的模型；请设置 enabled=true")
@@ -234,10 +238,10 @@ def _poll(task_id: str, cfg: dict) -> dict:
     deadline = time.monotonic() + cfg["max_wait"]
     while True:
         result = _request(url, cfg)
-        if _find(result, ("video_url", "videoUrl", "output_url", "download_url")):
+        if _find(result, tuple(cfg.get("video_url_keys") or ["video_url", "videoUrl", "output_url", "download_url"])):
             return result
-        state = (_find(result, ("status", "state", "task_status")) or "").lower()
-        if state in ("failed", "error", "cancelled", "canceled", "rejected"):
+        state = (_find(result, tuple(cfg.get("status_keys") or ["status", "state", "task_status"])) or "").lower()
+        if state in {str(x).lower() for x in (cfg.get("failed_states") or ["failed", "error", "cancelled", "canceled", "rejected"])}:
             raise RuntimeError("视频任务失败：" + json.dumps(result, ensure_ascii=False)[:800])
         if time.monotonic() >= deadline:
             raise TimeoutError(f"任务 {task_id} 等待超时；任务 ID 已保存，可重试续查")
@@ -291,8 +295,8 @@ def _submit(item: dict, manifest: dict, providers: list, root: Path, path: Path)
                 body = build_request(candidate, item, manifest)
                 try:
                     response = _request(candidate["VIDEO_API_SUBMIT_URL"], candidate, body)
-                    url = _find(response, ("video_url", "videoUrl", "output_url", "download_url"))
-                    task_id = _find(response, ("task_id", "taskId", "job_id", "jobId", "id"))
+                    url = _find(response, tuple(candidate.get("video_url_keys") or ["video_url", "videoUrl", "output_url", "download_url"]))
+                    task_id = _find(response, tuple(candidate.get("task_id_keys") or ["task_id", "taskId", "job_id", "jobId", "id"]))
                     if task_id:
                         item["task_id"] = task_id
                         item["provider"] = candidate["name"]
@@ -312,7 +316,7 @@ def _submit(item: dict, manifest: dict, providers: list, root: Path, path: Path)
                     failures.append(f"{candidate['name']}: {exc}")
             if result is None or cfg is None:
                 raise RuntimeError("所有视频 API 备用平台均失败：" + "；".join(failures))
-        url = _find(result, ("video_url", "videoUrl", "output_url", "download_url"))
+        url = _find(result, tuple(cfg.get("video_url_keys") or ["video_url", "videoUrl", "output_url", "download_url"]))
         if not url:
             raise RuntimeError("任务结束但响应中没有视频 URL")
         item.update(state="succeeded", video_url=url, error=None, provider=cfg["name"])
