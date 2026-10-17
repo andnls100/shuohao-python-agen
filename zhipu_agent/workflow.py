@@ -1,7 +1,7 @@
 """流水线编排：按技能包的接力顺序依次执行各阶段。
 
-    小说 → outline → characters → art → script → staging → storyboard
-                                  ↘ refs（可选，真出角色参考图）
+    小说 → outline → characters → art → images（可选，复用提示词批量出图） → script → staging → storyboard
+                                  ↘ refs（可选，角色锚点与派生参考图）
 
 每个阶段是 stages/ 下的一个模块，暴露 run / artifact / check。
 已经完成且通过校验的阶段会被跳过（--force 重做）。
@@ -13,16 +13,17 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .config import Settings
 from .skill_loader import load_pack
-from .stages import art, characters, outline, refs, script, staging, storyboard, video
+from .stages import art, characters, images, outline, refs, script, staging, storyboard, video
 from .stages.base import (
     Context, guess_title, read_text_auto, safe_name,
 )
 from .validator import check_node
 
-STAGES = ["outline", "characters", "art", "script", "staging", "storyboard", "refs", "video"]
-DEFAULT_STAGES = STAGES[:-2]  # refs 和 video 都是显式选择的可选阶段
+STAGES = ["outline", "characters", "art", "images", "script", "staging", "storyboard", "refs", "video"]
+# 生图、角色参考图和视频调用都可能产生额外费用，默认流水线不自动触发。
+DEFAULT_STAGES = [name for name in STAGES if name not in ("images", "refs", "video")]
 MODULES = {
-    "outline": outline, "characters": characters, "art": art, "script": script,
+    "outline": outline, "characters": characters, "art": art, "images": images, "script": script,
     "staging": staging, "storyboard": storyboard, "refs": refs, "video": video,
 }
 # 这些阶段内部按集续跑，指定了 --eps 时不能整体跳过
@@ -30,6 +31,7 @@ PARTIAL_OK = ("script", "staging", "storyboard", "video")
 REQUIRES = {
     "characters": [],            # 没有大纲也能跑
     "art": ["outline"],
+    "images": ["characters", "art"],
     "script": ["outline"],
     "staging": ["script", "art"],
     "storyboard": ["script"],
@@ -71,16 +73,38 @@ def build_context(
     interactive: bool = True,
     force: bool = False,
     images_dir: Optional[Path] = None,
+    skip_source: bool = False,
 ) -> Context:
     version = check_node(settings)
     pack = load_pack(settings)
-    book_file, final_title = prepare_source(book, out, title)
+    if skip_source:
+        out = Path(out)
+        final_title = title
+        if not final_title:
+            candidates = set()
+            for folder, suffix in ((out / "characters", "-cast.json"), (out / "art", "-art.json")):
+                if folder.is_dir():
+                    for candidate in folder.glob("*" + suffix):
+                        candidates.add(candidate.name[:-len(suffix)])
+            if len(candidates) == 1:
+                final_title = next(iter(candidates))
+        if not final_title:
+            raise ValueError("只运行 images 阶段且不读取小说时，请用 --title 指定书名，或确保 output 中只有一套 cast/art JSON")
+        # The images stage only consumes cast.json and art.json. Do not read or copy the novel.
+        book_file = out / "source" / f"{safe_name(final_title)}.txt"
+        source_chars = None
+    else:
+        book_file, final_title = prepare_source(book, out, title)
+        source_chars = len(book_file.read_text(encoding="utf-8"))
     ctx = Context(
         settings=settings, pack=pack, out=Path(out), book_file=book_file, title=final_title,
         lang=lang, interactive=interactive, force=force,
         images_dir=Path(images_dir) if images_dir else None,
     )
-    ctx.log(f"《{final_title}》 · 原文 {len(book_file.read_text(encoding='utf-8'))} 字 · Node {version} · 输出到 {ctx.out}")
+    if source_chars is None:
+        ctx.log(f"《{final_title}》 · 使用已有 JSON 资产（跳过小说读取） · Node {version} · 输出到 {ctx.out}")
+    else:
+        ctx.log(f"《{final_title}》 · 原文 {source_chars} 字 · Node {version} · 输出到 {ctx.out}")
     return ctx
 
 
@@ -115,6 +139,8 @@ def run_stage(ctx: Context, name: str, opts: Dict[str, Any]) -> Optional[Path]:
     if name == "storyboard":
         return module.run(ctx, eps=eps, aspect=opts.get("aspect", "16:9"),
                           prompt_lang=opts.get("prompt_lang", "en"))
+    if name == "images":
+        return module.run(ctx, generate=opts.get("images_gen", False))
     if name == "refs":
         return module.run(ctx, names=opts.get("refs_names"), look=opts.get("refs_look", "动漫"),
                           gen=opts.get("refs_gen", False))

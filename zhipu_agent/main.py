@@ -48,12 +48,13 @@ def _build_parser() -> argparse.ArgumentParser:
             s.add_argument("--refs-names", help="refs 阶段只处理这些角色，逗号分隔；默认主角和重要配角")
             s.add_argument("--refs-look", default="动漫", help="refs 阶段的画风（默认 动漫）")
             s.add_argument("--refs-gen", action="store_true", help="refs 阶段真的出图（需先配置 character-refs 的出图模型）")
+            s.add_argument("--images-gen", action="store_true", help="从已保存的 cast.json / art.json 提示词批量出角色、场景和道具图；需配置 models.json 的 image 号池")
             s.add_argument("--video-protocol", default="h3", choices=["h3", "seedance"], help="视频提示词协议（默认 h3）")
             s.add_argument("--video-submit", action="store_true", help="明确提交云端视频生成任务；不加此参数只生成提示词和清单")
             s.add_argument("--force", action="store_true", help="忽略已有产物和缓存，全部重做")
             s.add_argument("--yes", action="store_true", help="不暂停：骨架拍板点自动确认")
             s.add_argument("--concurrency", type=int, help="同时进行的模型调用数（默认 3）")
-            s.add_argument("--fix-rounds", type=int, help="校验不过时最多回炉几轮（默认 3）")
+            s.add_argument("--fix-rounds", type=int, help="校验不过时最多回炉几轮（默认 1）")
     return p
 
 
@@ -111,12 +112,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 1 if problems else 0
 
 
-def _ctx_from(args: argparse.Namespace, settings) -> "workflow.Context":
+def _ctx_from(args: argparse.Namespace, settings, *, skip_source: bool = False) -> "workflow.Context":
     return workflow.build_context(
         settings, Path(args.book), Path(args.out), title=args.title, lang=args.lang,
         interactive=False if args.command == "status" else (not args.yes and sys.stdin.isatty()),
         force=getattr(args, "force", False),
         images_dir=Path(args.images) if getattr(args, "images", None) else None,
+        skip_source=skip_source,
     )
 
 
@@ -142,8 +144,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.fix_rounds is not None:
         overrides["fix_rounds"] = max(0, args.fix_rounds)
     settings = load_settings(**overrides)
-    settings.require()
     stages = workflow.parse_stages(args.stages)
+    # Images/video consume saved production JSON and do not need a text-model credential.
+    if any(stage not in ("images", "video") for stage in stages):
+        settings.require()
 
     interactive = not args.yes and sys.stdin.isatty()
     params: Dict[str, Any] = {}
@@ -166,6 +170,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     opts: Dict[str, Any] = {
         "params": params, "aspect": args.aspect, "prompt_lang": args.prompt_lang,
         "max_chars": args.max_chars, "refs_look": args.refs_look, "refs_gen": args.refs_gen,
+        "images_gen": args.images_gen,
         "video_protocol": args.video_protocol, "video_submit": args.video_submit,
         "refs_names": [n.strip() for n in args.refs_names.split(",")] if args.refs_names else None,
     }
@@ -173,7 +178,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         from .stages.base import parse_eps
         opts["eps"] = parse_eps(args.eps)
 
-    ctx = _ctx_from(args, settings)
+    ctx = _ctx_from(args, settings, skip_source=(stages == ["images"]))
     results = workflow.run_pipeline(ctx, stages, opts)
     ctx.log("全部完成：")
     for name, path in results.items():
