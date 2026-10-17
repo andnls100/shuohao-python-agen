@@ -193,7 +193,7 @@ python run_agent.py status             # 各阶段产物是否存在、是否通
 ### 常用命令
 
 ```bash
-# 只跑大纲（outline 必须给出总集数、单集分钟数、题材）
+# 只跑大纲（outline 必须给出总集数、单集分钟数、题材；题材是自由文本，写法见下面的「题材怎么填」）
 python run_agent.py run --stages outline --book input/novel.txt --episodes 6 --minutes 2 --genre 都市
 
 # 大纲通过后，一次跑角色和美术
@@ -222,7 +222,7 @@ python run_agent.py run --stages script --force
 | `--book` | 小说文本，默认 `input/novel.txt` |
 | `--out` | 输出目录，默认 `output` |
 | `--stages` | 阶段，逗号分隔，默认前六个 |
-| `--episodes` `--minutes` `--genre` | outline 阶段必填：总集数、单集分钟数、题材 |
+| `--episodes` `--minutes` `--genre` | outline 阶段必填：总集数、单集分钟数、题材（自由文本，见下） |
 | `--adapt-mode` | 改编幅度：忠实、抽核、借壳，默认抽核 |
 | `--eps` | 只处理这些集，如 `1-3` 或 `1,3,5` |
 | `--aspect` | 分镜画幅 `16:9` 或 `9:16` |
@@ -231,6 +231,20 @@ python run_agent.py run --stages script --force
 | `--yes` | 不暂停，骨架拍板点自动确认 |
 | `--force` | 忽略已有产物和缓存 |
 | `--concurrency` `--fix-rounds` | 同时进行的调用数（默认 3）、最多回炉几轮（默认 3） |
+
+### 题材怎么填
+
+`--genre` **没有固定的可选列表**，技能包只要求它不能缺。题材的作用是决定爽点类型：模型会按它来设计打脸、揭破、反转等爽点和钩子，所以写得越具体越准，填错会让整份大纲偏掉。
+
+仓库里出现过的写法可以参考：
+
+| 写法 | 出处 |
+| --- | --- |
+| `民国情感悬疑` | `skills/novel-outline/examples/渡口-outline.json` 的样例 |
+| `女频逆袭` | `skills/novel-outline/references/schema.md` 里的数据结构示例 |
+| `都市` | 上面命令里的示例 |
+
+建议写成「受众或背景加核心看点」，比如 `都市医疗逆袭`、`古代宫斗`、`悬疑推理`。以上只是写法示例，不是技能包规定的枚举。
 
 ### 中断、续跑和排错
 

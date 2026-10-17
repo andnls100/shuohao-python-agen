@@ -190,6 +190,8 @@ python run_agent.py run --yes ...                                        # no pa
 python run_agent.py run --stages script --force                          # ignore existing output and cache
 ```
 
+`--genre` is **free text — there is no fixed list**; the skill only requires it to be present. It decides which hook types (face-slaps, reveals, reversals…) the outline is built around, so be specific: it is written as audience/setting plus the core appeal, e.g. `Republic-era romance mystery` (the bundled sample), `female-lead revenge` (the schema example), `urban medical comeback`.
+
 Other options: `--out`, `--adapt-mode`, `--images` (scene images, needs a vision model), `--concurrency` (default 3), `--fix-rounds` (default 3).
 
 ### Resume and troubleshooting

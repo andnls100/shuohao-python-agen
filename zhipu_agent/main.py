@@ -37,7 +37,7 @@ def _build_parser() -> argparse.ArgumentParser:
                            help=f"要运行的阶段，逗号分隔；all = {','.join(workflow.DEFAULT_STAGES)}；可选：{','.join(workflow.STAGES)}")
             s.add_argument("--episodes", type=int, help="总集数（outline 阶段必填）")
             s.add_argument("--minutes", type=float, help="单集分钟数（outline 阶段必填）")
-            s.add_argument("--genre", help="题材（outline 阶段必填，决定爽点类型）")
+            s.add_argument("--genre", help="题材（outline 阶段必填，自由文本，决定爽点类型）")
             s.add_argument("--adapt-mode", default="抽核", help="改编幅度：忠实 / 抽核 / 借壳（默认 抽核）")
             s.add_argument("--preferences", default="", help="想保留的角色或场景等偏好")
             s.add_argument("--eps", help="只处理这些集，如 1-3 或 1,3,5（script / staging / storyboard 阶段）")
