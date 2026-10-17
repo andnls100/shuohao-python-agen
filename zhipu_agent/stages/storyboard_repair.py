@@ -126,8 +126,8 @@ def extract_h3_cut_text(segment: Dict[str, Any], index: int, lang: str = "en") -
     prompt = segment.get("h3Prompt")
     if not isinstance(prompt, str):
         return ""
-    marker = rf"\\[镜头\\s*{index}\\]" if lang == "zh" else rf"\\[Shot\\s*{index}\\]"
-    next_marker = rf"\\[镜头\\s*{index + 1}\\]" if lang == "zh" else rf"\\[Shot\\s*{index + 1}\\]"
+    marker = rf"\[镜头\s*{index}\]" if lang == "zh" else rf"\[Shot\s*{index}\]"
+    next_marker = rf"\[镜头\s*{index + 1}\]" if lang == "zh" else rf"\[Shot\s*{index + 1}\]"
     field_marker = "整体音景：" if lang == "zh" else "overall_soundscape:"
     start = re.search(marker, prompt)
     if not start:
