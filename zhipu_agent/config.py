@@ -263,7 +263,7 @@ def load_settings(**overrides) -> Settings:
         timeout=_float("ZHIPU_TIMEOUT", 300.0),
         retries=_int("ZHIPU_RETRIES", 4),
         concurrency=max(1, _int("AGENT_CONCURRENCY", 3)),
-        fix_rounds=max(0, _int("AGENT_FIX_ROUNDS", 3)),
+        fix_rounds=max(0, _int("AGENT_FIX_ROUNDS", 1)),
         node_bin=_get("NODE_BIN", default="node"),
         skills_dir=Path(_get("SKILLS_DIR", default=str(REPO_ROOT / "skills"))),
         direct_chars=_int("AGENT_DIRECT_CHARS", 60000),
