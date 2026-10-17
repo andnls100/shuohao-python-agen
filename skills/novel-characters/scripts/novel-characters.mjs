@@ -1843,7 +1843,8 @@ function main(argv) {
       );
       let abs = generated ? resolve(outDir, '..', generated.output_path) : null;
       if (!abs) {
-        abs = imageExtensions.map((ext) => join(imagesDir, `${slug(c.name)}-sheet${ext}`)
+        abs = imageExtensions
+          .map((ext) => join(imagesDir, `${slug(c.name)}-sheet${ext}`))
           .find((candidate) => existsSync(candidate));
       }
       if (abs && existsSync(abs)) c.sheetImage = relative(outDir, abs).split(sep).join('/');
