@@ -184,12 +184,14 @@ def run(ctx: Context) -> Path:
                         prop_ids.append(ident)
                 char_refs = [
                     {"id": ident, "name": char_by_id[ident].get("name"),
-                     "reference_image": existing_image(ident, "character")}
+                     "reference_image": existing_image(ident, "character"),
+                     "planned_reference_path": f"continuity/characters/{ident}/anchor.png"}
                     for ident in character_ids if ident in char_by_id
                 ]
                 prop_refs = [
                     {"id": ident, "name": prop_by_id[ident].get("name"),
-                     "reference_image": existing_image(ident, "prop")}
+                     "reference_image": existing_image(ident, "prop"),
+                     "planned_reference_path": f"continuity/props/{ident}/anchor.png"}
                     for ident in prop_ids if ident in prop_by_id
                 ]
                 shots.append({
@@ -209,6 +211,7 @@ def run(ctx: Context) -> Path:
                             "id": scene_id,
                             "name": scene.get("name"),
                             "reference_image": existing_image(scene_id, "scene"),
+                            "planned_reference_path": f"continuity/scenes/{scene_id}/master.png",
                         } if scene_id and scene else None),
                         "characters": char_refs,
                         "props": prop_refs,
