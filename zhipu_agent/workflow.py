@@ -26,7 +26,7 @@ MODULES = {
     "staging": staging, "storyboard": storyboard, "refs": refs, "video": video,
 }
 # 这些阶段内部按集续跑，指定了 --eps 时不能整体跳过
-PARTIAL_OK = ("script", "staging", "storyboard")
+PARTIAL_OK = ("script", "staging", "storyboard", "video")
 REQUIRES = {
     "characters": [],            # 没有大纲也能跑
     "art": ["outline"],
