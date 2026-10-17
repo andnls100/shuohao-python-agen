@@ -13,16 +13,17 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .config import Settings
 from .skill_loader import load_pack
-from .stages import art, characters, outline, refs, script, staging, storyboard, video
+from .stages import art, characters, images, outline, refs, script, staging, storyboard, video
 from .stages.base import (
     Context, guess_title, read_text_auto, safe_name,
 )
 from .validator import check_node
 
-STAGES = ["outline", "characters", "art", "script", "staging", "storyboard", "refs", "video"]
-DEFAULT_STAGES = STAGES[:-2]  # refs 和 video 都是显式选择的可选阶段
+STAGES = ["outline", "characters", "art", "images", "script", "staging", "storyboard", "refs", "video"]
+# 生图、角色参考图和视频调用都可能产生额外费用，默认流水线不自动触发。
+DEFAULT_STAGES = [name for name in STAGES if name not in ("images", "refs", "video")]
 MODULES = {
-    "outline": outline, "characters": characters, "art": art, "script": script,
+    "outline": outline, "characters": characters, "art": art, "images": images, "script": script,
     "staging": staging, "storyboard": storyboard, "refs": refs, "video": video,
 }
 # 这些阶段内部按集续跑，指定了 --eps 时不能整体跳过
@@ -30,6 +31,7 @@ PARTIAL_OK = ("script", "staging", "storyboard", "video")
 REQUIRES = {
     "characters": [],            # 没有大纲也能跑
     "art": ["outline"],
+    "images": ["characters", "art"],
     "script": ["outline"],
     "staging": ["script", "art"],
     "storyboard": ["script"],
@@ -115,6 +117,8 @@ def run_stage(ctx: Context, name: str, opts: Dict[str, Any]) -> Optional[Path]:
     if name == "storyboard":
         return module.run(ctx, eps=eps, aspect=opts.get("aspect", "16:9"),
                           prompt_lang=opts.get("prompt_lang", "en"))
+    if name == "images":
+        return module.run(ctx, generate=opts.get("images_gen", False))
     if name == "refs":
         return module.run(ctx, names=opts.get("refs_names"), look=opts.get("refs_look", "动漫"),
                           gen=opts.get("refs_gen", False))
