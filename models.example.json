@@ -47,6 +47,11 @@
       "timeout": 180
     }
   ],
+  "image_style": {
+    "look": "写实",
+    "character_mode": "portrait",
+    "negative": "omit"
+  },
   "video": [
     {
       "name": "视频平台主用",

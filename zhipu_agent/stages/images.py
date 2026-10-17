@@ -9,6 +9,8 @@ import base64
 import hashlib
 import json
 import os
+import re
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -174,6 +176,104 @@ def _extension(data: bytes) -> str:
     raise RuntimeError("API 返回的数据不是可识别的 PNG/JPEG/WebP 图片")
 
 
+# ---------------------------------------------------------------- 画风层
+# 设定集里的 image.prompt / image.sheet 刻意不写画风（见 novel-characters 的 profile-pass.md）：
+# 画风是出图那一刻才定的。原来这里直接把它们发给图片接口，等于没有画风，模型按自己的默认口味出，
+# 常常是插画 / CG 感。这里把 character-refs 技能的画风预设（skills/character-refs/scripts/looks.mjs，
+# 默认写实照片）读进来拼到角色提示词后面，和 character-refs 用的是同一份，不另存一套。
+
+_IMAGE_STYLE_DEFAULTS = {"character_mode": "portrait", "negative": "omit", "look": ""}
+_DESIGN_SHEET_LEAD = re.compile(r"^\s*(Single )?(Character|Model)( design| model)? sheet( of)?\s*[:,\-]?\s*", re.I)
+
+# 设定集提示词里夹着两个渲染引擎术语。写实照片画风下，它们会把图往 CG 渲染带；换成摄影里的说法，意思不变。
+_CG_TERMS = ((re.compile(r"ambient occlusion", re.I), "soft contact shadow"),
+             (re.compile(r"subsurface scattering", re.I), "translucency"))
+
+_LOOKS_JS = (
+    "const m = await import(process.argv[1]);"
+    "console.log(JSON.stringify({looks: m.LOOKS, default: m.DEFAULT_LOOK_ID}));"
+)
+
+
+def _load_looks(skills_dir: Path, node_bin: str = "node") -> dict:
+    """读 character-refs 的画风预设表，返回 {"looks": [...], "default": id}。"""
+    script = Path(skills_dir) / "character-refs" / "scripts" / "looks.mjs"
+    if not script.is_file():
+        raise FileNotFoundError(f"找不到画风预设：{script}")
+    done = subprocess.run(
+        [node_bin, "--input-type=module", "-e", _LOOKS_JS, script.resolve().as_uri()],
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
+    )
+    if done.returncode != 0:
+        raise RuntimeError(f"读取画风预设失败：{done.stderr.strip()[:300]}")
+    return json.loads(done.stdout)
+
+
+def _pick_look(table: dict, name: str = "") -> dict:
+    wanted = (name or table["default"]).strip().lower()
+    for look in table["looks"]:
+        names = [look["id"], *look.get("names", [])]
+        if wanted in (str(n).strip().lower() for n in names):
+            return look
+    known = "、".join(look["id"] for look in table["looks"])
+    raise ValueError(f"models.json 的 image_style.look 写的是 {name!r}，没有这个画风。可用：{known}")
+
+
+def _image_style_config() -> dict:
+    """models.json 里可选的 image_style：{"look": 画风名, "character_mode": portrait|sheet, "negative": omit|append}。"""
+    config = dict(_IMAGE_STYLE_DEFAULTS)
+    path = models_file_path()
+    if path.is_file():
+        try:
+            extra = json.loads(path.read_text(encoding="utf-8-sig")).get("image_style") or {}
+        except (OSError, ValueError):
+            extra = {}
+        if not isinstance(extra, dict):
+            raise ValueError("models.json 的 image_style 必须是对象")
+        config.update({k: str(v) for k, v in extra.items() if k in config})
+    if config["character_mode"] not in ("portrait", "sheet"):
+        raise ValueError("image_style.character_mode 只能是 portrait（单人半身像，默认）或 sheet（多视图设定图）")
+    if config["negative"] not in ("omit", "append"):
+        raise ValueError("image_style.negative 只能是 omit（不发负面词，默认）或 append（拼成 Avoid 句子）")
+    return config
+
+
+def _character_prompt(record: dict, style: dict, look: dict) -> tuple[str, str]:
+    """角色出图提示词 = 人物描述 + 画风层。
+
+    portrait（默认）：用 image.prompt（单人四分之三半身像），去掉 "character sheet" 这类设定图措辞，
+      再接画风的相机 / 皮肤质感段和固定的单人中性背景。没有拼画风自带的 clean 段：它写着
+      "empty hands, no props"，会和设定里"手里拿着箱子 / 佩剑"打架。
+    sheet：沿用 image.sheet（16:9 三区多视图设定图），只在后面补画风段。脸在图里很小，写实质感会差，
+      设定图要的是版面，不是照片感。
+    negative：omit（默认）不发负面词。这类接口大多只有正向提示词，把"塑料皮肤、娃娃眼"写进去，
+      模型反而可能画出来；想要的质感已经用正向写法放在画风段里。append 才拼成 Avoid 句子。
+    """
+    image = record.get("image") or {}
+    sheet = str(image.get("sheet") or "").strip()
+    single = str(image.get("prompt") or "").strip()
+    base = (sheet or single) if style["character_mode"] == "sheet" else (single or sheet)
+    if not base:
+        raise ValueError(f"角色「{record.get('name', record.get('id', '?'))}」没有 image.sheet 或 image.prompt")
+    negative = str(image.get("negativePrompt") or "").strip()
+    if look.get("medium") == "photo":
+        for pattern, plain in _CG_TERMS:
+            base = pattern.sub(plain, base)
+    if style["character_mode"] == "portrait":
+        stripped = _DESIGN_SHEET_LEAD.sub("", base, count=1).strip()
+        if stripped != base and stripped:
+            base = "Portrait of " + stripped if not stripped[:2].lower() in ("a ", "an") else stripped[0].upper() + stripped[1:]
+        prompt = f"{base}\n\n{look['style']} Exactly one person, plain neutral studio backdrop, no text, no watermark."
+    else:
+        prompt = f"{base}\n\n{look['style']}"
+    if style["negative"] == "append":
+        merged = ", ".join(x for x in (negative, str(look.get("neg") or "").strip()) if x)
+        if merged:
+            prompt += "\n\nAvoid the following visual elements: " + merged
+            negative = merged
+    return prompt, negative if style["negative"] == "append" else ""
+
+
 def _prompt_for(record: dict, kind: str) -> tuple[str, str]:
     image = record.get("image") or {}
     prompt = str(image.get("sheet") or image.get("prompt") or "").strip()
@@ -203,14 +303,21 @@ def _collect_tasks(ctx: Context) -> List[dict]:
     art = read_json(art_path)
     tasks: List[dict] = []
 
+    style = _image_style_config()
+    look = _pick_look(_load_looks(ctx.settings.skills_dir, ctx.settings.node_bin), style["look"])
+    ctx.log(f"角色出图：画风「{look['id']}」，{'单人半身像' if style['character_mode'] == 'portrait' else '多视图设定图'}，"
+            f"负面词{'拼进提示词' if style['negative'] == 'append' else '不发送'}")
+
     for index, character in enumerate(cast.get("characters", []), 1):
-        prompt, negative = _prompt_for(character, "角色")
+        prompt, negative = _character_prompt(character, style, look)
         ident = str(character.get("id") or f"C{index:03d}")
-        filename = f"{safe_name(character['name'])}-{safe_name(ident)}-sheet"
+        suffix = "portrait" if style["character_mode"] == "portrait" else "sheet"
+        filename = f"{safe_name(character['name'])}-{safe_name(ident)}-{suffix}"
         tasks.append({
             "id": f"character:{ident}", "kind": "character", "asset_id": ident,
             "name": character.get("name", ident), "prompt": prompt,
             "negative_prompt": negative, "output_base": Path("images") / "characters" / filename,
+            "look": look["id"], "character_mode": style["character_mode"],
         })
 
     scene_dir = Path("art") / "images"

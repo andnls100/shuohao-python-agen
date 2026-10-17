@@ -286,6 +286,18 @@ python run_agent.py run --stages script --force
 | `--force` | 忽略已有产物和缓存 |
 | `--concurrency` `--fix-rounds` | 同时进行的调用数（默认 3）、最多回炉几轮（默认 1） |
 
+### 角色图像不像真人时：`image_style`
+
+角色设定集里的提示词刻意不写画风，画风是出图那一刻才定的（`profile-pass.md`）。批量出图现在会把 `character-refs` 技能的画风预设（`skills/character-refs/scripts/looks.mjs`，默认写实照片）拼到角色提示词后面；这份预设和单独运行 `character-refs` 时是同一份，改一处两边都生效。在 `models.json` 里用可选的 `image_style` 控制，不写就用默认值：
+
+| 字段 | 取值 | 说明 |
+| --- | --- | --- |
+| `look` | `写实`（默认）、`动漫`，或预设表里的其他 id / 名称 | 画风 |
+| `character_mode` | `portrait`（默认）、`sheet` | `portrait`：用 `image.prompt` 出单人四分之三半身像，脸占画面大，写实质感最好。`sheet`：用 `image.sheet`，一张 16:9 图里排半身像、三视图和细节小图，适合当版面参考，但脸很小，写实感会差 |
+| `negative` | `omit`（默认）、`append` | `omit`：不发送负面词。大多数生图接口只有正向提示词，把"塑料皮肤、娃娃眼"写进去，模型反而可能画出来；想要的质感已经用正向写法放在画风段里。`append`：拼成 `Avoid the following visual elements: …` 一句，附上画风自带的负面词 |
+
+写实画风下，还会把设定集提示词里的两个渲染引擎术语换成摄影里的说法（`ambient occlusion` 换成 `soft contact shadow`，`subsurface scattering` 换成 `translucency`），避免把画面往 CG 渲染带。改了这些设置后提示词会变，已经成功出过图的角色会按新提示词重新出；`portrait` 的文件名是 `<角色>-<编号>-portrait`，`sheet` 的是 `-sheet`，旧图不会被覆盖。场景和道具不受这个设置影响。
+
 **分镜修复采用局部优先策略**：像 5.1 秒这种仅超上限 0.1 秒的轻微时长问题，会先自动改到上限并重算 H3 对齐时间；仍有明确 `段号#镜号` 的错误时，只把该镜的 cut 和对应 H3 镜头正文交给模型修复（每个镜头最多一次，单批最多 6 个）。不会因为单镜违规而让模型重写整集；无法定位到具体镜头或修复后仍不通过时，保存批次 JSON 并停止，供人工检查。其他阶段的默认自动回炉轮数为 1，可通过 `--fix-rounds` 或 `.env` 中的 `AGENT_FIX_ROUNDS` 调整。
 
 ### 视频生成阶段（可选）
