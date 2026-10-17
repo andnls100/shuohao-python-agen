@@ -261,6 +261,10 @@ def test_models_file_parsing_and_legacy_env():
                 raise AssertionError(f"应当报错：{needle}")
 
         bad({"text": []}, "text")
+        only_image = tmp / "only-image.json"
+        only_image.write_text(json.dumps({"image": [{"name": "i"}]}), encoding="utf-8")
+        loaded = load_models_file(only_image)
+        assert loaded["text"] == () and loaded["vision"] == (), "没写 text 时文本模型改读 .env，不应报错"
         bad({"text": [{"name": "x", "base_url": "http://x", "model": "m"}]}, "api_key")
         bad({"text": [{"name": "x", "base_url": "http://x", "api_key_env": "NO_SUCH_ENV_VAR_X", "model": "m"}]}, "NO_SUCH_ENV_VAR_X")
         one = {"name": "x", "base_url": "http://x", "api_key": "k", "model": "m"}

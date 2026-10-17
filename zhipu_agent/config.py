@@ -253,8 +253,10 @@ def load_models_file(path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
     if not isinstance(raw, dict):
         raise ConfigError(f"{path} 顶层应当是对象，包含 text / vision 两个列表")
     text = raw.get("text")
-    if not isinstance(text, list) or not text:
-        raise ConfigError(f"{path} 里的 text 必须是至少一项的列表")
+    if text is None:
+        text = []   # 没写 text：文本模型仍然读 .env（models.json 可以只配 image / video）
+    elif not isinstance(text, list) or not text:
+        raise ConfigError(f"{path} 里的 text 必须是至少一项的列表（不需要就整个删掉，文本模型改读 .env）")
     vision = raw.get("vision", [])
     if not isinstance(vision, list):
         raise ConfigError(f"{path} 里的 vision 必须是列表（不需要视觉模型就删掉这一项或写 []）")
