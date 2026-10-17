@@ -275,7 +275,7 @@ python run_agent.py run --stages script --force
 | `--video-submit` | 明确授权调用配置好的视频 API；不加此参数只生成预览文件 |
 | `--yes` | 不暂停，骨架拍板点自动确认 |
 | `--force` | 忽略已有产物和缓存 |
-| `--concurrency` `--fix-rounds` | 同时进行的调用数（默认 3）、最多回炉几轮（默认 3） |
+| `--concurrency` `--fix-rounds` | 同时进行的调用数（默认 3）、最多回炉几轮（默认 1） |
 
 ### 视频生成阶段（可选）
 
