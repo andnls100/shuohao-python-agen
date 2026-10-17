@@ -125,20 +125,21 @@ def run(
         for ep in wanted:
             if ep in merged_episodes:
                 continue
-            cache = next((p for p in _episode_cache_candidates(work, ep) if p.is_file()), None)
-            if cache is None:
-                continue
-            episode = _read_cached_episode(cache, ep)
-            if episode is None:
-                ctx.log(f"[storyboard] 缓存 {cache.name} 不完整或无效，将重新生成该集")
-                try:
-                    cache.unlink()
-                except OSError:
-                    pass
-                continue
-            merged_episodes[ep] = episode
-            recovered = True
-            ctx.log(f"[storyboard] 恢复缓存 {cache.name}，跳过第 {ep} 集生成")
+            for cache in _episode_cache_candidates(work, ep):
+                if not cache.is_file():
+                    continue
+                episode = _read_cached_episode(cache, ep)
+                if episode is None:
+                    ctx.log(f"[storyboard] 缓存 {cache.name} 不完整或无效，检查其他缓存")
+                    try:
+                        cache.unlink()
+                    except OSError:
+                        pass
+                    continue
+                merged_episodes[ep] = episode
+                recovered = True
+                ctx.log(f"[storyboard] 恢复缓存 {cache.name}，跳过第 {ep} 集生成")
+                break
         if recovered:
             main["episodes"] = [merged_episodes[k] for k in sorted(merged_episodes)]
             main["aspectRatio"] = aspect
