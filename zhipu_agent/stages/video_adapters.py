@@ -34,6 +34,19 @@ def build_request(provider: dict, item: dict, manifest: dict) -> dict:
         "resolution": provider.get("resolution", "480P"),
     }
 
+    if adapter == "cogvideox_zhipu":
+        # Zhipu videos API accepts 5 or 10 seconds for CogVideoX-3.
+        duration = 5 if float(item["duration_seconds"]) <= 5 else 10
+        ratio = context["aspect_ratio"]
+        size = provider.get("size") or ("1920x1080" if ratio == "16:9" else "1080x1920" if ratio == "9:16" else "1024x1024")
+        return {
+            "model": context["model"],
+            "prompt": context["prompt"],
+            "duration": duration,
+            "size": size,
+            "quality": bool(provider.get("quality", True)),
+        }
+
     if adapter == "aliyun_wan":
         # Wan 3.0 official API: input.prompt + parameters.duration/resolution/ratio.
         # Wan takes an integer duration; short storyboard shots are rounded to seconds.
