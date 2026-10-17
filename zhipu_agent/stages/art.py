@@ -14,6 +14,7 @@ from typing import Any, Dict, List
 
 from ..skill_loader import build_system
 from ..validator import Result
+from ..visual_style import visual_style_instruction
 from .base import Context, Item, compact, read_json, run_items, write_json
 
 SKILL = "novel-art"
@@ -40,7 +41,8 @@ def _episodes_using(outline: Dict[str, Any], key: str, ident: str) -> List[Dict[
     ]
 
 
-def run(ctx: Context) -> Path:
+def run(ctx: Context, visual_style: str = "manju") -> Path:
+    style_hint = visual_style_instruction(visual_style)
     sk = ctx.skill(SKILL)
     work = ctx.work("art")
     outline_path = ctx.artifact("outline")
@@ -80,11 +82,12 @@ def run(ctx: Context) -> Path:
             f"## 用到这个场景的分集（光照状态要从分集反推，不写用不上的）\n"
             f"{json.dumps(_episodes_using(outline, 'sceneIds', scene['id']), ensure_ascii=False, indent=1)}\n\n"
             f"## 同批其他场景（空间气质要区分开）\n{'、'.join(n for n in scene_names if n != scene['name']) or '（无）'}\n\n"
+            f"## 视觉风格（场景图提示词必须遵守）\n{style_hint}\n\n"
             f"## 约束\n{avoid}\n\n"
             "## 输出\n只输出这一个场景的 JSON 对象（结构见《数据结构》的 scenes 段）。"
         )
         items.append(Item(key, scene_system, prompt, tokens=[scene["name"], scene["id"]],
-                          cache=work / f"scene-{scene['id']}.json"))
+                          cache=work / f"scene-{scene['id']}-{visual_style}.json"))
 
     if doc["props"]:
         for prop in doc["props"]:
@@ -98,21 +101,23 @@ def run(ctx: Context) -> Path:
                 f"## 出现这件道具的分集\n"
                 f"{json.dumps(_episodes_using(outline, 'propIds', prop['id']), ensure_ascii=False, indent=1)}\n\n"
                 f"## 登记过的场景\n{'、'.join(scene_names)}\n\n"
+                f"## 视觉风格（道具图提示词必须遵守）\n{style_hint}\n\n"
                 f"## 约束\n{avoid}道具图要白底、无手、提示词里带尺度短语。\n\n"
                 "## 输出\n只输出这一件道具的 JSON 对象（结构见《数据结构》的 props 段）。"
             )
             items.append(Item(key, prop_system, prompt, tokens=[prop["name"], prop["id"]],
-                              cache=work / f"prop-{prop['id']}.json"))
+                              cache=work / f"prop-{prop['id']}-{visual_style}.json"))
     else:
         kinds["props"] = "props"
         prompt = (
             f"## 任务\n大纲没有登记叙事道具。请先选再填：从下面的材料里挑 3–8 件有特写、跨集出现、承载剧情的道具。\n\n"
             f"## 改编核心\n{core}\n\n"
             f"## 分集梗概\n{json.dumps(compact(outline.get('episodes', []), 300), ensure_ascii=False, indent=1)}\n\n"
-            f"## 登记过的场景\n{'、'.join(scene_names)}\n\n## 约束\n{avoid}\n\n"
+            f"## 登记过的场景\n{'、'.join(scene_names)}\n\n"
+            f"## 视觉风格（道具图提示词必须遵守）\n{style_hint}\n\n## 约束\n{avoid}\n\n"
             "## 输出\n只输出 JSON 数组，每个元素是一件道具（结构见《数据结构》的 props 段）。"
         )
-        items.append(Item("props", prop_system, prompt, tokens=["道具", "props"], cache=work / "props.json"))
+        items.append(Item("props", prop_system, prompt, tokens=["道具", "props"], cache=work / f"props-{visual_style}.json"))
 
     def apply(key: str, data: Any) -> None:
         kind = kinds[key]

@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 from ..validator import Result
 from ..config import models_file_path
 from .base import Context, read_json, write_json
+from ..visual_style import visual_style_instruction
 
 
 def artifact(ctx: Context) -> Path:
@@ -50,7 +51,7 @@ def _prompt(segment: dict, protocol: str) -> str:
     return "\n\n".join(parts)
 
 
-def _collect(ctx: Context, eps: Optional[list], protocol: str) -> dict:
+def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str) -> dict:
     source = ctx.artifact("storyboard")
     if not source.is_file():
         raise FileNotFoundError(f"找不到分镜文件：{source}；请先运行 storyboard 阶段")
@@ -62,13 +63,16 @@ def _collect(ctx: Context, eps: Optional[list], protocol: str) -> dict:
             continue
         for idx, segment in enumerate(episode.get("segments", []), 1):
             sid = str(segment.get("id") or f"E{ep:02d}-{idx:02d}")
+            style_hint = visual_style_instruction(visual_style)
+            base_prompt = _prompt(segment, protocol)
             items.append({"id": sid, "ep": ep, "sceneIndex": segment.get("sceneIndex"),
-                          "duration_seconds": _duration(segment), "prompt": _prompt(segment, protocol),
+                          "duration_seconds": _duration(segment),
+                          "prompt": base_prompt + "\n\n" + style_hint,
                           "state": "planned", "task_id": None, "video_url": None,
                           "video_path": None, "error": None})
     if not items:
         raise ValueError("所选集没有可生成的视频分段；检查分镜产物或 --eps 参数")
-    return {"version": 1, "source": ctx.title, "protocol": protocol,
+    return {"version": 1, "source": ctx.title, "protocol": protocol, "visual_style": visual_style,
             "aspect_ratio": board.get("aspectRatio", "16:9"), "items": items}
 
 
@@ -267,16 +271,17 @@ def check(ctx: Context) -> Result:
     return Result(0, f"{len(items)} 个视频分段已生成")
 
 
-def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: bool = False) -> Path:
+def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: bool = False,
+        visual_style: str = "manju") -> Path:
     root = ctx.out / "video"
     root.mkdir(parents=True, exist_ok=True)
     path = artifact(ctx)
-    manifest = _collect(ctx, eps, protocol)
+    manifest = _collect(ctx, eps, protocol, visual_style)
     previous = {}
     if path.is_file() and not ctx.force:
         try:
             old = read_json(path)
-            if old.get("protocol") == protocol:
+            if old.get("protocol") == protocol and old.get("visual_style", "manju") == visual_style:
                 previous = {str(x.get("id")): x for x in old.get("items", [])}
         except (OSError, ValueError):
             pass

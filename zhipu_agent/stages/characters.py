@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 from ..llm import Conversation, ask_text
 from ..skill_loader import build_system
 from ..validator import NodeError, Result
+from ..visual_style import visual_style_instruction
 from .base import Context, Item, compact, no_validate, read_json, run_items, safe_name, write_json
 
 SKILL = "novel-characters"
@@ -66,9 +67,10 @@ def _normalize_roster(data: Any) -> Dict[str, Any]:
     return data
 
 
-def run(ctx: Context, max_chars: int = 30) -> Path:
+def run(ctx: Context, max_chars: int = 30, visual_style: str = "manju") -> Path:
     if ctx.lang not in BUILTIN_LANGS:
         raise ValueError(f"目前只支持 {BUILTIN_LANGS} 作为角色报告语言（其他语言需要先翻译界面文案）")
+    style_hint = visual_style_instruction(visual_style)
     sk = ctx.skill(SKILL)
     work = ctx.work("characters")
     cast_path = artifact(ctx)
@@ -169,6 +171,7 @@ def run(ctx: Context, max_chars: int = 30) -> Path:
         prompt = (
             f"## 任务\n为角色「{name}」产出一张完整的角色卡。\n\n"
             f"报告语言 lang = {ctx.lang}（{lang_name}）：人类可读字段用这个语言；出图和 TTS 提示词永远英文。\n\n"
+            f"## 视觉风格（image.prompt 必须遵守）\n{style_hint}\n\n"
             f"## 大纲里的定位（已拍板，不要推翻分档）\n{seed_text}\n\n"
             f"## 原文观察记录与可引用的逐字片段\n{obs_text}\n\n"
             f"## 同批其他角色的名字（避免长相声线撞车）\n{'、'.join(n for n in names if n != name) or '（无）'}\n\n"
@@ -177,7 +180,7 @@ def run(ctx: Context, max_chars: int = 30) -> Path:
         )
         # 报错里角色名有两种写法："[陆行远] image.prompt …" 和 "胡二爷 与 岸上挑灯的更夫 的提示词雷同"
         items.append(Item(name, card_system, prompt,
-                          tokens=[f"[{name}]", f"card-{safe_name(name)}", name], cache=card_files[name]))
+                          tokens=[f"[{name}]", f"card-{safe_name(name)}", name], cache=work / f"card-{safe_name(name)}-{visual_style}.json"))
 
     def apply_card(key: str, data: Any) -> None:
         if isinstance(data, dict) and isinstance(data.get("character"), dict):

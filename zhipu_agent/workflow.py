@@ -131,14 +131,16 @@ def run_stage(ctx: Context, name: str, opts: Dict[str, Any]) -> Optional[Path]:
     if name == "outline":
         return module.run(ctx, opts["params"])
     if name == "characters":
-        return module.run(ctx, max_chars=opts.get("max_chars", 30))
+        return module.run(ctx, max_chars=opts.get("max_chars", 30),
+                          visual_style=opts.get("visual_style", "manju"))
     if name == "art":
-        return module.run(ctx)
+        return module.run(ctx, visual_style=opts.get("visual_style", "manju"))
     if name in ("script", "staging"):
         return module.run(ctx, eps=eps)
     if name == "storyboard":
         return module.run(ctx, eps=eps, aspect=opts.get("aspect", "16:9"),
-                          prompt_lang=opts.get("prompt_lang", "en"))
+                          prompt_lang=opts.get("prompt_lang", "en"),
+                          visual_style=opts.get("visual_style", "manju"))
     if name == "images":
         return module.run(ctx, generate=opts.get("images_gen", False), only=opts.get("images_only"))
     if name == "refs":
@@ -146,7 +148,8 @@ def run_stage(ctx: Context, name: str, opts: Dict[str, Any]) -> Optional[Path]:
                           gen=opts.get("refs_gen", False))
     if name == "video":
         return module.run(ctx, eps=eps, protocol=opts.get("video_protocol", "h3"),
-                          submit=opts.get("video_submit", False))
+                          submit=opts.get("video_submit", False),
+                          visual_style=opts.get("visual_style", "manju"))
     raise ValueError(name)
 
 
