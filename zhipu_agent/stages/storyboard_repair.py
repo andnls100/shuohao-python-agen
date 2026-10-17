@@ -287,8 +287,8 @@ def replace_h3_cut_text(segment: Dict[str, Any], index: int, text: str, lang: st
             return False
         insert_at = min(candidates)
         prefix = prompt[:insert_at].rstrip()
-        suffix = prompt[insert_at:].lstrip("\\n")
-        segment["h3Prompt"] = prefix + "\\n" + text.strip() + "\\n" + suffix
+        suffix = prompt[insert_at:].lstrip("\n")
+        segment["h3Prompt"] = prefix + "\n" + text.strip() + "\n" + suffix
         return True
     end_candidates = []
     next_match = re.search(next_marker, prompt[start_match.end():])

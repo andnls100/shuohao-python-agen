@@ -52,10 +52,10 @@ class StoryboardRepairTest(unittest.TestCase):
     def test_missing_shot_block_is_inserted_without_losing_neighbours(self):
         segment = {
             "h3Prompt": (
-                "How the reference pictures align with the target video — line\\n"
-                "integrated_multimodal_description:\\n"
-                "[Shot 1] first\\n[Shot 3] At 00:06.000, third\\n"
-                "overall_soundscape: sound\\nnon_diegetic_music: N/A"
+                "How the reference pictures align with the target video — line\n"
+                "integrated_multimodal_description:\n"
+                "[Shot 1] first\n[Shot 3] At 00:06.000, third\n"
+                "overall_soundscape: sound\nnon_diegetic_music: N/A"
             )
         }
         self.assertTrue(replace_h3_cut_text(segment, 2, "[Shot 2] At 00:03.000, repaired second", "en"))
@@ -69,7 +69,7 @@ class StoryboardRepairTest(unittest.TestCase):
             "episodes": [{"segments": [{
                 "id": "E01-01",
                 "cuts": [{"seconds": 3.0, "size": "close", "frame": "人物面部占据画面中心"}],
-                "h3Prompt": "旧对齐行\\n整体视听描述：\\n[镜头 1] 人物静止\\n整体音景：安静\\n非叙事配乐：无",
+                "h3Prompt": "旧对齐行\n整体视听描述：\n[镜头 1] 人物静止\n整体音景：安静\n非叙事配乐：无",
             }]}],
         }
         fixes = repair_deterministic_storyboard(doc, "zh")
