@@ -194,6 +194,7 @@ python run_agent.py status             # 各阶段产物是否存在、是否通
 | 7 | `storyboard` | novel-storyboard：三集一批，最后导出投产包 |
 | 8（可选） | `refs` | character-refs：可生成角色锚点和派生参考图 |
 | 9（可选） | `video` | 视频阶段：读取分镜，生成逐段提示词、任务清单和人工质检清单；配置 API 并显式指定 `--video-submit` 后才会调用云端生成 |
+| 10（可选） | `audio` | 音频阶段：读取角色卡与剧本，创建并复用 CosyVoice 角色音色，逐句生成对白音频；显式指定 `--audio-submit` 才会调用 API |
 
 不加 `--stages`（或使用 `--stages all`）时仍只跑六个文本制作阶段；`images`、`refs` 和 `video` 都需显式指定，避免意外产生图片或视频费用。`images` 只读取已保存的 `cast.json` / `art.json`，不会重新读取小说或调用文本模型；成功图片会跳过，失败项可在重跑时续做。视频阶段依赖已经生成的 `storyboard`。
 
@@ -212,6 +213,7 @@ python run_agent.py status             # 各阶段产物是否存在、是否通
 | 6 | `storyboard` | `storyboard/<书名>-storyboard.json`：段、分镜、分镜图提示词、H3 提示词 | `<书名>-storyboard.md`、`storyboard-report.html` | `storyboard/.gates.jsonl`（质量门失败的累积记录） |
 | 7 | `refs`（可选） | `character-refs/<角色名>/asset.json`：角色描述加每张参考图的全部版本 | 配了出图模型并加 `--refs-gen` 时，另有 `character-refs/character-refs.html` | `work/refs/<角色名>-intake.json`（模型整理出的角色描述） |
 | 8 | `video`（可选） | `video/video-manifest.json`：逐段提示词、时长、任务 ID、生成状态、视频 URL 和本地路径 | `video/prompts/<分段ID>.txt`、`video/qc-checklist.md`；下载成功的视频保存在 `video/videos/<分段ID>.mp4` | `video-manifest.json` 保存云端任务状态，重新执行可复用已保存的任务 ID 和已完成结果 |
+| 9（可选） | `audio` | `audio/audio-manifest.json`：逐句对白、角色 ID、voice ID、生成状态和音频路径 | `audio/character-voices.json`、`audio/prompts/`、`audio/qc-checklist.md`、`audio/lines/<台词ID>.mp3` | 角色音色 ID 保存在输出目录，跨集复用，不写死在 `models.json` |
 
 第 6 步还会在 `storyboard/` 下导出投产包：
 - `storyboard/E01-01/prompt.md`、`E01-02/prompt.md`……每一段一个文件夹，里面是这一段的 H3 提示词，以及按 Picture 序号列出的分镜图挂载说明。
@@ -308,6 +310,19 @@ python run_agent.py run --stages images --images-gen --images-only 徐今朝,C03
 写实画风下，还会把设定集提示词里的两个渲染引擎术语换成摄影里的说法（`ambient occlusion` 换成 `soft contact shadow`，`subsurface scattering` 换成 `translucency`），避免把画面往 CG 渲染带。改了这些设置后提示词会变，已经成功出过图的角色会按新提示词重新出；`portrait` 的文件名是 `<角色>-<编号>-portrait`，`sheet` 的是 `-sheet`，旧图不会被覆盖。场景和道具不受这个设置影响。
 
 **分镜修复采用局部优先策略**：像 5.1 秒这种仅超上限 0.1 秒的轻微时长问题，会先自动改到上限并重算 H3 对齐时间；仍有明确 `段号#镜号` 的错误时，只把该镜的 cut 和对应 H3 镜头正文交给模型修复（每个镜头最多一次，单批最多 6 个）。不会因为单镜违规而让模型重写整集；无法定位到具体镜头或修复后仍不通过时，保存批次 JSON 并停止，供人工检查。其他阶段的默认自动回炉轮数为 1，可通过 `--fix-rounds` 或 `.env` 中的 `AGENT_FIX_ROUNDS` 调整。
+
+### 角色对白音频生成（可选）
+
+音频阶段使用 `cosyvoice-v3.5-flash` 生成逐句对白音频。角色音色 ID 保存在 `output/audio/character-voices.json`，后续集数复用同一 ID，不需要写入 `models.json`。预览命令不调用 API：
+
+```bash
+python run_agent.py run --stages audio --eps 1
+
+# 确认配置、音色描述和费用后，正式生成
+python run_agent.py run --stages audio --eps 1 --audio-submit --yes
+```
+
+详见[角色对白音频生成文档](docs/audio-generation.md)。CosyVoice v3.5 Flash 的声音设计仅支持北京地域，需要使用对应的 Workspace ID、接口地址和 API Key。
 
 ### 视频生成阶段（可选）
 
