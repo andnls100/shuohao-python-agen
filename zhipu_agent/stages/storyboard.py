@@ -3,8 +3,8 @@
 流程（对应 skills/novel-storyboard/SKILL.md）：
   seed      每批 ≤3 集，把剧本节拍展开成工作底稿 seedScenes（每拍几秒是算出来的）
   切镜      批内每集一次模型调用：先按剧情单元分段（≤15 秒），段内切 2–5 秒的分镜，写 frame / shot / h3Prompt
-  校验      validate 18 道质量门（节拍全覆盖、H3 对齐指令逐字对账、台词逐字进 <d> 块……）
-            → 按 "E01-02" 这样的段号 / "第 N 集" 把报错归给那一集回炉
+  校验      先自动修复轻微时长超限并重算 H3 时间；其余可定位错误只修单个分镜
+            → 不因一个分镜的问题重新生成整集；无法定位或修复失败则保存批次并停止
   输出      md / html 报告 + export 导出投产包（每段一个文件夹）
 """
 from __future__ import annotations
@@ -14,9 +14,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..skill_loader import build_system
+from ..llm import Conversation
 from ..validator import Result
 from .base import (
     Context, Item, batches, compact, ep_tokens, read_json, run_items, write_json,
+)
+from .storyboard_repair import (
+    cut_violation_refs, extract_h3_cut_text, repair_minor_cut_durations,
+    replace_h3_cut_text, sync_segment_timing,
 )
 
 SKILL = "novel-storyboard"
@@ -149,9 +154,92 @@ def run(
                 [e for e in _doc["episodes"] if e["ep"] != ep] + [episode], key=lambda e: e["ep"])
             write_json(_path, _doc)
 
+        def validate_batch(_p=batch_path, _doc=batch_doc) -> Result:
+            # A tiny duration overrun is a deterministic edit, not a reason to call an LLM.
+            timing_fixes = repair_minor_cut_durations(_doc, prompt_lang)
+            if timing_fixes:
+                for fix in timing_fixes:
+                    ctx.log(f"[storyboard] 自动修正时长：{fix}")
+                write_json(_p, _doc)
+
+            result = ctx.run(sk, ["validate", _p, *_refs(ctx)], cwd=sb_dir)
+            if result.ok:
+                return result
+
+            # Only route errors that name a precise segment/cut. Never send a whole episode
+            # back to the model for a single bad cut. At most one local repair call per cut.
+            targets = cut_violation_refs(result.violations)
+            if not targets:
+                ctx.log("[storyboard] 剩余错误无法定位到具体分镜；停止自动回炉，保留批次文件供检查")
+                return result
+
+            repaired = 0
+            max_local_repairs = 6
+            for (segment_id, cut_index), errors in list(targets.items())[:max_local_repairs]:
+                episode = next((e for e in _doc.get("episodes", [])
+                                if any(s.get("id") == segment_id for s in e.get("segments", []))), None)
+                segment = next((s for s in (episode or {}).get("segments", [])
+                                if s.get("id") == segment_id), None)
+                cuts = (segment or {}).get("cuts", [])
+                if not segment or not isinstance(cuts, list) or not (1 <= cut_index <= len(cuts)):
+                    continue
+                cut = cuts[cut_index - 1]
+                old_cut = json.loads(json.dumps(cut, ensure_ascii=False))
+                old_shot_text = extract_h3_cut_text(segment, cut_index, prompt_lang)
+                repair_system = (
+                    "你是分镜 JSON 的局部修复器。只能修复提供的一个 cut 和它对应的一段 H3 镜头正文，"
+                    "绝不能重写整集、其他分镜或剧情。保留 beats、characters、props 原样；"
+                    "不要新增剧情或台词。只输出 JSON："
+                    "{\"cut\":{...需要修改的字段...},\"h3ShotText\":\"该镜完整的 [Shot k]/[镜头 k] 正文\"}。"
+                    "若不需要修改 h3ShotText，原样返回它。"
+                )
+                repair_user = (
+                    f"分镜段：{segment_id}；第 {cut_index} 切。画幅：{_doc.get('aspectRatio', aspect)}；"
+                    f"H3 提示词语言：{prompt_lang}。\n"
+                    f"本切校验错误：{json.dumps(errors, ensure_ascii=False)}\n"
+                    f"段级必要上下文：{json.dumps({k: segment.get(k) for k in ('sceneIndex', 'blocking', 'soundscape', 'music')}, ensure_ascii=False)}\n"
+                    f"当前 cut：{json.dumps(old_cut, ensure_ascii=False)}\n"
+                    f"当前 H3 镜头正文：{json.dumps(old_shot_text, ensure_ascii=False)}\n"
+                    "仅返回修复后的当前 cut 字段和当前 H3 镜头正文。不要返回整个 segment 或 episode。"
+                )
+                try:
+                    patch = Conversation(repair_system, ctx.settings).ask_json(repair_user)
+                except Exception as exc:  # noqa: BLE001
+                    ctx.log(f"[storyboard] {segment_id}#{cut_index} 局部修复调用失败：{exc}")
+                    continue
+                if not isinstance(patch, dict):
+                    continue
+                patch_cut = patch.get("cut")
+                if isinstance(patch_cut, dict):
+                    # Structural/script ownership stays immutable; only cut-level presentation fields can change.
+                    forbidden = {"beats", "characters", "props", "sceneIndex", "id"}
+                    allowed = set(cut) | {
+                        "seconds", "size", "camera", "stability", "lens", "cameraPosition",
+                        "composition", "eyeline", "focus", "lighting", "frame", "shot", "sfx",
+                        "note", "recipe",
+                    }
+                    for key, value in patch_cut.items():
+                        if key in allowed and key not in forbidden:
+                            cut[key] = value
+                shot_text = patch.get("h3ShotText")
+                if isinstance(shot_text, str) and shot_text.strip():
+                    replace_h3_cut_text(segment, cut_index, shot_text, prompt_lang)
+                sync_segment_timing(segment, prompt_lang)
+                if cut != old_cut or extract_h3_cut_text(segment, cut_index, prompt_lang) != old_shot_text:
+                    repaired += 1
+                    ctx.log(f"[storyboard] 已局部修复 {segment_id}#{cut_index}")
+                    write_json(_p, _doc)
+
+            if len(targets) > max_local_repairs:
+                ctx.log(f"[storyboard] 还有 {len(targets) - max_local_repairs} 个分镜未自动修复；为控制调用量停止")
+            if repaired:
+                result = ctx.run(sk, ["validate", _p, *_refs(ctx)], cwd=sb_dir)
+            return result
+
         run_items(
             ctx, items, apply=apply, label=f"storyboard-第{group[0]}–{group[-1]}集",
-            validate=lambda _p=batch_path: ctx.run(sk, ["validate", _p, *_refs(ctx)], cwd=sb_dir),
+            validate=validate_batch,
+            rounds=0,  # no episode-wide retries; repairs above are deterministic or cut-scoped
         )
         merged = {e["ep"]: e for e in main["episodes"]}
         merged.update({e["ep"]: e for e in batch_doc["episodes"]})
