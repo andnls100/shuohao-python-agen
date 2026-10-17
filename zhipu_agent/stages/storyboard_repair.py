@@ -68,9 +68,14 @@ def sync_segment_timing(segment: Dict[str, Any], lang: str = "en") -> bool:
         return False
 
     lines = prompt.splitlines()
-    if not lines:
+    # Models occasionally emit a leading blank line. Replace the first actual
+    # content line, not the blank line, or the validator still sees a stale header.
+    first_content = next((i for i, line in enumerate(lines) if line.strip()), None)
+    if first_content is None:
         return False
-    lines[0] = _alignment(cuts, lang)
+    lines[first_content] = _alignment(cuts, lang)
+    if first_content:
+        lines = lines[first_content:]
     prompt = "\n".join(lines)
     starts = _starts(cuts)
 
