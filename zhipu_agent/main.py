@@ -189,7 +189,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         from .stages.base import parse_eps
         opts["eps"] = parse_eps(args.eps)
 
-    ctx = _ctx_from(args, settings, skip_source=(stages == ["images"]))
+    ctx = _ctx_from(args, settings, skip_source=all(stage in ("images", "continuity") for stage in stages))
     results = workflow.run_pipeline(ctx, stages, opts)
     ctx.log("全部完成：")
     for name, path in results.items():
