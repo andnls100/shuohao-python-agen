@@ -18,8 +18,10 @@ const REALISTIC = {
   label: { zh: '写实照片', en: 'Realistic photo', ja: '写実写真' },
   medium: 'photo',
   style: 'A real photograph, not a render: shot on a full-frame digital camera with an 85mm portrait lens at f/5.6, natural true-to-life ' +
-    "colors and white balance. Natural skin texture with the pores and fine lines the person's age calls for, a no-makeup look, " +
-    'no retouching, no beauty filter. Real fabric with natural creases. Subtle film grain.',
+    "colors and white balance. Natural human skin with age-appropriate pores, fine lines, subtle tonal variation and realistic skin highlights; " +
+    'fine facial hair where appropriate, naturally irregular details, no makeup look, no retouching, no beauty filter. ' +
+    'Tactile real-world materials: visible fabric weave, individual fibers, believable seams, layered folds and natural cloth weight; ' +
+    'individual hair strands with varied thickness and a few natural flyaways. Subtle film grain.',
   clean: 'White seamless paper backdrop lit to pure white. A soft directional key light from the front-left with a weaker fill, so the face ' +
     'and clothes have gentle natural shadows and volume. Exactly one person, empty hands, no props, no text, no watermark.',
   neg: 'CGI, 3D render, digital painting, illustration, anime, airbrushed skin, smooth plastic skin, waxy skin, doll face, ' +
