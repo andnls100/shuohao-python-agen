@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..skill_loader import build_system
+from ..visual_style import visual_style_instruction
 from ..llm import Conversation
 from ..validator import Result
 from .base import (
@@ -59,7 +60,9 @@ def run(
     eps: Optional[List[int]] = None,
     aspect: str = "16:9",
     prompt_lang: str = "en",
+    visual_style: str = "manju",
 ) -> Path:
+    style_hint = visual_style_instruction(visual_style)
     sk = ctx.skill(SKILL)
     work = ctx.work("storyboard")
     sb_dir = ctx.dir("storyboard")
@@ -128,6 +131,7 @@ def run(
             prompt = (
                 f"## 任务\n给第 {ep} 集切分镜：先按剧情单元分段（每段 9–15 秒、不跨场），段内切 2–5 秒的分镜。\n\n"
                 f"## 画幅与语言\naspectRatio = {aspect}；promptLang = {prompt_lang}（h3Prompt 的正文语言，台词在 <d> 里保留原文）。\n\n"
+                f"## 视觉风格（frame、shot 和 h3Prompt 必须统一遵守）\n{style_hint}\n保持同一风格贯穿所有镜头，不要在漫剧插画与真人摄影之间混用。\n\n"
                 f"## 工作底稿 seedScenes（节拍编号、台词、每拍秒数已算好，不要重估；镜头必须认领这些节拍）\n"
                 f"{json.dumps(seed_ep.get('seedScenes', []), ensure_ascii=False, indent=1)}\n\n"
                 f"## 场景卡\n{json.dumps(scene_cards, ensure_ascii=False, indent=1)}\n\n"
