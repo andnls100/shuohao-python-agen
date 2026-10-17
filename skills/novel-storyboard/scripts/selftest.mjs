@@ -191,14 +191,16 @@ eq(gateReport(FIXTURE, CTX).length, 18, '十八道门');
 }
 // ep-duration
 {
+  eq(DEFAULT_PARAMS.tolerance, 1, '每集总时长默认容差改为 ±100%');
   const doc = clone(FIXTURE);
-  for (const s of doc.episodes[0].segments) for (const c of s.cuts) c.seconds = Math.min(5, c.seconds + 2);
-  ok(gate(doc, 'ep-duration').detail.includes('超'), '写超总时长被拦');
+  for (const s of doc.episodes[0].segments) for (const c of s.cuts) c.seconds = 10;
+  ok(gate(doc, 'ep-duration').detail.includes('超'), '超过目标 200% 的总时长被拦');
 }
 {
   const doc = clone(FIXTURE);
+  doc.params = { ...(doc.params ?? {}), tolerance: 0.15 };
   for (const s of doc.episodes[0].segments) for (const c of s.cuts) c.seconds = Math.max(2, c.seconds - 2);
-  ok(gate(doc, 'ep-duration').detail.includes('欠'), '写欠总时长被拦');
+  ok(gate(doc, 'ep-duration').detail.includes('欠'), '显式设置 ±15% 时仍会检查欠时长');
 }
 // crowd
 {
