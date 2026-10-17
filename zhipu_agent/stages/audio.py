@@ -131,7 +131,8 @@ def _collect(ctx: Context, eps: Optional[list]) -> dict:
 
 def _synthesize(item: dict, cfg: dict, target: Path) -> None:
     body = {
-        "model": cfg["model"], "input": item["text"],\n        "voice": str(cfg["voice_map"].get(item.get("speaker")) or cfg["voice_map"].get(item.get("character_name")) or cfg["voice"]),
+        "model": cfg["model"], "input": item["text"],
+        "voice": str(cfg["voice_map"].get(item.get("speaker")) or cfg["voice_map"].get(item.get("character_name")) or cfg["voice"]),
         "response_format": cfg["response_format"],
     }
     if cfg["instructions_field"] and item.get("voice_instruction"):
