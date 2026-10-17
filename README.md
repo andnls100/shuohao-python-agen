@@ -3,7 +3,7 @@
 
 # shuohao-skills
 
-**Agent-agnostic skills for AI short-drama production** — from a novel to shoot-ready material: character bibles, adaptation outlines, scene & prop bibles, screenplays, opening staging, and storyboards. Each skill is self-contained and works with any Agent that can read `SKILL.md` and run the bundled scripts; Claude Code and Codex are two supported examples, not requirements.
+**Agent-agnostic skills for AI short-drama production** — from a novel to production assets: adaptation outline, character bible, art bible, screenplay, opening staging, and storyboard. A Python agent orchestrates these stages and can optionally continue after storyboarding into video prompt preparation and cloud video generation. Each skill is self-contained and works with any Agent that can read `SKILL.md` and run the bundled scripts; Claude Code and Codex are examples, not requirements.
 
 The repository now contains **seven skills: six production stages plus standalone character reference generation**. The outline settles the adaptation; characters, art, and screenplay iterate together; staging fixes each scene's opening positions before storyboarding.
 
@@ -22,6 +22,7 @@ flowchart TD
     staging -->|Copy opening blocking| storyboard[novel-storyboard]
     refs -. Reference images .-> storyboard
     storyboard --> production[Video production packs]
+    production --> video[video · prompts and optional cloud generation]
 ```
 
 | Skill | What it does |
@@ -199,21 +200,24 @@ Put the novel at `input/novel.txt` (UTF-8 or GBK). Outputs go to `output/`, with
 
 ### Stages and common commands
 
-Stages: `outline` → `characters` → `art` → `script` → `staging` → `storyboard`, plus the optional `refs` (character-refs, not run by default). Finished stages that pass validation are skipped.
+Stages: `outline` → `characters` → `art` → `script` → `staging` → `storyboard`, plus optional `refs` and `video`. The default run executes only the six core production stages; `refs` and `video` must be selected explicitly. The video stage requires a storyboard. Finished stages that pass validation are skipped, and video can be run for selected episodes with `--eps`.
 
 ```bash
 python run_agent.py run --stages outline --book input/novel.txt --episodes 6 --minutes 2 --genre urban
 python run_agent.py run --stages characters,art
 python run_agent.py run --stages script,staging,storyboard --eps 1-2     # small trial first
 python run_agent.py run --stages storyboard --aspect 9:16 --prompt-lang zh
-python run_agent.py run --stages refs --refs-names Alice --refs-gen      # --refs-gen needs an image model configured
+python run_agent.py run --stages refs --refs-names Alice --refs-gen      # needs an image model configured
+python run_agent.py run --stages video --eps 1                           # preview prompts; no API calls
+python run_agent.py run --stages video --eps 1 --video-protocol seedance # Seedance-style prompt composition
+python run_agent.py run --stages video --eps 1 --video-submit            # explicitly submit cloud jobs after API setup
 python run_agent.py run --yes ...                                        # no pause at the outline checkpoint
 python run_agent.py run --stages script --force                          # ignore existing output and cache
 ```
 
 `--genre` is **free text — there is no fixed list**; the skill only requires it to be present. It decides which hook types (face-slaps, reveals, reversals…) the outline is built around, so be specific: it is written as audience/setting plus the core appeal, e.g. `Republic-era romance mystery` (the bundled sample), `female-lead revenge` (the schema example), `urban medical comeback`.
 
-Other options: `--out`, `--adapt-mode`, `--images` (scene images, needs a vision model), `--concurrency` (default 3), `--fix-rounds` (default 3).
+Other options: `--out`, `--adapt-mode`, `--images` (scene images, needs a vision model), `--refs-names`, `--refs-look`, `--refs-gen`, `--video-protocol` (`h3` or `seedance`), `--video-submit` (explicitly enables cloud API calls), `--concurrency` (default 3), and `--fix-rounds` (default 3).
 
 ### Output files per step
 
@@ -228,10 +232,44 @@ Everything goes under `--out` (default `output/`), one sub-folder per stage. In 
 | 5 | `staging` | `staging/staging.json` — standable/sittable things per location and each scene's opening positions | `blocking.txt` (one opening-blocking sentence per scene), `staging-report.html` | `work/staging/location-S01.json`, `scenes-*.json` |
 | 6 | `storyboard` | `storyboard/<title>-storyboard.json` — segments, shots, frame prompts, H3 prompts | `<title>-storyboard.md`, `storyboard-report.html` | `storyboard/.gates.jsonl` |
 | 7 | `refs` (optional) | `character-refs/<name>/asset.json` — description plus all versions of each reference image | `character-refs/character-refs.html` (with an image model configured and `--refs-gen`) | `work/refs/<name>-intake.json` |
+| 8 | `video` (optional) | `video/video-manifest.json` — per-segment prompts, duration, task ID, generation state, video URL and local path | `video/prompts/<segment-id>.txt`, `video/qc-checklist.md`; downloaded videos go to `video/videos/<segment-id>.mp4` | The manifest records cloud task state and completed results for resume |
 
 Step 6 also exports a production package: `storyboard/E01-01/prompt.md`, `E01-02/prompt.md`, … (one folder per segment with its H3 prompt and the Picture-order list), and `storyboard/manifest.json` (per-segment duration, cut times, prompt and picture paths, and which pictures are missing). **The storyboard images (`f1.png`, `f2.png`, …) are not produced by this pipeline** — generate them with your image tool from the frame prompts and drop them into the segment folders, then export again.
 
 Other files: `source/` (UTF-8 copy of the novel), `agent.log` (run log), and `work/` (all caches — re-running resumes from them; delete a cache file or use `--force` to redo an item). With an image model configured and `--refs-gen`, step 7 also writes the reference PNGs (`default/front-full.v1.png`, …) under each character folder; otherwise it only writes `asset.json`.
+
+### Optional video generation stage
+
+The video stage runs after storyboarding and is **not included in the default pipeline**. By default it only creates prompts and a manifest; it does not submit cloud jobs.
+
+```bash
+python run_agent.py run --stages video --eps 1
+python run_agent.py run --stages video --eps 1 --video-protocol seedance
+```
+
+Outputs are written under `output/video/`: `video-manifest.json` (per-segment prompt, duration, task ID, state, video URL and local path), `prompts/<segment-id>.txt`, `qc-checklist.md`, and downloaded files under `videos/<segment-id>.mp4`.
+
+Configure the provider in the project-root `.env` file:
+
+```dotenv
+VIDEO_API_SUBMIT_URL=https://your-provider.example/v1/videos/generations
+VIDEO_API_STATUS_URL_TEMPLATE=https://your-provider.example/v1/videos/{task_id}
+VIDEO_API_KEY=your_api_key
+VIDEO_API_MODEL=your-video-model
+VIDEO_API_TIMEOUT=120
+VIDEO_API_POLL_INTERVAL=5
+VIDEO_API_MAX_WAIT=900
+```
+
+The adapter uses a generic REST contract: Bearer Token authentication and a JSON body with `model`, `prompt`, `duration`, and `aspect_ratio`. If the provider uses different request fields, authentication, or response fields, adapt `zhipu_agent/stages/video.py` to its official API documentation. An OpenAI-compatible text endpoint does not necessarily support video generation.
+
+Only after verifying the provider, model, pricing, and prompts should you submit jobs:
+
+```bash
+python run_agent.py run --stages video --eps 1 --video-submit
+```
+
+Use `--eps 1-3` or `--eps 1,3,5` to select episodes. Failures are recorded in the manifest; async tasks can be polled when a status URL template is configured, and completed segments are skipped on rerun. If downloading fails, the cloud URL and error are retained. This stage **does not yet stitch all segments into a full-episode MP4**. See [video generation setup](docs/video-generation.md).
 
 ### Resume and troubleshooting
 
