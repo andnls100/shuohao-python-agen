@@ -297,6 +297,14 @@ def run(ctx: Context, generate: bool = False) -> Path:
         write_json(path, manifest)
         for provider in providers:
             try:
+                # Log the exact prompt passed to the image API. Do not log credentials.
+                ctx.log(
+                    f"生图提示词 | 任务={item['id']} | 名称={item['name']} | "
+                    f"平台={provider['name']} | 模型={provider['model']} | 尺寸={provider['size']}"
+                )
+                ctx.log("----- 生图提示词开始 -----")
+                ctx.log(item["prompt"])
+                ctx.log("----- 生图提示词结束 -----")
                 result = _request_json(provider, item["prompt"])
                 b64, url = _find_image_payload(result)
                 if b64:
