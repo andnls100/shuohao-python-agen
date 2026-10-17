@@ -10,7 +10,7 @@ python run_agent.py run --stages video --eps 1
 
 默认读取 `output/storyboard/<书名>-storyboard.json`，按分段写入：
 
-- `output/video/video-manifest.json`：每段的提示词、时长、任务 ID、状态、视频 URL 和本地路径。
+- `output/video/video-manifest.json`：每段的提示词、时长、任务 ID、状态、使用的平台、视频 URL 和本地路径。
 - `output/video/prompts/<分段ID>.txt`：逐段提示词。
 - `output/video/qc-checklist.md`：人工质检清单。
 - `output/video/videos/<分段ID>.mp4`：API 返回可下载地址且下载成功时保存的视频文件。
@@ -21,21 +21,49 @@ python run_agent.py run --stages video --eps 1
 python run_agent.py run --stages video --eps 1 --video-protocol seedance
 ```
 
-## 2. 配置视频 API
+## 2. 在 models.json 配置视频 API 号池
 
-在项目根目录的 `.env` 中填写：
+模型配置统一放在项目根目录的 `models.json`。首次配置时复制 `models.example.json` 为 `models.json`，保留需要的 `text` / `vision` 列表，并填写 `video` 列表：
 
-```dotenv
-VIDEO_API_SUBMIT_URL=https://your-provider.example/v1/videos/generations
-VIDEO_API_STATUS_URL_TEMPLATE=https://your-provider.example/v1/videos/{task_id}
-VIDEO_API_KEY=your_api_key
-VIDEO_API_MODEL=your-video-model
-VIDEO_API_TIMEOUT=120
-VIDEO_API_POLL_INTERVAL=5
-VIDEO_API_MAX_WAIT=900
+```json
+{
+  "video": [
+    {
+      "name": "视频平台主用",
+      "submit_url": "https://provider-a.example/v1/videos/generations",
+      "status_url_template": "https://provider-a.example/v1/videos/{task_id}",
+      "api_key_env": "VIDEO_PRIMARY_API_KEY",
+      "model": "video-model-a",
+      "timeout": 120,
+      "poll_interval": 5,
+      "max_wait": 900
+    },
+    {
+      "name": "视频平台备用",
+      "submit_url": "https://provider-b.example/v1/videos/generations",
+      "status_url_template": "https://provider-b.example/v1/videos/{task_id}",
+      "api_key_env": "VIDEO_BACKUP_API_KEY",
+      "model": "video-model-b"
+    }
+  ]
+}
 ```
 
-此适配器使用通用 REST 约定：提交时 POST JSON `model`、`prompt`、`duration`、`aspect_ratio`，以 Bearer Token 鉴权；响应应直接提供 `video_url` / `output_url`，或提供 `task_id` 并允许通过状态 URL 查询。若平台字段、鉴权或请求路径不同，需要按平台文档修改 `zhipu_agent/stages/video.py`；不要假定任意 OpenAI 兼容接口都支持视频生成。
+- `video` 是视频生成 API 号池，按数组顺序尝试；提交请求失败时自动切换下一个备用平台。
+- 每项必填 `name`、`submit_url`、`model`，以及 `api_key` 或 `api_key_env`。建议用 `api_key_env` 引用系统环境变量，避免把真实密钥写进配置文件。
+- `status_url_template` 可选；如果平台返回 `task_id` 而不是视频 URL，就必须填写，并包含 `{task_id}` 占位符。
+- `timeout`、`poll_interval`、`max_wait` 分别控制请求超时、轮询间隔和最长等待时间。
+- 为避免同一分段重复提交并产生费用，任务一旦返回 `task_id`，后续续查固定使用创建该任务的平台，不会因轮询失败而转投其他平台。
+- `models.json` 已被 `.gitignore` 忽略。视频 API 的字段、鉴权或请求路径因平台而异，必要时需按供应商文档调整 `zhipu_agent/stages/video.py`。
+
+使用 `api_key_env` 时，可通过系统环境变量设置 Key（Windows CMD 示例）：
+
+```bat
+set VIDEO_PRIMARY_API_KEY=你的主用Key
+set VIDEO_BACKUP_API_KEY=你的备用Key
+```
+
+通用适配器提交时 POST JSON `model`、`prompt`、`duration`、`aspect_ratio`，使用 Bearer Token 鉴权。不能假定任意 OpenAI 兼容接口都支持视频生成。
 
 ## 3. 明确提交云端任务
 
@@ -45,7 +73,7 @@ VIDEO_API_MAX_WAIT=900
 python run_agent.py run --stages video --eps 1 --video-submit
 ```
 
-未指定 `--video-submit` 时绝不调用视频 API。提交模式会逐段保存任务状态；已成功生成的分段会跳过，已保存任务 ID 的分段在配置状态 URL 后可续查。生成失败会记录到 manifest，不会悄悄当作成功。
+未指定 `--video-submit` 时绝不调用视频 API。提交模式会逐段保存任务状态；已成功生成的分段会跳过。生成失败会记录到 manifest，不会悄悄当作成功。
 
 ## 4. 当前边界
 
