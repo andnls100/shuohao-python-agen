@@ -46,7 +46,7 @@ def build_request(provider: dict, item: dict, manifest: dict) -> dict:
             "input": {"prompt": context["prompt"]},
             "parameters": {
                 "resolution": context["resolution"],
-                "ratio": provider.get("ratio", ratio),
+                "ratio": provider.get("ratio") or ratio,
                 "duration": duration,
                 "prompt_extend": bool(provider.get("prompt_extend", True)),
             },
