@@ -43,6 +43,8 @@ def _build_parser() -> argparse.ArgumentParser:
             s.add_argument("--eps", help="只处理这些集，如 1-3 或 1,3,5（script / staging / storyboard 阶段）")
             s.add_argument("--aspect", default="16:9", choices=["16:9", "9:16"], help="分镜画幅")
             s.add_argument("--prompt-lang", default="en", choices=["en", "zh"], help="H3 提示词语言（官方口径默认 en）")
+            s.add_argument("--fight-enhancement", default="auto", choices=["off", "auto", "enhanced"],
+                           help="打戏增强：off=关闭，auto=仅强化重要打戏（默认），enhanced=强化所有打戏；改模式后建议加 --force")
             s.add_argument("--visual-style", default="manju", choices=["manju", "live-action"],
                            help="视觉提示词风格：manju=漫剧，live-action=真人（默认漫剧）")
             s.add_argument("--max-chars", type=int, default=30, help="没有大纲时，最多给几个角色出角色卡")
@@ -175,6 +177,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     opts: Dict[str, Any] = {
         "params": params, "aspect": args.aspect, "prompt_lang": args.prompt_lang,
+        "fight_enhancement": args.fight_enhancement,
         "visual_style": args.visual_style,
         "max_chars": args.max_chars, "refs_look": args.refs_look or ("写实" if args.visual_style == "live-action" else "动漫"), "refs_gen": args.refs_gen,
         "images_gen": args.images_gen,
