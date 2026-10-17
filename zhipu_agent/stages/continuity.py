@@ -173,12 +173,15 @@ def run(ctx: Context) -> Path:
                         ident = str(character.get("id") or "")
                         if ident and name and name in _aliases(character) and ident not in character_ids:
                             character_ids.append(ident)
-                prop_ids = [
-                    ident for ident, prop in prop_by_id.items()
-                    if any(alias in context_text for alias in
-                           [str(prop.get("name") or ""), *(prop.get("aliases") or [])]
-                           if len(alias) >= 2)
-                ]
+                prop_ids = []
+                for ident, prop in prop_by_id.items():
+                    aliases = [
+                        str(value).strip()
+                        for value in [prop.get("name"), *(prop.get("aliases") or [])]
+                        if value is not None and str(value).strip()
+                    ]
+                    if any(len(alias) >= 2 and alias in context_text for alias in aliases):
+                        prop_ids.append(ident)
                 char_refs = [
                     {"id": ident, "name": char_by_id[ident].get("name"),
                      "reference_image": existing_image(ident, "character")}
