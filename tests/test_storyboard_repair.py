@@ -84,6 +84,21 @@ class StoryboardRepairTest(unittest.TestCase):
         self.assertIn("8.00-second mark", segment["h3Prompt"])
         self.assertIn("[Shot 3] At 00:08.000,", segment["h3Prompt"])
 
+    def test_alignment_rounding_matches_javascript_math_round(self):
+        # JS Math.round(0.25 * 10) / 10 is 0.3; Python round(0.25, 1) is 0.2.
+        segment = {
+            "cuts": [{"seconds": 0.25}, {"seconds": 3.0}],
+            "h3Prompt": (
+                "How the reference pictures align with the target video — stale\\n"
+                "integrated_multimodal_description:\\n"
+                "[Shot 1] first\\n[Shot 2] At 00:00.250, second\\n"
+                "overall_soundscape: sound\\nnon_diegetic_music: N/A"
+            ),
+        }
+        self.assertTrue(sync_segment_timing(segment, "en"))
+        self.assertIn("Picture 2 (from Shot 2) aligns with the 0.30-second mark", segment["h3Prompt"])
+        self.assertIn("[Shot 2] At 00:00.300,", segment["h3Prompt"])
+
     def test_alignment_rebuild_handles_leading_blank_lines(self):
         segment = {
             "cuts": [{"seconds": 3.0}, {"seconds": 4.0}],
