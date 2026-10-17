@@ -174,23 +174,51 @@ class Settings:
 
 def models_file_path() -> Path:
     custom = _get("AGENT_MODELS_FILE")
-    return Path(custom) if custom else REPO_ROOT / "models.json"
+    if custom:
+        return Path(custom)
+    primary = REPO_ROOT / "models.json"
+    alias = REPO_ROOT / "model.json"  # 常见的少写一个 s；models.json 不存在时才认它
+    return alias if (not primary.is_file() and alias.is_file()) else primary
 
 
-def _endpoint_from(entry: Any, where: str, index: int) -> Endpoint:
+def _keys_from(entry: Dict[str, Any], label: str, name: str) -> List[str]:
+    """一项里的所有 Key：api_key（单个）、api_keys（列表）、api_key_env（环境变量名）、
+    api_keys_env（环境变量里逗号分隔的多个 Key）。按这个顺序合并，去掉重复。"""
+    keys: List[str] = []
+    single = str(entry.get("api_key") or "").strip()
+    if single:
+        keys.append(single)
+    many = entry.get("api_keys")
+    if many is not None:
+        if not isinstance(many, list) or not all(isinstance(k, str) for k in many):
+            raise ConfigError(f"{label}（{name}）的 api_keys 必须是字符串列表，例如 [\"Key1\", \"Key2\"]")
+        keys.extend(k.strip() for k in many if k.strip())
+    for field, split in (("api_key_env", False), ("api_keys_env", True)):
+        env_name = str(entry.get(field) or "").strip()
+        if not env_name:
+            continue
+        value = os.environ.get(env_name, "").strip()
+        if not value:
+            raise ConfigError(f"{label}（{name}）的 {field} 指向环境变量 {env_name}，但它没有设置")
+        keys.extend([k.strip() for k in value.split(",") if k.strip()] if split else [value])
+    unique: List[str] = []
+    for k in keys:
+        if k not in unique:
+            unique.append(k)
+    return unique
+
+
+def _endpoints_from(entry: Any, where: str, index: int) -> List[Endpoint]:
+    """一项配置展开成一个或多个 Endpoint：同一个平台、同一个模型，每个 Key 一项（互为备份，也各自限流）。"""
     if not isinstance(entry, dict):
         raise ConfigError(f"{where}[{index}] 应当是一个对象，当前是 {type(entry).__name__}")
     label = f"{where}[{index}]"
     name = str(entry.get("name") or f"{where}-{index + 1}")
     base_url = str(entry.get("base_url") or "").strip()
     model = str(entry.get("model") or "").strip()
-    key = str(entry.get("api_key") or "").strip()
-    key_env = str(entry.get("api_key_env") or "").strip()
-    if not key and key_env:
-        key = os.environ.get(key_env, "").strip()
-        if not key:
-            raise ConfigError(f"{label}（{name}）的 api_key_env 指向环境变量 {key_env}，但它没有设置")
-    problems = [f for f, v in (("base_url", base_url), ("model", model), ("api_key 或 api_key_env", key)) if not v]
+    keys = _keys_from(entry, label, name)
+    problems = [f for f, v in (("base_url", base_url), ("model", model),
+                               ("api_key / api_keys / api_key_env", keys)) if not v]
     if problems:
         raise ConfigError(f"{label}（{name}）缺少：{'、'.join(problems)}")
 
@@ -203,11 +231,14 @@ def _endpoint_from(entry: Any, where: str, index: int) -> Endpoint:
         except (TypeError, ValueError) as exc:
             raise ConfigError(f"{label}（{name}）的 {field} 不合法：{value!r}") from exc
 
-    return Endpoint(
-        name=name, base_url=base_url, api_key=key, model=model,
+    shared = dict(
+        base_url=base_url, model=model,
         temperature=num("temperature", float), max_tokens=num("max_tokens", int),
         timeout=num("timeout", float), stream=num("stream", bool), json_mode=num("json_mode", bool),
     )
+    if len(keys) == 1:
+        return [Endpoint(name=name, api_key=keys[0], **shared)]
+    return [Endpoint(name=f"{name}#{i + 1}", api_key=k, **shared) for i, k in enumerate(keys)]
 
 
 def load_models_file(path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
@@ -236,15 +267,18 @@ def load_models_file(path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
         cooldown = float(raw.get("cooldown", 120))
     except (TypeError, ValueError) as exc:
         raise ConfigError(f"{path} 里的 cooldown 必须是数字（秒）") from exc
-    names = set()
     pools: Dict[str, Tuple[Endpoint, ...]] = {}
     for kind, entries in (("text", text), ("vision", vision)):
-        built = tuple(_endpoint_from(e, kind, i) for i, e in enumerate(entries))
-        for ep in built:
-            if (kind, ep.name) in names:
-                raise ConfigError(f"{path} 里 {kind} 有重名的项：{ep.name}（name 不能重复）")
-            names.add((kind, ep.name))
-        pools[kind] = built
+        seen = set()
+        built: List[Endpoint] = []
+        for i, entry in enumerate(entries):
+            group = _endpoints_from(entry, kind, i)
+            base_name = str(entry.get("name") or f"{kind}-{i + 1}") if isinstance(entry, dict) else ""
+            if base_name in seen:
+                raise ConfigError(f"{path} 里 {kind} 有重名的项：{base_name}（name 不能重复）")
+            seen.add(base_name)
+            built.extend(group)
+        pools[kind] = tuple(built)
     return {"text": pools["text"], "vision": pools["vision"], "strategy": strategy,
             "cooldown": cooldown, "path": str(path)}
 

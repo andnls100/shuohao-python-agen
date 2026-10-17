@@ -162,7 +162,7 @@ cp models.example.json models.json     # Windows: copy models.example.json model
 - `strategy: "failover"` (default): try providers in list order and switch to the next when one fails.
 - `strategy: "round_robin"`: distribute text and vision calls across providers.
 - `text` serves text generation; `vision` is used for scene-image recognition during staging (use `[]` if not needed).
-- Each text/vision entry requires `name`, `base_url`, `model`, and `api_key` or `api_key_env`. Per-entry options include `temperature`, `max_tokens`, `timeout`, `stream` and `json_mode`.
+- Each text/vision entry requires `name`, `base_url`, `model`, and key(s): `api_key` (one), `api_keys` (a list, e.g. `["Key1", "Key2"]`), `api_key_env` (an env var name) or `api_keys_env` (an env var with comma-separated keys), combinable. Several keys in one entry expand into one pool item per key (`name#1`, `name#2`) on the same platform and model: with `failover` the first key is used and the next one on failure, before other providers; with `round_robin` the keys rotate. Duplicates are dropped. `model.json` is also recognised when `models.json` is absent. Per-entry options include `temperature`, `max_tokens`, `timeout`, `stream` and `json_mode`.
 - On errors, the agent retries briefly before moving to a backup provider. `.env` is for runtime options such as concurrency and repair rounds; API keys referenced by `api_key_env` must be set as system environment variables.
 - `python run_agent.py doctor --ping` tests each configured text and vision model.
 

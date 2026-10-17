@@ -284,6 +284,70 @@ def test_models_file_parsing_and_legacy_env():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_models_file_multiple_keys_per_entry():
+    """api_keys 把一项展开成每个 Key 一项：同平台同模型，按顺序互为备份，也能轮流分摊。"""
+    import json
+    import os
+    from zhipu_agent import config
+    from zhipu_agent.config import ConfigError, load_models_file
+    tmp = Path(tempfile.mkdtemp(prefix="agent-test-keys-"))
+    try:
+        os.environ["POOL_MANY"] = "e1, e2 ,k2"
+        f = tmp / "models.json"
+        f.write_text(json.dumps({"strategy": "round_robin", "text": [
+            {"name": "zhipu", "base_url": "http://z/v1", "model": "m", "api_keys": ["k1", "k2", "k1"], "max_tokens": 1000},
+            {"name": "env-many", "base_url": "http://e/v1", "model": "m", "api_keys_env": "POOL_MANY"},
+            {"name": "single", "base_url": "http://s/v1", "model": "m", "api_key": "ks"},
+            {"name": "mixed", "base_url": "http://x/v1", "model": "m", "api_key": "a", "api_keys": ["b"]},
+        ]}), encoding="utf-8")
+        cfg = load_models_file(f)
+        got = [(e.name, e.api_key) for e in cfg["text"]]
+        assert got == [("zhipu#1", "k1"), ("zhipu#2", "k2"),            # 重复的 k1 去掉
+                       ("env-many#1", "e1"), ("env-many#2", "e2"), ("env-many#3", "k2"),
+                       ("single", "ks"), ("mixed#1", "a"), ("mixed#2", "b")], got
+        assert all(e.base_url == "http://z/v1" and e.model == "m" and e.max_tokens == 1000
+                   for e in cfg["text"][:2]), "同一项展开出的 Key 共用地址、模型和参数"
+
+        # 轮流策略：起头依次换，每个 Key 都轮得到
+        llm.reset_pool_state()
+        s = load_settings(api_key="", model="", text_pool=cfg["text"], strategy="round_robin")
+        heads = [llm._order(s, "text")[0].name for _ in range(3)]
+        assert heads == ["zhipu#1", "zhipu#2", "env-many#1"], heads
+        # 顺序策略：第一个 Key 先用，失败后同平台的第二个 Key 排在别的平台前面
+        llm.reset_pool_state()
+        s = load_settings(api_key="", model="", text_pool=cfg["text"], strategy="failover")
+        assert [e.name for e in llm._order(s, "text")][:3] == ["zhipu#1", "zhipu#2", "env-many#1"]
+        llm.reset_pool_state()
+
+        def bad(entry, needle):
+            f.write_text(json.dumps({"text": [entry]}), encoding="utf-8")
+            try:
+                load_models_file(f)
+            except ConfigError as exc:
+                assert needle in str(exc), (needle, str(exc))
+            else:
+                raise AssertionError(f"应当报错：{needle}")
+        base = {"name": "x", "base_url": "http://x", "model": "m"}
+        bad({**base, "api_keys": "k1,k2"}, "api_keys")
+        bad({**base, "api_keys": []}, "api_key")
+        bad({**base, "api_keys_env": "NO_SUCH_ENV_X"}, "NO_SUCH_ENV_X")
+
+        # model.json（少写 s）：models.json 不存在时也认
+        os.environ.pop("AGENT_MODELS_FILE", None)
+        real_root = config.REPO_ROOT
+        config.REPO_ROOT = tmp
+        try:
+            f.rename(tmp / "model.json")
+            assert config.models_file_path() == tmp / "model.json"
+            (tmp / "models.json").write_text("{}", encoding="utf-8")
+            assert config.models_file_path() == tmp / "models.json", "两个都有时以 models.json 为准"
+        finally:
+            config.REPO_ROOT = real_root
+    finally:
+        os.environ.pop("POOL_MANY", None)
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_extract_json_tolerates_fences_and_chatter():
     assert llm.extract_json('好的，结果如下：\n```json\n{"a": [1, 2]}\n```\n以上。') == {"a": [1, 2]}
     assert llm.extract_json('前言 {"a": 1} 后记') == {"a": 1}
@@ -300,6 +364,7 @@ if __name__ == "__main__":
     for test in (test_pool_failover_order_and_cooldown,
                  test_pool_round_robin_spreads_calls_and_vision_uses_vision_pool,
                  test_models_file_parsing_and_legacy_env,
+                 test_models_file_multiple_keys_per_entry,
                  test_extract_json_tolerates_fences_and_chatter,
                  test_image_goes_to_vision_model_as_multimodal_message,
                  test_long_text_uses_volume_summaries,
