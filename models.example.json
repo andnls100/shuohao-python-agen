@@ -119,25 +119,43 @@
     },
     {
       "key": "cogvideox3_zhipu",
-      "name": "智谱-CogVideoX",
-      "adapter": "generic",
-      "enabled": false,
+      "name": "智谱开放平台-CogVideoX-3",
+      "adapter": "cogvideox_zhipu",
+      "enabled": true,
       "active": false,
-      "submit_url": "",
-      "status_url_template": "",
-      "api_key_env": "ZHIPU_VIDEO_API_KEY",
-      "model": "FILL_FROM_ZHIPU_VIDEO_API_DOCS",
+      "submit_url": "https://open.bigmodel.cn/api/paas/v4/videos/generations",
+      "status_url_template": "https://open.bigmodel.cn/api/paas/v4/async-result/{task_id}",
+      "api_key_env": "ZHIPUAI_API_KEY",
+      "model": "cogvideox-3",
       "resolution": "480P",
       "timeout": 120,
       "poll_interval": 5,
-      "max_wait": 1800,
-      "request_template": {
-        "model": "{{model}}",
-        "prompt": "{{prompt}}",
-        "duration": "{{duration_seconds}}",
-        "aspect_ratio": "{{aspect_ratio}}"
-      },
-      "note": "暂未启用：目前未核实智谱开放平台存在可直接调用的 CogVideoX-3 托管视频生成 API。请勿将智谱清言网页产品或开源权重名当作 API 模型名。"
+      "max_wait": 900,
+      "request_template": null,
+      "note": "暂未启用：目前未核实智谱开放平台存在可直接调用的 CogVideoX-3 托管视频生成 API。请勿将智谱清言网页产品或开源权重名当作 API 模型名。",
+      "duration": 5,
+      "size": "1920x1080",
+      "quality": true,
+      "video_url_keys": [
+        "url"
+      ],
+      "task_id_keys": [
+        "id",
+        "task_id",
+        "taskId"
+      ],
+      "status_keys": [
+        "task_status",
+        "status",
+        "state"
+      ],
+      "failed_states": [
+        "failed",
+        "failure",
+        "error",
+        "cancelled",
+        "canceled"
+      ]
     }
   ]
 }
