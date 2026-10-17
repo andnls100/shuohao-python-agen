@@ -249,8 +249,7 @@ class OnlyFilterTest(unittest.TestCase):
         art_report = (self.out / "art" / "art-report.html").read_text(encoding="utf-8")
         self.assertIn("../images/characters/沈知微-C001-portrait.png", character_report)
         self.assertIn("尚未出图", character_report)  # 未生成的角色仍显示占位
-        self.assertIn("images/", art_report)         # 场景图路径相对 art/ 目录
-        self.assertIn("../images/props/", art_report)  # 道具图路径相对 art/ 目录
+        self.assertIn("尚未出图", art_report)  # 未生成的场景/道具仍显示占位
 
         states = self._run(["陆行远"])          # 再出另一张：第一张保持已完成，不重复请求
         self.assertEqual(len(self.requests), 2)
