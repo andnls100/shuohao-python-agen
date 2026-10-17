@@ -189,15 +189,13 @@ def balance_episode_durations(doc: Dict[str, Any], script: Dict[str, Any],
             changed = False
             # Trim the longest action-only cuts first; never touch dialogue-bearing cuts.
             eligible.sort(key=lambda item: float(item[1].get("seconds", 0) or 0), reverse=True)
-            for segment, cut, cut_index, capacity in eligible:
+            for item_index, (segment, cut, cut_index, capacity) in enumerate(eligible):
                 seconds = float(cut.get("seconds", 0) or 0)
                 if capacity <= 0 or seconds <= min_cut_seconds + 0.001:
                     continue
                 cut["seconds"] = round(seconds - 0.1, 1)
                 excess_ticks -= 1
-                eligible[eligible.index((segment, cut, cut_index, capacity))] = (
-                    segment, cut, cut_index, capacity - 1
-                )
+                eligible[item_index] = (segment, cut, cut_index, capacity - 1)
                 fixes.append(f"{segment.get('id', '?')}#{cut_index}: 动作镜头时长 -0.1s")
                 changed = True
                 if excess_ticks <= 0:
