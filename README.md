@@ -152,39 +152,21 @@ git clone -b master https://github.com/andnls100/shuohao-python-agen.git
 cd shuohao-python-agen
 pip install -r requirements.txt        # only the openai package
 node --version                         # Node 18+
-cp .env.example .env                   # Windows: copy .env.example .env
+cp models.example.json models.json     # Windows: copy models.example.json models.json
 ```
 
-Fill at least these in `.env`:
+**Model API configuration uses the `models.json` pool**, not `.env` for model endpoints, model names or API keys. Configure text models in `text`, optional vision models in `vision`, and cloud-video providers in the optional `video` list. Each entry has its own endpoint, model and API key, or uses `api_key_env` to read a key from an environment variable. The real `models.json` is git-ignored.
 
-```
-ZHIPU_API_KEY=your-key
-ZHIPU_MODEL=model-name
-ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4/
-```
+### Multiple models and fallback providers
 
-For an aggregator, set `ZHIPU_BASE_URL` to its OpenAI-compatible endpoint and use its model names. `.env` is git-ignored.
+- `strategy: "failover"` (default): try providers in list order and switch to the next when one fails.
+- `strategy: "round_robin"`: distribute text and vision calls across providers.
+- `text` serves text generation; `vision` is used for scene-image recognition during staging (use `[]` if not needed).
+- Each text/vision entry requires `name`, `base_url`, `model`, and `api_key` or `api_key_env`. Per-entry options include `temperature`, `max_tokens`, `timeout`, `stream` and `json_mode`.
+- On errors, the agent retries briefly before moving to a backup provider. `.env` is for runtime options such as concurrency and repair rounds; API keys referenced by `api_key_env` must be set as system environment variables.
+- `python run_agent.py doctor --ping` tests each configured text and vision model.
 
-### Multiple models and platforms (a pool)
-
-With one platform and one model, `.env` is enough. For several text models, several vision models, each with its own address and key (like an account pool), copy `models.example.json` to `models.json` and fill it in. It is git-ignored; when it exists, the model/address/key variables in `.env` are no longer used (other options such as concurrency still come from `.env`).
-
-```json
-{
-  "strategy": "failover",
-  "cooldown": 120,
-  "text":   [ { "name": "p1", "base_url": "https://…/v1", "api_key": "…", "model": "…" },
-              { "name": "p2", "base_url": "https://…/v1", "api_key_env": "P2_KEY", "model": "…" } ],
-  "vision": [ { "name": "v1", "base_url": "https://…/v1", "api_key": "…", "model": "…" } ]
-}
-```
-
-- `text` serves all text generation; `vision` is used only when staging reads scene images (omit it or use `[]` if you do not need it).
-- Each entry has its own `base_url`, `api_key` (or `api_key_env` to read it from an environment variable) and `model`; optional `temperature`, `max_tokens`, `timeout`, `stream`, `json_mode` apply to that entry only. `name` must be unique within a list.
-- `failover` (default): use entries in order, the next one only when the previous fails. `round_robin`: each call starts from the next entry, spreading concurrent calls across platforms.
-- When a platform fails, the agent retries briefly, then moves to the next one; the failed platform goes to the back of the line for `cooldown` seconds (five times as long for 401/402/403). If every platform fails, the error lists each one's reason.
-- Without a file, a vision model on a different platform can be set with `ZHIPU_VISION_BASE_URL` and `ZHIPU_VISION_API_KEY` in `.env`; unset, it shares the text model's platform.
-- `python run_agent.py doctor --ping` calls every entry once and shows which work.
+See [video generation setup](docs/video-generation.md) for video-provider pool configuration, failover and task-resume behavior.
 
 ### Run
 
