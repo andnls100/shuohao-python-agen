@@ -53,7 +53,7 @@ def _build_parser() -> argparse.ArgumentParser:
             s.add_argument("--force", action="store_true", help="忽略已有产物和缓存，全部重做")
             s.add_argument("--yes", action="store_true", help="不暂停：骨架拍板点自动确认")
             s.add_argument("--concurrency", type=int, help="同时进行的模型调用数（默认 3）")
-            s.add_argument("--fix-rounds", type=int, help="校验不过时最多回炉几轮（默认 3）")
+            s.add_argument("--fix-rounds", type=int, help="校验不过时最多回炉几轮（默认 1）")
     return p
 
 
