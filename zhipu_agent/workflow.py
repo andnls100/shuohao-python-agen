@@ -13,13 +13,13 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .config import Settings
 from .skill_loader import load_pack
-from .stages import art, characters, images, outline, refs, script, staging, storyboard, video
+from .stages import art, audio, characters, images, outline, refs, script, staging, storyboard, video
 from .stages.base import (
     Context, guess_title, read_text_auto, safe_name,
 )
 from .validator import check_node
 
-STAGES = ["outline", "characters", "art", "images", "script", "staging", "storyboard", "refs", "video"]
+STAGES = ["outline", "characters", "art", "images", "script", "audio", "staging", "storyboard", "refs", "video"]
 # 生图、角色参考图和视频调用都可能产生额外费用，默认流水线不自动触发。
 DEFAULT_STAGES = [name for name in STAGES if name not in ("images", "refs", "video")]
 MODULES = {
@@ -27,7 +27,7 @@ MODULES = {
     "staging": staging, "storyboard": storyboard, "refs": refs, "video": video,
 }
 # 这些阶段内部按集续跑，指定了 --eps 时不能整体跳过
-PARTIAL_OK = ("script", "staging", "storyboard", "video")
+PARTIAL_OK = ("script", "audio", "staging", "storyboard", "video")
 REQUIRES = {
     "characters": [],            # 没有大纲也能跑
     "art": ["outline"],
