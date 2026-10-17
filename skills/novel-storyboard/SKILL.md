@@ -39,6 +39,8 @@ metadata:
 
 ## novel-storyboard
 
+打戏增强是可选模式，由 Python Agent 的 `--fight-enhancement off|auto|enhanced` 控制；默认 `auto`。详细规则见 `{baseDir}/references/fight-enhancement.md`。`off` 完全沿用普通分镜；`auto` 只强化剧情重要的打戏；`enhanced` 强化所有真实打戏。不要为非打戏场景添加战斗，增强动作仍须通过原有分镜质量门。
+
 给 AI 短剧出**分镜**——管线里第一个直接面对视频模型的层。**前提刻在骨子里：镜头是生成出来的，多切一镜的成本几乎为零**，所以这里不心疼镜头数量，上限只有一个：视频模型单段生成的时长（默认 15 秒）。
 
 **核心机制：镜头认领节拍。** 每个镜头声明它覆盖剧本某场的哪几个连续节拍（`sceneIndex` + `beats: [起, 止]`），镜头不许跨场次——换景必换镜。这让分镜和剧本的关系变成可机械对账的：
