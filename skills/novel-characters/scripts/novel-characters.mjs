@@ -1823,9 +1823,30 @@ function main(argv) {
     // src 写成相对那里的路径，整个目录一起挪也不断。图不存在就渲染成占位。
     const outDir = resolve(castPath, '..');
     const imagesDir = imagesFlag ? resolve(imagesFlag) : join(outDir, 'images');
+    const manifestPath = join(outDir, '..', 'images', 'image-manifest.json');
+    let imageItems = [];
+    if (existsSync(manifestPath)) {
+      try {
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+        imageItems = Array.isArray(manifest.items) ? manifest.items : [];
+      } catch { /* malformed manifest: retain legacy image lookup */ }
+    }
+    const imageExtensions = ['.png', '.jpg', '.jpeg', '.webp'];
     for (const c of characters) {
-      const abs = join(imagesDir, `${slug(c.name)}-sheet.png`);
-      if (existsSync(abs)) c.sheetImage = relative(outDir, abs).split(sep).join('/');
+      const id = String(c.id ?? '');
+      const generated = imageItems.find((item) =>
+        item.kind === 'character' &&
+        item.state === 'succeeded' &&
+        (String(item.asset_id ?? '') === id || String(item.name ?? '') === String(c.name ?? '')) &&
+        typeof item.output_path === 'string' &&
+        existsSync(resolve(outDir, '..', item.output_path))
+      );
+      let abs = generated ? resolve(outDir, '..', generated.output_path) : null;
+      if (!abs) {
+        abs = imageExtensions.map((ext) => join(imagesDir, `${slug(c.name)}-sheet${ext}`)
+          .find((candidate) => existsSync(candidate));
+      }
+      if (abs && existsSync(abs)) c.sheetImage = relative(outDir, abs).split(sep).join('/');
     }
 
     process.stdout.write(
