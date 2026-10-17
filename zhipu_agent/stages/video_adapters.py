@@ -9,22 +9,20 @@ from typing import Any
 
 
 def _render(value: Any, context: dict) -> Any:
-    """Recursively interpolate placeholders; exact placeholders preserve their type."""
+    """Recursively interpolate {{field}} placeholders; exact placeholders preserve type."""
     if isinstance(value, dict):
         return {key: _render(item, context) for key, item in value.items()}
     if isinstance(value, list):
         return [_render(item, context) for item in value]
     if not isinstance(value, str):
         return value
-    if value.startswith("\${") and value.endswith("}") and value.count("\${") == 1:
+    if value.startswith("{{") and value.endswith("}}") and value.count("{{") == 1:
         key = value[2:-2]
         if key in context:
             return context[key]
     for key, replacement in context.items():
-        value = value.replace("\${" + key + "}", str(replacement))
+        value = value.replace("{{" + key + "}}", str(replacement))
     return value
-
-
 def build_request(provider: dict, item: dict, manifest: dict) -> dict:
     """Build the request body for the selected provider adapter."""
     adapter = str(provider.get("adapter") or "generic").lower()
