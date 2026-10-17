@@ -185,6 +185,7 @@ def _config(model_key: Optional[str] = None) -> list:
             "max_wait": max(10, int(entry.get("max_wait", 900))),
             "resolution": str(entry.get("resolution") or "480P"), "ratio": str(entry.get("ratio") or ""),
             "prompt_extend": entry.get("prompt_extend", True), "request_template": entry.get("request_template"),
+            "size": str(entry.get("size") or ""), "quality": entry.get("quality", True),
             "headers": entry.get("headers", {}),
             "video_url_keys": entry.get("video_url_keys", ["video_url", "videoUrl", "output_url", "download_url"]),
             "task_id_keys": entry.get("task_id_keys", ["task_id", "taskId", "job_id", "jobId", "id"]),
