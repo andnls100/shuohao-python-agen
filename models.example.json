@@ -54,14 +54,17 @@
   },
   "audio": [
     {
-      "name": "TTS 主用",
-      "speech_url": "https://你的TTS平台/v1/audio/speech",
-      "api_key_env": "AUDIO_PRIMARY_API_KEY",
-      "model": "支持语音合成的模型名",
-      "voice": "alloy",
-      "voice_map": {"C01": "voice_id_1", "C02": "voice_id_2"},
+      "name": "百炼-CosyVoice",
+      "provider": "cosyvoice_tts",
+      "speech_url": "https://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer",
+      "voice_design_url": "https://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/customization",
+      "api_key_env": "DASHSCOPE_API_KEY",
+      "model": "cosyvoice-v3.5-flash",
       "response_format": "mp3",
-      "instructions_field": "instructions",
+      "sample_rate": 24000,
+      "voice_language_hints": ["zh"],
+      "language_hints": ["zh"],
+      "voice_preview_text": "你好，我是这个故事中的角色，很高兴认识你。",
       "timeout": 120
     }
   ],
