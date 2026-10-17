@@ -56,6 +56,45 @@ def _blocking_lines(ctx: Context) -> List[str]:
     return [ln.strip() for ln in result.stdout.splitlines() if ln.strip()] if result.ok else []
 
 
+
+def _episode_cache_candidates(work: Path, ep: int) -> List[Path]:
+    """Support both the current ep-001.json name and legacy ep001.json caches."""
+    return [work / f"ep{ep:03d}.json", work / f"ep-{ep:03d}.json"]
+
+
+def _normalize_episode_segment_ids(episode: Dict[str, Any], ep: int) -> bool:
+    """Force segment IDs to match the authoritative episode number and list order."""
+    changed = False
+    segments = episode.get("segments", [])
+    if not isinstance(segments, list):
+        return False
+    for index, segment in enumerate(segments, start=1):
+        if not isinstance(segment, dict):
+            continue
+        expected = f"E{ep:02d}-{index:02d}"
+        if segment.get("id") != expected:
+            segment["id"] = expected
+            changed = True
+    episode["ep"] = ep
+    return changed
+
+
+def _read_cached_episode(cache: Path, ep: int) -> Optional[Dict[str, Any]]:
+    """Return a reusable episode cache, or None if it is incomplete/invalid."""
+    try:
+        data = read_json(cache)
+    except (OSError, ValueError, TypeError):
+        return None
+    if isinstance(data, dict) and isinstance(data.get("episode"), dict):
+        data = data["episode"]
+    if isinstance(data, list) and len(data) == 1:
+        data = data[0]
+    if not isinstance(data, dict) or not isinstance(data.get("segments"), list) or not data["segments"]:
+        return None
+    episode = {k: v for k, v in data.items() if k != "seedScenes"}
+    _normalize_episode_segment_ids(episode, ep)
+    return episode
+
 def run(
     ctx: Context,
     eps: Optional[List[int]] = None,
@@ -96,7 +135,48 @@ def run(
     if path.is_file() and not ctx.force:
         main = read_json(path)
         main.setdefault("promptLang", prompt_lang)
-    done = {e["ep"] for e in main["episodes"] if e.get("segments")}
+    # Existing merged output can also contain stale IDs from older runs. Repair them
+    # before deciding which episodes are complete, and persist the deterministic fix.
+    normalized_existing = False
+    for episode in main.get("episodes", []):
+        if isinstance(episode, dict) and isinstance(episode.get("ep"), int):
+            normalized_existing = _normalize_episode_segment_ids(episode, episode["ep"]) or normalized_existing
+    if normalized_existing:
+        write_json(path, main)
+        ctx.log("[storyboard] 已校正已有分镜的集号/分镜 ID")
+    # Recover completed episode caches before deciding what still needs generation.
+    # This prevents restarting the seed/model calls when only work/epNNN.json survived.
+    if not ctx.force:
+        merged_episodes = {
+            e["ep"]: e for e in main.get("episodes", [])
+            if isinstance(e, dict) and e.get("segments") and "ep" in e
+        }
+        recovered = False
+        for ep in wanted:
+            if ep in merged_episodes:
+                continue
+            for cache in _episode_cache_candidates(work, ep):
+                if not cache.is_file():
+                    continue
+                episode = _read_cached_episode(cache, ep)
+                if episode is None:
+                    ctx.log(f"[storyboard] 缓存 {cache.name} 不完整或无效，检查其他缓存")
+                    try:
+                        cache.unlink()
+                    except OSError:
+                        pass
+                    continue
+                merged_episodes[ep] = episode
+                recovered = True
+                ctx.log(f"[storyboard] 恢复缓存 {cache.name}，跳过第 {ep} 集生成")
+                break
+        if recovered:
+            main["episodes"] = [merged_episodes[k] for k in sorted(merged_episodes)]
+            main["aspectRatio"] = aspect
+            main["promptLang"] = prompt_lang
+            write_json(path, main)
+
+    done = {e["ep"] for e in main.get("episodes", []) if e.get("segments")}
     todo = [e for e in wanted if e not in done]
     if not todo:
         ctx.log("所有集都已切好，跳过切镜")
@@ -149,7 +229,9 @@ def run(
                 + "## 输出\n只输出这一集的 JSON 对象：{\"ep\": N, \"segments\": [...]}，不要 seedScenes。"
                   "改秒数必须同步改 h3Prompt（对齐指令和 [Shot k]/[镜头 k] 切点时刻由分镜秒数推导，逐字对账；标记语言必须与 promptLang 一致）。"
             )
-            items.append(Item(str(ep), system, prompt, tokens=ep_tokens(ep), cache=work / f"ep-{ep:03d}.json"))
+            existing_cache = next((p for p in _episode_cache_candidates(work, ep) if p.is_file()), None)
+            cache_path = existing_cache or (work / f"ep{ep:03d}.json")
+            items.append(Item(str(ep), system, prompt, tokens=ep_tokens(ep), cache=cache_path))
 
         def apply(key: str, data: Any, _doc=batch_doc, _path=batch_path) -> None:
             if isinstance(data, dict) and isinstance(data.get("episode"), dict):
