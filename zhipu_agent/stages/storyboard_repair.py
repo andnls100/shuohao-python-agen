@@ -90,6 +90,10 @@ def repair_minor_cut_durations(doc: Dict[str, Any], lang: str = "en",
                                max_overrun: float = 0.2) -> List[str]:
     """Snap tiny upper-bound overruns (e.g. 5.1s) to 5.0s, then resync H3 timing."""
     repaired: List[str] = []
+    try:
+        upper = float((doc.get("params") or {}).get("maxCutSeconds", 5))
+    except (TypeError, ValueError):
+        upper = 5.0
     for segment in _segments(doc):
         cuts = segment.get("cuts")
         if not isinstance(cuts, list):
@@ -100,9 +104,9 @@ def repair_minor_cut_durations(doc: Dict[str, Any], lang: str = "en",
                 seconds = float(cut.get("seconds"))
             except (TypeError, ValueError, AttributeError):
                 continue
-            if 5.0 < seconds <= 5.0 + max_overrun:
-                cut["seconds"] = 5.0
-                repaired.append(f"{segment.get('id', '?')}#{index}: {seconds:.1f}s -> 5.0s")
+            if upper < seconds <= upper + max_overrun:
+                cut["seconds"] = upper
+                repaired.append(f"{segment.get('id', '?')}#{index}: {seconds:.1f}s -> {upper:.1f}s")
                 changed = True
         if changed:
             sync_segment_timing(segment, lang)
