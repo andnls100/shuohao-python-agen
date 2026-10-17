@@ -187,8 +187,6 @@ def run(
         raise FileNotFoundError(f"需要先有剧本：{script_path}（先运行 script 阶段）")
     script = read_json(script_path)
     wanted = eps or [e["ep"] for e in script["episodes"]]
-    if fight_enhancement not in {"off", "auto", "enhanced"}:
-        raise ValueError("fight_enhancement 只能是 off、auto 或 enhanced")
     ctx.log(f"[storyboard] 打戏增强模式：{fight_enhancement}" + ("（已有分镜需 --force 才会按新模式重做）" if artifact(ctx).is_file() and not ctx.force else ""))
     path = artifact(ctx)
 
