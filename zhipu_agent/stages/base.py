@@ -39,6 +39,7 @@ STAGE_FILES = {
     "script": ("script", "{t}-script.json"),
     "staging": ("staging", "staging.json"),
     "storyboard": ("storyboard", "{t}-storyboard.json"),
+    "continuity": ("continuity", "continuity-manifest.json"),
 }
 
 
