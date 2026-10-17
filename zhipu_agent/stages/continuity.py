@@ -167,7 +167,8 @@ def run(ctx: Context) -> Path:
                 context_text = shot_text + " " + str(segment.get("blocking") or "")
                 character_ids = _mentioned_characters(context_text, characters)
                 # Staging provides explicit presence data; use it to fill omissions in shot text.
-                for place in staging_scene.get("places", []) if isinstance(staging_scene, dict) else []:
+                staging_places = staging_scene.get("places", []) if isinstance(staging_scene, dict) else []
+                for place in staging_places:
                     name = str(place.get("name") or place.get("character") or "") if isinstance(place, dict) else ""
                     for character in characters:
                         ident = str(character.get("id") or "")
