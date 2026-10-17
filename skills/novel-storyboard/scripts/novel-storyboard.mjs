@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
  * AI 短剧的前提刻在骨子里，三层结构也由此而来：
  *
  *   段（segment）＝ 一次视频生成调用，上限就是模型单段时长（默认 15 秒）
- *   分镜（cut）  ＝ 段内的一次剪切，2–5 秒——短剧观众的注意力节奏
+ *   分镜（cut）  ＝ 段内的一次剪切，2–10 秒——短剧观众的注意力节奏
  *   分镜图       ＝ 每个分镜一张关键帧：第 1 个分镜的是主分镜图（钉在
  *                  0.00 秒），其余是子分镜图（各钉在自己的切点时刻）
  *
@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 export const DEFAULT_PARAMS = {
   maxSegmentSeconds: 15, // 视频模型单段生成上限（秒）
   minCutSeconds: 2,      // 单个分镜下限
-  maxCutSeconds: 5,      // 单个分镜上限——3 秒左右是短剧的呼吸
+  maxCutSeconds: 10,      // 单个分镜上限——3 秒左右是短剧的呼吸
   maxOnScreen: 3,        // 单个分镜同框人数上限，超了必须带拆解说明
   tolerance: 0.15,       // 每集总时长对剧本目标的容差
 };
