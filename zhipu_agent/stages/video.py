@@ -75,7 +75,7 @@ def _shot_prompt(segment: dict, cut: dict, shot_index: int, visual_style: str) -
     return "\n\n".join(parts)
 
 
-def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str) -> dict:
+def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str, shots: Optional[list] = None) -> dict:
     source = ctx.artifact("storyboard")
     if not source.is_file():
         raise FileNotFoundError(f"找不到分镜文件：{source}；请先运行 storyboard 阶段")
@@ -115,6 +115,12 @@ def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str
                     "state": "planned", "task_id": None, "video_url": None,
                     "video_path": None, "error": None
                 })
+    if shots:
+        requested = {str(value).strip() for value in shots if str(value).strip()}
+        items = [item for item in items if item["id"] in requested]
+        missing = requested - {item["id"] for item in items}
+        if missing:
+            raise ValueError("找不到指定镜头 ID：" + "、".join(sorted(missing)) + "；请查看 output/video/video-manifest.json 中的 items[].id")
     if not items:
         raise ValueError("所选集没有可生成的视频镜头/分段；检查分镜产物或 --eps 参数")
     return {"version": 2, "source": ctx.title, "protocol": protocol, "visual_style": visual_style,
@@ -316,11 +322,11 @@ def check(ctx: Context) -> Result:
 
 
 def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: bool = False,
-        visual_style: str = "manju") -> Path:
+        visual_style: str = "manju", shots: Optional[list] = None) -> Path:
     root = ctx.out / "video"
     root.mkdir(parents=True, exist_ok=True)
     path = artifact(ctx)
-    manifest = _collect(ctx, eps, protocol, visual_style)
+    manifest = _collect(ctx, eps, protocol, visual_style, shots)
     previous = {}
     if path.is_file() and not ctx.force:
         try:
@@ -329,11 +335,15 @@ def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: 
                 previous = {str(x.get("id")): x for x in old.get("items", [])}
         except (OSError, ValueError):
             pass
-    if eps and previous:
-        selected_eps = set(eps)
+    if previous and (eps or shots):
+        selected_eps = set(eps or [])
         selected_ids = {item["id"] for item in manifest["items"]}
-        extras = [dict(item) for item in previous.values()
-                  if int(item.get("ep", 0)) not in selected_eps and str(item.get("id")) not in selected_ids]
+        if shots:
+            # 只处理指定镜头时，把清单中未选中的已有镜头保留下来。
+            extras = [dict(item) for item in previous.values() if str(item.get("id")) not in selected_ids]
+        else:
+            extras = [dict(item) for item in previous.values()
+                      if int(item.get("ep", 0)) not in selected_eps and str(item.get("id")) not in selected_ids]
         manifest["items"] = extras + manifest["items"]
         manifest["items"].sort(key=lambda item: (int(item.get("ep", 0)), str(item.get("id", ""))))
     for item in manifest["items"]:
