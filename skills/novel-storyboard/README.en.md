@@ -32,7 +32,7 @@ Same stance as the other four skills in this repo: **a checklist the model grade
 | Segment duration | 0 < Σcuts ≤ 15s (the single-generation cap; tune `params.maxSegmentSeconds`) |
 | **Cut duration** | every cut 2–5s — the ~3s rhythm is a **hard gate**, not advice |
 | Dialogue fits | dialogue seconds of claimed beats ≤ cut seconds, per cut |
-| Episode total | Σ segments within ±15% of the script's `targetSeconds` |
+| Episode total | Σ segments within ±100% of the script's `targetSeconds` by default (`params.tolerance` can override) |
 | On-screen cap | ≤ 3 characters per cut, more requires a breakdown note |
 | Segment ID discipline | `E01-01` format, sequential — the segment ID is the asset filename |
 | Size word | the Chinese shot-size word (e.g. 特写) must appear in the cut's frame prompt |
