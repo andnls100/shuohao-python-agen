@@ -492,8 +492,9 @@ def run(
                 return result
 
             repaired = 0
-            max_local_repairs = 24
-            for (segment_id, cut_index), errors in list(targets.items())[:max_local_repairs]:
+            # Do not silently leave later cuts untouched when a batch has many violations.
+            # Every target is a cut-scoped call; no episode-wide regeneration is performed.
+            for (segment_id, cut_index), errors in targets.items():
                 episode = next((e for e in _doc.get("episodes", [])
                                 if any(s.get("id") == segment_id for s in e.get("segments", []))), None)
                 segment = next((s for s in (episode or {}).get("segments", [])
@@ -548,8 +549,6 @@ def run(
                     ctx.log(f"[storyboard] 已局部修复 {segment_id}#{cut_index}")
                     write_json(_p, _doc)
 
-            if len(targets) > max_local_repairs:
-                ctx.log(f"[storyboard] 还有 {len(targets) - max_local_repairs} 个分镜未自动修复；单批局部修复上限为 {max_local_repairs}")
             if repaired:
                 result = ctx.run(sk, ["validate", _p, *_refs(ctx)], cwd=sb_dir)
             return result
