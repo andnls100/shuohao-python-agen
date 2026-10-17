@@ -84,6 +84,15 @@ class StoryboardRepairTest(unittest.TestCase):
         self.assertIn("8.00-second mark", segment["h3Prompt"])
         self.assertIn("[Shot 3] At 00:08.000,", segment["h3Prompt"])
 
+    def test_alignment_rebuild_handles_leading_blank_lines(self):
+        segment = {
+            "cuts": [{"seconds": 3.0}, {"seconds": 4.0}],
+            "h3Prompt": "\\n\\n旧对齐行\\n整体视听描述：\\n[镜头 1] 第一镜\\n[镜头 2] 于 00:03.000，第二镜\\n整体音景：声音",
+        }
+        self.assertTrue(sync_segment_timing(segment, "zh"))
+        self.assertTrue(segment["h3Prompt"].startswith("参考图与目标视频的对齐——"))
+        self.assertFalse(segment["h3Prompt"].startswith("\\n"))
+
     def test_zh_alignment_is_rebuilt(self):
         segment = {
             "cuts": [{"seconds": 3.0}, {"seconds": 5.1}],
