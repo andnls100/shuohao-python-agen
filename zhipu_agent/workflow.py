@@ -121,7 +121,7 @@ def run_stage(ctx: Context, name: str, opts: Dict[str, Any]) -> Optional[Path]:
                 f"请把 {need} 加进 --stages，或先单独运行它。"
             )
 
-    if name != "refs" and not ctx.force and module.artifact(ctx).is_file() \
+    if name not in ("refs", "continuity") and not ctx.force and module.artifact(ctx).is_file() \
             and not (eps and name in PARTIAL_OK):
         result = module.check(ctx)
         if result.ok:
