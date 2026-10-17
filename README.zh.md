@@ -375,3 +375,15 @@ for f in skills/*/scripts/selftest.mjs; do node "$f"; done
 ## License
 
 [Apache 2.0](LICENSE)
+
+
+## 视频生成阶段（可选）
+
+在分镜之后运行视频阶段，先检查提示词，不会自动产生视频 API 费用：
+
+```bash
+python run_agent.py run --stages video --eps 1
+python run_agent.py run --stages video --eps 1 --video-protocol seedance
+```
+
+确认供应商 API 的价格、请求格式和模型可用后，在 `.env` 配置 `VIDEO_API_SUBMIT_URL`、`VIDEO_API_KEY`、`VIDEO_API_MODEL`（异步接口还需要 `VIDEO_API_STATUS_URL_TEMPLATE`），并显式添加 `--video-submit` 才会提交任务。详见 [视频生成阶段文档](docs/video-generation.md)。通用适配器并不意味着所有视频平台都兼容相同的 API 格式。
