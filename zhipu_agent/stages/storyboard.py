@@ -174,7 +174,10 @@ def run(
     aspect: str = "16:9",
     prompt_lang: str = "en",
     visual_style: str = "manju",
+    fight_enhancement: str = "auto",
 ) -> Path:
+    if fight_enhancement not in {"off", "auto", "enhanced"}:
+        raise ValueError("fight_enhancement 只能是 off、auto 或 enhanced")
     style_hint = visual_style_instruction(visual_style)
     sk = ctx.skill(SKILL)
     work = ctx.work("storyboard")
@@ -184,6 +187,9 @@ def run(
         raise FileNotFoundError(f"需要先有剧本：{script_path}（先运行 script 阶段）")
     script = read_json(script_path)
     wanted = eps or [e["ep"] for e in script["episodes"]]
+    if fight_enhancement not in {"off", "auto", "enhanced"}:
+        raise ValueError("fight_enhancement 只能是 off、auto 或 enhanced")
+    ctx.log(f"[storyboard] 打戏增强模式：{fight_enhancement}" + ("（已有分镜需 --force 才会按新模式重做）" if artifact(ctx).is_file() and not ctx.force else ""))
     path = artifact(ctx)
 
     art_scenes: Dict[str, Any] = {}
@@ -287,6 +293,30 @@ def run(
             prop_cards = [compact(outline_props[p], 160) for p in sorted(prop_ids) if p in outline_props]
             first_blocking = [ln for ln in blocking
                               if any(t in ln for t in (f"第 {ep} 集", f"第{ep}集", f"E{ep:02d}"))]
+            fight_instruction = ""
+            if fight_enhancement != "off":
+                fight_instruction = (
+                    "\n\n## 打戏增强规则\n"
+                    "先判断各场是否存在真实的肢体或兵器交锋；不要仅凭“冲突、争吵”等词判断为打戏。"
+                    "打戏按动作因果规划：发起动作 → 对手可见的防守/闪避/反制 → 接触或落空结果 → 双方位置与重心变化 → 下一动作承接。"
+                    "不要只写“双方激烈打斗”；每个动作必须说明谁对谁做什么、方向/距离如何、对手如何回应、结果是什么，并确保动作能在对应镜头秒数内完成。"
+                    "保持剧本已确定的胜负、伤势、武器、人物能力和剧情结果，不得擅自新增致命攻击、伤害或剧情转折。"
+                    "对被增强的打戏 segment 增加可选字段 fightPlan，结构为："
+                    "{\"importance\":\"high\"或\"medium\",\"actions\":["
+                    "{\"actionId\":\"A001\",\"attacker\":\"角色ID或剧本身份\",\"defender\":\"角色ID或剧本身份\","
+                    "\"attack\":\"具体动作\",\"response\":\"防守/闪避/反击\",\"result\":\"动作结果\","
+                    "\"positionsBefore\":\"动作前双方相对位置\",\"positionsAfter\":\"动作后双方相对位置\","
+                    "\"seconds\":2.0,\"cutIndexes\":[1]}]}。"
+                    "cutIndexes 从 1 开始，对应该 segment.cuts 的序号；动作计划覆盖关键攻防节拍，且时间安排与对应镜头相容。"
+                    "必须把动作计划落实到 cut.frame、cut.shot、cut.sfx、segment.blocking 和 h3Prompt，不能只写 fightPlan 而不改变镜头内容。"
+                    "每镜明确动作衔接、双方空间位置、攻防反应和动势承接；仍遵守现有时长、台词、画幅、角色名和 H3 协议校验。\n"
+                    + (
+                        "模式=auto：判断打戏对剧情的作用。只有 high 重要程度（决定胜负、揭示主角实力、改变剧情走向或构成高潮）的打戏才写 fightPlan 并强化；普通推搡、短暂冲突、重点在对白/情绪的挥拳不强化，沿用普通分镜。"
+                        if fight_enhancement == "auto" else
+                        "模式=enhanced：所有真实打戏都写 fightPlan 并强化；非打戏场景完全沿用普通分镜，不得强行增加打斗。"
+                    )
+                    + "\n"
+                )
             prompt = (
                 f"## 任务\n给第 {ep} 集切分镜：先按剧情单元分段（每段 9–15 秒、不跨场），段内切 2–10 秒的分镜。\n\n"
                 + f"## 画幅与语言\naspectRatio = {aspect}；promptLang = {prompt_lang}（h3Prompt 正文、对齐行、镜头标记、声景和配乐字段都必须使用该语言；台词在 <d> 里保留原文）。\n\n"
@@ -302,6 +332,7 @@ def run(
                 + "## 输出\n只输出这一集的 JSON 对象：{\"ep\": N, \"segments\": [...]}，不要 seedScenes。"
                   "改秒数必须同步改 h3Prompt（对齐指令和 [Shot k]/[镜头 k] 切点时刻由分镜秒数推导，逐字对账；标记语言必须与 promptLang 一致）。"
             )
+            prompt += fight_instruction
             existing_cache = next((p for p in _episode_cache_candidates(work, ep) if p.is_file()), None)
             cache_path = existing_cache or (work / f"ep{ep:03d}.json")
             items.append(Item(str(ep), system, prompt, tokens=ep_tokens(ep), cache=cache_path))
