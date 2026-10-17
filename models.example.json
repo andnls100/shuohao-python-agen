@@ -135,7 +135,9 @@
       "note": "智谱开放平台 CogVideoX-3 官方 API 配置。调用前需设置 ZHIPUAI_API_KEY；每次生成时长按官方支持值取 5 或 10 秒。",
       "duration": 5,
       "size": "1920x1080",
-      "quality": true,
+      "quality": "quality",
+      "with_audio": true,
+      "fps": 30,
       "video_url_keys": [
         "url"
       ],
