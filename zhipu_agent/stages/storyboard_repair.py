@@ -197,7 +197,7 @@ def repair_deterministic_storyboard(doc: Dict[str, Any], lang: str = "en") -> Li
 
 
 def balance_episode_durations(doc: Dict[str, Any], script: Dict[str, Any],
-                              tolerance: float = 0.15, min_cut_seconds: float = 2.0) -> List[str]:
+                              tolerance: float = 1.0, min_cut_seconds: float = 2.0) -> List[str]:
     """Trim only action-only cuts, in 0.1s steps, when an episode exceeds its target window."""
     params = doc.get("params") or {}
     try:
