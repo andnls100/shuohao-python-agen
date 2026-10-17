@@ -58,7 +58,8 @@ def _repair_existing_h3(ctx: Context, doc: Dict[str, Any], path: Path,
     fixes = repair_deterministic_storyboard(doc, prompt_lang)
     fixes += repair_minor_cut_durations(doc, prompt_lang)
     fixes += repair_dialogue_fit(doc, read_json(ctx.artifact("script")), prompt_lang)
-    fixes += balance_episode_durations(doc, read_json(ctx.artifact("script")))
+    # Do not rebalance episode totals here: existing artifacts may still carry an old
+    # explicit tolerance override, and this pass is for fixing prompts, not trimming cuts.
     if fixes:
         for fix in fixes:
             ctx.log(f"[storyboard] 已有分镜自动修正：{fix}")
