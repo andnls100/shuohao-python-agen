@@ -19,13 +19,14 @@ def _segments(doc: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
 
 
 def _starts(cuts: List[Dict[str, Any]]) -> List[float]:
+    """Match the validator's JavaScript Math.round(n * 10) / 10 exactly."""
     starts: List[float] = []
     total = 0.0
     for cut in cuts:
-        starts.append(round(total, 1))
+        starts.append(_r1(total))
         try:
             total += float(cut.get("seconds", 0))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, AttributeError):
             pass
     return starts
 
