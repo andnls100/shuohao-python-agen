@@ -364,7 +364,13 @@ def check(ctx: Context) -> Result:
     return Result(0, f"{len(items)} 张图片已生成")
 
 
-def run(ctx: Context, generate: bool = False) -> Path:
+def _matches(item: dict, wanted: List[str]) -> bool:
+    """--images-only 的名字能对上这张图：任务名（徐今朝）、编号（C03）或完整 id（character:C03）。"""
+    keys = {str(item.get("name", "")), str(item.get("asset_id", "")), str(item.get("id", ""))}
+    return any(w in keys for w in wanted)
+
+
+def run(ctx: Context, generate: bool = False, only: Optional[List[str]] = None) -> Path:
     path = artifact(ctx)
     path.parent.mkdir(parents=True, exist_ok=True)
     tasks = _collect_tasks(ctx)
@@ -375,8 +381,15 @@ def run(ctx: Context, generate: bool = False) -> Path:
         except (OSError, ValueError, KeyError):
             previous = {}
 
+    if only:
+        unknown = [w for w in only if not any(_matches(t, [w]) for t in tasks)]
+        if unknown:
+            known = "、".join(f"{t['name']}（{t['asset_id']}）" for t in tasks)
+            raise ValueError(f"--images-only 里的 {'、'.join(unknown)} 找不到对应的图。可选：{known}")
+
     items = []
     for task in tasks:
+        picked = not only or _matches(task, only)
         digest = hashlib.sha256(task["prompt"].encode("utf-8")).hexdigest()
         old = previous.get(task["id"], {})
         output_path = old.get("output_path")
@@ -387,7 +400,8 @@ def run(ctx: Context, generate: bool = False) -> Path:
             and (ctx.out / output_path).is_file()
         )
         output_base = task.pop("output_base")
-        if old_ok and not (ctx.force and generate):
+        # --images-only 时，--force 只重置被选中的图，其余已完成的不动
+        if old_ok and not (ctx.force and generate and picked):
             task.update(old)
         else:
             task.update({
@@ -415,6 +429,8 @@ def run(ctx: Context, generate: bool = False) -> Path:
 
     providers = _image_providers()
     for item in items:
+        if only and not _matches(item, only):
+            continue
         target = ctx.out / str(item.get("output_path", ""))
         if (item.get("state") == "succeeded" and target.is_file() and not ctx.force):
             ctx.log(f"跳过已完成：{item['name']} → {item['output_path']}")

@@ -140,7 +140,7 @@ def run_stage(ctx: Context, name: str, opts: Dict[str, Any]) -> Optional[Path]:
         return module.run(ctx, eps=eps, aspect=opts.get("aspect", "16:9"),
                           prompt_lang=opts.get("prompt_lang", "en"))
     if name == "images":
-        return module.run(ctx, generate=opts.get("images_gen", False))
+        return module.run(ctx, generate=opts.get("images_gen", False), only=opts.get("images_only"))
     if name == "refs":
         return module.run(ctx, names=opts.get("refs_names"), look=opts.get("refs_look", "动漫"),
                           gen=opts.get("refs_gen", False))

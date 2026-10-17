@@ -286,6 +286,15 @@ python run_agent.py run --stages script --force
 | `--force` | 忽略已有产物和缓存 |
 | `--concurrency` `--fix-rounds` | 同时进行的调用数（默认 3）、最多回炉几轮（默认 1） |
 
+### 只出指定的几张图：`--images-only`
+
+加 `--images-only` 并写角色名、场景名或编号（多个用逗号隔开），就只请求这几张，其余保持"待生成"；已经成功的不会重复请求，想重出就同时加 `--force`（只重置被选中的这几张）。名字写错时会列出所有可选的名字和编号。
+
+```bash
+python run_agent.py run --stages images --images-gen --images-only 徐今朝
+python run_agent.py run --stages images --images-gen --images-only 徐今朝,C03,S01
+```
+
 ### 角色图像不像真人时：`image_style`
 
 角色设定集里的提示词刻意不写画风，画风是出图那一刻才定的（`profile-pass.md`）。批量出图现在会把 `character-refs` 技能的画风预设（`skills/character-refs/scripts/looks.mjs`，默认写实照片）拼到角色提示词后面；这份预设和单独运行 `character-refs` 时是同一份，改一处两边都生效。在 `models.json` 里用可选的 `image_style` 控制，不写就用默认值：
