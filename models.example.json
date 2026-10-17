@@ -132,7 +132,7 @@
       "poll_interval": 5,
       "max_wait": 900,
       "request_template": null,
-      "note": "暂未启用：目前未核实智谱开放平台存在可直接调用的 CogVideoX-3 托管视频生成 API。请勿将智谱清言网页产品或开源权重名当作 API 模型名。",
+      "note": "智谱开放平台 CogVideoX-3 官方 API 配置。调用前需设置 ZHIPUAI_API_KEY；每次生成时长按官方支持值取 5 或 10 秒。",
       "duration": 5,
       "size": "1920x1080",
       "quality": true,
