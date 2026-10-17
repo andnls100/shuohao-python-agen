@@ -48,6 +48,7 @@ def _build_parser() -> argparse.ArgumentParser:
             s.add_argument("--refs-names", help="refs 阶段只处理这些角色，逗号分隔；默认主角和重要配角")
             s.add_argument("--refs-look", default="动漫", help="refs 阶段的画风（默认 动漫）")
             s.add_argument("--refs-gen", action="store_true", help="refs 阶段真的出图（需先配置 character-refs 的出图模型）")
+            s.add_argument("--images-gen", action="store_true", help="从已保存的 cast.json / art.json 提示词批量出角色、场景和道具图；需配置 models.json 的 image 号池")
             s.add_argument("--video-protocol", default="h3", choices=["h3", "seedance"], help="视频提示词协议（默认 h3）")
             s.add_argument("--video-submit", action="store_true", help="明确提交云端视频生成任务；不加此参数只生成提示词和清单")
             s.add_argument("--force", action="store_true", help="忽略已有产物和缓存，全部重做")
@@ -166,6 +167,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     opts: Dict[str, Any] = {
         "params": params, "aspect": args.aspect, "prompt_lang": args.prompt_lang,
         "max_chars": args.max_chars, "refs_look": args.refs_look, "refs_gen": args.refs_gen,
+        "images_gen": args.images_gen,
         "video_protocol": args.video_protocol, "video_submit": args.video_submit,
         "refs_names": [n.strip() for n in args.refs_names.split(",")] if args.refs_names else None,
     }
