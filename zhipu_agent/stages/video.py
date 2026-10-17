@@ -370,8 +370,12 @@ def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: 
         ctx.log("预览模式：未调用视频 API。检查提示词后再加 --video-submit 发起生成。")
         return path
     cfg = _config()
+    selected_shots = {str(value).strip() for value in (shots or []) if str(value).strip()}
     for item in manifest["items"]:
+        if selected_shots and item["id"] not in selected_shots:
+            continue
         if item.get("state") == "succeeded" and item.get("video_url"):
+            ctx.log(f"跳过已生成镜头：{item['id']}")
             continue
         ctx.log(f"视频任务：{item['id']}（{item['duration_seconds']} 秒）")
         _submit(item, manifest, cfg, root, path)
