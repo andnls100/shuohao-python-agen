@@ -1028,7 +1028,8 @@ function main(argv) {
       );
       let abs = generated ? resolve(outDir, '..', generated.output_path) : null;
       if (!abs) {
-        abs = imageExtensions.map((ext) => join(imagesDir, `${slug(item.name)}-sheet${ext}`)
+        abs = imageExtensions
+          .map((ext) => join(imagesDir, `${slug(item.name)}-sheet${ext}`))
           .find((candidate) => existsSync(candidate));
       }
       if (abs && existsSync(abs)) item.sheetImage = relative(outDir, abs).split(sep).join('/');
