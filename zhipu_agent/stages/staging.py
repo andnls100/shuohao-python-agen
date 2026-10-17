@@ -44,9 +44,11 @@ def _find_image(ctx: Context, sk, name: str) -> Optional[Path]:
     """在场景图目录里找 <地点 slug>-sheet.png。"""
     folder = ctx.images_dir or (ctx.out / "art" / "images")
     slug = ctx.run(sk, ["slug", name]).stdout.strip() or name
-    for candidate in (folder / f"{slug}-sheet.png", folder / f"{name}-sheet.png"):
-        if candidate.is_file():
-            return candidate
+    for stem in (slug, name):
+        for suffix in (".png", ".jpg", ".jpeg", ".webp"):
+            candidate = folder / f"{stem}-sheet{suffix}"
+            if candidate.is_file():
+                return candidate
     return None
 
 
