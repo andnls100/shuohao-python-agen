@@ -89,10 +89,10 @@ class StoryboardRepairTest(unittest.TestCase):
         segment = {
             "cuts": [{"seconds": 0.25}, {"seconds": 3.0}],
             "h3Prompt": (
-                "How the reference pictures align with the target video — stale\\n"
-                "integrated_multimodal_description:\\n"
-                "[Shot 1] first\\n[Shot 2] At 00:00.250, second\\n"
-                "overall_soundscape: sound\\nnon_diegetic_music: N/A"
+                "How the reference pictures align with the target video — stale\n"
+                "integrated_multimodal_description:\n"
+                "[Shot 1] first\n[Shot 2] At 00:00.250, second\n"
+                "overall_soundscape: sound\nnon_diegetic_music: N/A"
             ),
         }
         self.assertTrue(sync_segment_timing(segment, "en"))
