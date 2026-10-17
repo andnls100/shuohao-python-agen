@@ -5,7 +5,7 @@
     {
       "name": "智谱-flash",
       "base_url": "https://open.bigmodel.cn/api/paas/v4/",
-      "api_key": "把这里换成平台一的 Key",
+      "api_keys": ["Key1", "Key2"],
       "model": "glm-5.3-flash"
     },
     {

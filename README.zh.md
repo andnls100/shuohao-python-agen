@@ -162,7 +162,7 @@ copy models.example.json models.json   # Windows；Linux/macOS 可用 cp
 - `strategy: "failover"`（默认）：按列表顺序调用，前一个平台失败后自动切换下一个备用平台。
 - `strategy: "round_robin"`：文本和视觉模型调用按轮询分摊到不同平台。
 - `text` 用于文字生成，`vision` 用于 staging 阶段的场景图识别；不需要视觉模型时可写 `[]`。
-- 每项必填 `name`、`base_url`、`model` 和 `api_key` 或 `api_key_env`。每个模型可独立配置 `temperature`、`max_tokens`、`timeout`、`stream`、`json_mode`。
+- 每项必填 `name`、`base_url`、`model` 和 Key。Key 可以写 `api_key`（一个）、`api_keys`（列表，如 `["Key1", "Key2"]`）、`api_key_env`（环境变量名）、`api_keys_env`（环境变量里逗号隔开的多个 Key），可以组合。一项里配了多个 Key，会展开成同一平台、同一模型的多个条目（`名称#1`、`名称#2`），互为备份：`failover` 时先用第一个 Key，出错再换下一个，然后才换别的平台；`round_robin` 时各个 Key 轮流。重复的 Key 自动去掉。文件名写成 `model.json` 也能识别，两个都有时以 `models.json` 为准。每个模型可独立配置 `temperature`、`max_tokens`、`timeout`、`stream`、`json_mode`。
 - 平台出错时会先有限重试，再切换备用项；冷却时间与鉴权/欠费错误的处理规则见配置代码。
 - `.env` 仅用于并发、回炉轮数等运行参数；若使用 `api_key_env`，密钥需提前设置为相应的系统环境变量。
 - `python run_agent.py doctor --ping` 会逐个测试配置的文本和视觉模型。
