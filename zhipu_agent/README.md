@@ -35,6 +35,7 @@ python run_agent.py doctor --ping
 python run_agent.py run --book input/novel.txt --episodes 6 --minutes 2 --genre 都市
 python run_agent.py run --stages script,staging,storyboard --eps 1-3
 python run_agent.py run --stages refs --refs-names 沈知微
+python run_agent.py run --stages continuity
 python run_agent.py status
 ```
 
@@ -56,3 +57,14 @@ python run_agent.py status
 - `--refs-gen` 的真实出图没有测过；character-refs 的作者自己也只使用假服务验证过。
 
 长篇小说的成本较高：每个条目至少一次调用，回炉另算。先使用 `--eps` 和短文本试跑。
+
+
+## 一致性视频资产清单
+
+在已有角色设定、美术设定和分镜产物后运行：
+
+```
+python run_agent.py run --stages continuity
+```
+
+会生成 `output/continuity/continuity-manifest.json`，登记角色、场景、道具资产，以及每个分镜计划使用的参考素材和镜头参考图目标路径。该阶段只整理清单，不调用生图或视频 API。角色关联会结合镜头文字和已有 staging 站位做匹配；请重点检查清单中的 `scene_id`、`character_ids`，自动匹配可能需要人工修正。
