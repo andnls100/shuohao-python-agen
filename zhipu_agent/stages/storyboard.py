@@ -142,7 +142,7 @@ def run(
                 + (f"## 每场第一段的开场走位句（blocking 请照抄对应那一场的这一句）\n" + "\n".join(first_blocking) + "\n\n"
                    if first_blocking else "")
                 + "## 输出\n只输出这一集的 JSON 对象：{\"ep\": N, \"segments\": [...]}，不要 seedScenes。"
-                  "改秒数必须同步改 h3Prompt（对齐指令和 [Shot k] 切点时刻由分镜秒数推导，逐字对账）。"
+                  "改秒数必须同步改 h3Prompt（对齐指令和 [Shot k]/[镜头 k] 切点时刻由分镜秒数推导，逐字对账；标记语言必须与 promptLang 一致）。"
             )
             items.append(Item(str(ep), system, prompt, tokens=ep_tokens(ep), cache=work / f"ep-{ep:03d}.json"))
 
