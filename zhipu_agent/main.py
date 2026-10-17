@@ -112,12 +112,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 1 if problems else 0
 
 
-def _ctx_from(args: argparse.Namespace, settings) -> "workflow.Context":
+def _ctx_from(args: argparse.Namespace, settings, *, skip_source: bool = False) -> "workflow.Context":
     return workflow.build_context(
         settings, Path(args.book), Path(args.out), title=args.title, lang=args.lang,
         interactive=False if args.command == "status" else (not args.yes and sys.stdin.isatty()),
         force=getattr(args, "force", False),
         images_dir=Path(args.images) if getattr(args, "images", None) else None,
+        skip_source=skip_source,
     )
 
 
@@ -143,8 +144,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.fix_rounds is not None:
         overrides["fix_rounds"] = max(0, args.fix_rounds)
     settings = load_settings(**overrides)
-    settings.require()
     stages = workflow.parse_stages(args.stages)
+    # Images/video consume saved production JSON and do not need a text-model credential.
+    if any(stage not in ("images", "video") for stage in stages):
+        settings.require()
 
     interactive = not args.yes and sys.stdin.isatty()
     params: Dict[str, Any] = {}
@@ -175,7 +178,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         from .stages.base import parse_eps
         opts["eps"] = parse_eps(args.eps)
 
-    ctx = _ctx_from(args, settings)
+    ctx = _ctx_from(args, settings, skip_source=(stages == ["images"]))
     results = workflow.run_pipeline(ctx, stages, opts)
     ctx.log("全部完成：")
     for name, path in results.items():
