@@ -91,13 +91,13 @@ def _repair_existing_h3(ctx: Context, doc: Dict[str, Any], path: Path,
                 "integrated_multimodal_description:、overall_soundscape:、non_diegetic_music:。"
                 "每个镜头段落必须存在且按顺序；每切运镜词必须与对应 cut.camera 匹配；"
                 "对齐行与每个切点时间必须由 cuts 秒数累计得出。人名不写进正文，"
-                "只允许在 <d> 台词块中保留剧本原文。只输出 JSON：{\\"h3Prompt\\":\\"...\\"}。"
+                "只允许在 <d> 台词块中保留剧本原文。只输出 JSON：{\"h3Prompt\":\"...\"}。"
             )
             repair_user = (
-                f"segment={segment_id}; promptLang={prompt_lang}\\n"
-                f"校验错误：{json.dumps(errors, ensure_ascii=False)}\\n"
-                f"固定 cuts（只读）：{json.dumps(segment.get('cuts', []), ensure_ascii=False)}\\n"
-                f"原始 h3Prompt：{json.dumps(old_prompt, ensure_ascii=False)}\\n"
+                f"segment={segment_id}; promptLang={prompt_lang}\n"
+                f"校验错误：{json.dumps(errors, ensure_ascii=False)}\n"
+                f"固定 cuts（只读）：{json.dumps(segment.get('cuts', []), ensure_ascii=False)}\n"
+                f"原始 h3Prompt：{json.dumps(old_prompt, ensure_ascii=False)}\n"
                 "请完整重写 h3Prompt，严格保留每个 <d>...</d> 块的内容和顺序；"
                 "除协议骨架、语言、运镜词和切点时间外，不改剧情语义。"
             )
