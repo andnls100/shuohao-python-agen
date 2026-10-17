@@ -215,10 +215,25 @@ Everything goes under `--out` (default `output/`), one sub-folder per stage. In 
 | 6 | `storyboard` | `storyboard/<title>-storyboard.json` — segments, shots, frame prompts, H3 prompts | `<title>-storyboard.md`, `storyboard-report.html` | `storyboard/.gates.jsonl` |
 | 7 | `refs` (optional) | `character-refs/<name>/asset.json` — description plus all versions of each reference image | `character-refs/character-refs.html` (with an image model configured and `--refs-gen`) | `work/refs/<name>-intake.json` |
 | 8 | `video` (optional) | `video/video-manifest.json` — per-segment prompts, duration, task ID, generation state, video URL and local path | `video/prompts/<segment-id>.txt`, `video/qc-checklist.md`; downloaded videos go to `video/videos/<segment-id>.mp4` | The manifest records cloud task state and completed results for resume |
+| 9 | `audio` (optional) | `audio/audio-manifest.json` — dialogue text, character ID, voice ID, generation state and audio path | `audio/character-voices.json`, `audio/prompts/`, `audio/qc-checklist.md`, `audio/lines/<line-id>.mp3` | Character voice IDs persist in the output registry and are reused across episodes |
 
 Step 6 also exports a production package: `storyboard/E01-01/prompt.md`, `E01-02/prompt.md`, … (one folder per segment with its H3 prompt and the Picture-order list), and `storyboard/manifest.json` (per-segment duration, cut times, prompt and picture paths, and which pictures are missing). **The storyboard images (`f1.png`, `f2.png`, …) are not produced by this pipeline** — generate them with your image tool from the frame prompts and drop them into the segment folders, then export again.
 
 Other files: `source/` (UTF-8 copy of the novel), `agent.log` (run log), and `work/` (all caches — re-running resumes from them; delete a cache file or use `--force` to redo an item). With an image model configured and `--refs-gen`, step 7 also writes the reference PNGs (`default/front-full.v1.png`, …) under each character folder; otherwise it only writes `asset.json`.
+
+### Optional dialogue audio generation
+
+The audio stage creates one TTS file per dialogue line and persists each character's custom voice ID in `output/audio/character-voices.json`. It is optional and is not part of the default pipeline. Configure CosyVoice in `models.json`; preview mode does not call the API.
+
+```bash
+# Preview the dialogue manifest and voice registry; no API calls
+python run_agent.py run --stages audio --eps 1
+
+# Create missing character voices and synthesize dialogue audio
+python run_agent.py run --stages audio --eps 1 --audio-submit --yes
+```
+
+See [dialogue audio generation](docs/audio-generation.md) for the CosyVoice v3.5 Flash configuration and voice registry behavior.
 
 ### Optional video generation stage
 
