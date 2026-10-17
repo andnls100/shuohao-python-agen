@@ -39,12 +39,20 @@ def build_request(provider: dict, item: dict, manifest: dict) -> dict:
         duration = 5 if float(item["duration_seconds"]) <= 5 else 10
         ratio = context["aspect_ratio"]
         size = provider.get("size") or ("1920x1080" if ratio == "16:9" else "1080x1920" if ratio == "9:16" else "1024x1024")
+        quality = provider.get("quality", "quality")
+        if isinstance(quality, bool):
+            quality = "quality" if quality else "speed"
+        if quality not in ("quality", "speed"):
+            raise ValueError("CogVideoX-3 quality 必须为 'quality' 或 'speed'")
+
         return {
             "model": context["model"],
             "prompt": context["prompt"],
             "duration": duration,
             "size": size,
-            "quality": bool(provider.get("quality", True)),
+            "quality": quality,
+            "with_audio": bool(provider.get("with_audio", True)),
+            "fps": int(provider.get("fps", 30)),
         }
 
     if adapter == "aliyun_wan":
