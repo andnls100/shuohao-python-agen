@@ -60,6 +60,23 @@ def _episode_cache_candidates(work: Path, ep: int) -> List[Path]:
     return [work / f"ep{ep:03d}.json", work / f"ep-{ep:03d}.json"]
 
 
+def _normalize_episode_segment_ids(episode: Dict[str, Any], ep: int) -> bool:
+    """Force segment IDs to match the authoritative episode number and list order."""
+    changed = False
+    segments = episode.get("segments", [])
+    if not isinstance(segments, list):
+        return False
+    for index, segment in enumerate(segments, start=1):
+        if not isinstance(segment, dict):
+            continue
+        expected = f"E{ep:02d}-{index:02d}"
+        if segment.get("id") != expected:
+            segment["id"] = expected
+            changed = True
+    episode["ep"] = ep
+    return changed
+
+
 def _read_cached_episode(cache: Path, ep: int) -> Optional[Dict[str, Any]]:
     """Return a reusable episode cache, or None if it is incomplete/invalid."""
     try:
@@ -73,7 +90,7 @@ def _read_cached_episode(cache: Path, ep: int) -> Optional[Dict[str, Any]]:
     if not isinstance(data, dict) or not isinstance(data.get("segments"), list) or not data["segments"]:
         return None
     episode = {k: v for k, v in data.items() if k != "seedScenes"}
-    episode["ep"] = ep
+    _normalize_episode_segment_ids(episode, ep)
     return episode
 
 def run(
@@ -114,6 +131,15 @@ def run(
     if path.is_file() and not ctx.force:
         main = read_json(path)
         main.setdefault("promptLang", prompt_lang)
+    # Existing merged output can also contain stale IDs from older runs. Repair them
+    # before deciding which episodes are complete, and persist the deterministic fix.
+    normalized_existing = False
+    for episode in main.get("episodes", []):
+        if isinstance(episode, dict) and isinstance(episode.get("ep"), int):
+            normalized_existing = _normalize_episode_segment_ids(episode, episode["ep"]) or normalized_existing
+    if normalized_existing:
+        write_json(path, main)
+        ctx.log("[storyboard] 已校正已有分镜的集号/分镜 ID")
     # Recover completed episode caches before deciding what still needs generation.
     # This prevents restarting the seed/model calls when only work/epNNN.json survived.
     if not ctx.force:
