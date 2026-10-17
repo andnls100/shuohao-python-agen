@@ -117,7 +117,7 @@ def run(ctx: Context, visual_style: str = "manju") -> Path:
             f"## 视觉风格（道具图提示词必须遵守）\n{style_hint}\n\n## 约束\n{avoid}\n\n"
             "## 输出\n只输出 JSON 数组，每个元素是一件道具（结构见《数据结构》的 props 段）。"
         )
-        items.append(Item("props", prop_system, prompt, tokens=["道具", "props"], cache=work / "props.json"))
+        items.append(Item("props", prop_system, prompt, tokens=["道具", "props"], cache=work / f"props-{visual_style}.json"))
 
     def apply(key: str, data: Any) -> None:
         kind = kinds[key]
