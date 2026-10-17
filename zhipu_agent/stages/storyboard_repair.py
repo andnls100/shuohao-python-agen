@@ -120,6 +120,28 @@ def cut_violation_refs(lines: Iterable[str]) -> Dict[Tuple[str, int], List[str]]
     return found
 
 
+
+def extract_h3_cut_text(segment: Dict[str, Any], index: int, lang: str = "en") -> str:
+    """Return one H3 shot block, excluding the next shot and soundscape fields."""
+    prompt = segment.get("h3Prompt")
+    if not isinstance(prompt, str):
+        return ""
+    marker = rf"\\[镜头\\s*{index}\\]" if lang == "zh" else rf"\\[Shot\\s*{index}\\]"
+    next_marker = rf"\\[镜头\\s*{index + 1}\\]" if lang == "zh" else rf"\\[Shot\\s*{index + 1}\\]"
+    field_marker = "整体音景：" if lang == "zh" else "overall_soundscape:"
+    start = re.search(marker, prompt)
+    if not start:
+        return ""
+    ends = []
+    nxt = re.search(next_marker, prompt[start.end():])
+    if nxt:
+        ends.append(start.end() + nxt.start())
+    field = prompt.find(field_marker, start.end())
+    if field >= 0:
+        ends.append(field)
+    end = min(ends) if ends else len(prompt)
+    return prompt[start.start():end].strip()
+
 def replace_h3_cut_text(segment: Dict[str, Any], index: int, text: str, lang: str = "en") -> bool:
     """Replace just one [Shot k]/[镜头 k] block, leaving other shots untouched."""
     prompt = segment.get("h3Prompt")
