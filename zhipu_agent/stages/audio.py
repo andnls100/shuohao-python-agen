@@ -6,6 +6,7 @@ are created only when the output registry has no voice_id for that character.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -248,9 +249,25 @@ def _save_preview(ctx: Context, character_id: str, output: dict) -> Optional[str
         data = base64.b64decode(encoded)
     except (ValueError, TypeError) as exc:
         raise RuntimeError("音色创建成功，但预览音频 Base64 无法解码") from exc
-    path = ctx.out / "audio" / "voice-previews" / (_safe(character_id) + ".wav")
+    # Character IDs may contain Chinese or Windows-reserved filename characters.
+    # Use a deterministic ASCII-only filename to avoid invalid paths and collisions.
+    digest = hashlib.sha256(str(character_id).encode("utf-8")).hexdigest()[:16]
+    path = ctx.out / "audio" / "voice-previews" / f"voice_{digest}.wav"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
+    tmp = path.with_suffix(".wav.part")
+    try:
+        tmp.write_bytes(data)
+        tmp.replace(path)
+    except OSError as exc:
+        # Preview audio is optional: the voice_id has already been persisted,
+        # so a preview-file failure must not abort all dialogue generation.
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+        ctx.log(f"  警告：音色创建成功，但预览音频保存失败（{exc}）；将继续处理音频生成")
+        return None
     return str(path.relative_to(ctx.out))
 
 
