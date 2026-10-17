@@ -25,6 +25,28 @@
       "model": "glm-5.3-flashx"
     }
   ],
+  "image": [
+    {
+      "name": "图片平台主用",
+      "base_url": "https://你的图片平台/v1",
+      "api_key": "替换成图片平台 Key",
+      "model": "平台支持的生图模型名",
+      "endpoint": "/images/generations",
+      "size": "1536x1024",
+      "quality": "high",
+      "timeout": 180
+    },
+    {
+      "name": "图片平台备用",
+      "base_url": "https://你的备用图片平台/v1",
+      "api_key": "替换成备用图片平台 Key",
+      "model": "备用平台支持的生图模型名",
+      "endpoint": "/images/generations",
+      "size": "1536x1024",
+      "quality": "high",
+      "timeout": 180
+    }
+  ],
   "video": [
     {
       "name": "视频平台主用",
