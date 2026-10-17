@@ -244,6 +244,14 @@ class OnlyFilterTest(unittest.TestCase):
         self.assertGreater(len(states), 1)
         self.assertTrue(all(v == "pending" for k, v in states.items() if k != "沈知微"), states)
 
+        # 生图阶段应自动刷新两个报告，并从 manifest 引用实际输出路径。
+        character_report = (self.out / "characters" / "report.html").read_text(encoding="utf-8")
+        art_report = (self.out / "art" / "art-report.html").read_text(encoding="utf-8")
+        self.assertIn("../images/characters/沈知微-C001-portrait.png", character_report)
+        self.assertIn("尚未出图", character_report)  # 未生成的角色仍显示占位
+        self.assertIn("images/", art_report)         # 场景图路径相对 art/ 目录
+        self.assertIn("../images/props/", art_report)  # 道具图路径相对 art/ 目录
+
         states = self._run(["陆行远"])          # 再出另一张：第一张保持已完成，不重复请求
         self.assertEqual(len(self.requests), 2)
         self.assertEqual((states["沈知微"], states["陆行远"]), ("succeeded", "succeeded"))
