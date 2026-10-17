@@ -54,7 +54,7 @@ def _load_audio_config() -> list[dict]:
             raise ValueError(f"models.json 的 audio[{i}]（{name}）speech_url 必须是 HTTP(S) URL")
         result.append({
             "name": name, "url": url, "model": model, "key": key,
-            "voice": str(item.get("voice") or "alloy"),
+            "voice": str(item.get("voice") or "alloy"),\n            "voice_map": item.get("voice_map") if isinstance(item.get("voice_map"), dict) else {},
             "response_format": str(item.get("response_format") or "mp3"),
             "timeout": max(10, int(item.get("timeout", 120))),
             "instructions_field": str(item.get("instructions_field") or "instructions"),
@@ -120,7 +120,7 @@ def _collect(ctx: Context, eps: Optional[list]) -> dict:
 
 def _synthesize(item: dict, cfg: dict, target: Path) -> None:
     body = {
-        "model": cfg["model"], "input": item["text"], "voice": cfg["voice"],
+        "model": cfg["model"], "input": item["text"],\n        "voice": str(cfg["voice_map"].get(item.get("speaker")) or cfg["voice_map"].get(item.get("character_name")) or cfg["voice"]),
         "response_format": cfg["response_format"],
     }
     if cfg["instructions_field"] and item.get("voice_instruction"):
