@@ -229,6 +229,13 @@ def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: 
                 previous = {str(x.get("id")): x for x in old.get("items", [])}
         except (OSError, ValueError):
             pass
+    if eps and previous:
+        selected_eps = set(eps)
+        selected_ids = {item["id"] for item in manifest["items"]}
+        extras = [dict(item) for item in previous.values()
+                  if int(item.get("ep", 0)) not in selected_eps and str(item.get("id")) not in selected_ids]
+        manifest["items"] = extras + manifest["items"]
+        manifest["items"].sort(key=lambda item: (int(item.get("ep", 0)), str(item.get("id", ""))))
     for item in manifest["items"]:
         old = previous.get(item["id"])
         if old and old.get("prompt") == item["prompt"]:
