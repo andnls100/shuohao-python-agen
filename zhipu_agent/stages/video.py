@@ -51,30 +51,74 @@ def _prompt(segment: dict, protocol: str) -> str:
     return "\n\n".join(parts)
 
 
+def _shot_prompt(segment: dict, cut: dict, shot_index: int, visual_style: str) -> str:
+    """为 Seedance 单独构造一个镜头的提示词，而不是把整段 cuts 一次提交。"""
+    parts = []
+    if segment.get("blocking"):
+        parts.append("【人物关系与构图逻辑】\n" + str(segment["blocking"]))
+    rows = [f"【镜头{shot_index}】"]
+    for label, key in (("时长", "seconds"), ("焦距", "lens"), ("机位", "cameraPosition"),
+                       ("构图", "composition"), ("运镜", "camera"), ("景别", "size"),
+                       ("画面", "shot"), ("音效", "sfx"), ("光影", "lighting"),
+                       ("视线", "eyeline"), ("焦点", "focus")):
+        if cut.get(key) not in (None, ""):
+            rows.append(f"{label}：{cut[key]}秒" if key == "seconds" else f"{label}：{cut[key]}")
+    parts.append("\n".join(rows))
+    if segment.get("soundscape"):
+        parts.append("环境声：" + str(segment["soundscape"]))
+    if segment.get("music"):
+        parts.append("音乐：" + str(segment["music"]))
+    if segment.get("h3Prompt"):
+        parts.append("剧情与台词上下文（仅供本镜头参考）：\n" + str(segment["h3Prompt"]))
+    parts.append("只生成当前这一个镜头，不要拼接其他镜头；保持角色外观、服装、场景和空间关系连续；避免字幕、画面文字和多余人物。")
+    parts.append(visual_style_instruction(visual_style))
+    return "\n\n".join(parts)
+
+
 def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str) -> dict:
     source = ctx.artifact("storyboard")
     if not source.is_file():
         raise FileNotFoundError(f"找不到分镜文件：{source}；请先运行 storyboard 阶段")
     board = read_json(source)
     wanted, items = set(eps or []), []
+    style_hint = visual_style_instruction(visual_style)
     for episode in board.get("episodes", []):
         ep = int(episode.get("ep", 0))
         if wanted and ep not in wanted:
             continue
         for idx, segment in enumerate(episode.get("segments", []), 1):
             sid = str(segment.get("id") or f"E{ep:02d}-{idx:02d}")
-            style_hint = visual_style_instruction(visual_style)
-            base_prompt = _prompt(segment, protocol)
-            items.append({"id": sid, "ep": ep, "sceneIndex": segment.get("sceneIndex"),
-                          "duration_seconds": _duration(segment),
-                          "prompt": base_prompt + "\n\n" + style_hint,
-                          "state": "planned", "task_id": None, "video_url": None,
-                          "video_path": None, "error": None})
+            if protocol == "seedance" and segment.get("cuts"):
+                # Seedance 模式下每个 cut 独立生成一个视频镜头，方便单镜头重试和跳过已完成项。
+                for cut_idx, cut in enumerate(segment.get("cuts", []), 1):
+                    shot_id = f"{sid}-C{cut_idx:02d}"
+                    try:
+                        duration = round(float(cut.get("seconds", 0) or 0), 2)
+                    except (TypeError, ValueError):
+                        duration = 0
+                    if duration <= 0:
+                        raise ValueError(f"镜头 {shot_id} 的 seconds 必须大于 0")
+                    items.append({
+                        "id": shot_id, "ep": ep, "sceneIndex": segment.get("sceneIndex"),
+                        "segmentId": sid, "shotIndex": cut_idx,
+                        "duration_seconds": duration,
+                        "prompt": _shot_prompt(segment, cut, cut_idx, visual_style),
+                        "state": "planned", "task_id": None, "video_url": None,
+                        "video_path": None, "error": None
+                    })
+            else:
+                base_prompt = _prompt(segment, protocol)
+                items.append({
+                    "id": sid, "ep": ep, "sceneIndex": segment.get("sceneIndex"),
+                    "duration_seconds": _duration(segment),
+                    "prompt": base_prompt + "\n\n" + style_hint,
+                    "state": "planned", "task_id": None, "video_url": None,
+                    "video_path": None, "error": None
+                })
     if not items:
-        raise ValueError("所选集没有可生成的视频分段；检查分镜产物或 --eps 参数")
-    return {"version": 1, "source": ctx.title, "protocol": protocol, "visual_style": visual_style,
+        raise ValueError("所选集没有可生成的视频镜头/分段；检查分镜产物或 --eps 参数")
+    return {"version": 2, "source": ctx.title, "protocol": protocol, "visual_style": visual_style,
             "aspect_ratio": board.get("aspectRatio", "16:9"), "items": items}
-
 
 def _config() -> list:
     """读取 models.json 中的视频 API 号池；按列表顺序故障转移。"""
