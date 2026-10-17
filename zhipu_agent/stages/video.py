@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 from ..validator import Result
+from ..config import models_file_path
 from .base import Context, read_json, write_json
 
 
@@ -71,19 +72,43 @@ def _collect(ctx: Context, eps: Optional[list], protocol: str) -> dict:
             "aspect_ratio": board.get("aspectRatio", "16:9"), "items": items}
 
 
-def _config() -> dict:
-    cfg = {k: os.environ.get(k, "").strip() for k in
-           ("VIDEO_API_SUBMIT_URL", "VIDEO_API_KEY", "VIDEO_API_MODEL")}
-    missing = [k for k, v in cfg.items() if not v]
-    if missing:
-        raise ValueError("提交前必须配置：" + "、".join(missing))
-    if urlparse(cfg["VIDEO_API_SUBMIT_URL"]).scheme not in ("http", "https"):
-        raise ValueError("VIDEO_API_SUBMIT_URL 必须是 HTTP(S) URL")
-    cfg.update(status_template=os.environ.get("VIDEO_API_STATUS_URL_TEMPLATE", "").strip(),
-               timeout=max(10, int(os.environ.get("VIDEO_API_TIMEOUT", "120"))),
-               poll=max(1, float(os.environ.get("VIDEO_API_POLL_INTERVAL", "5"))),
-               max_wait=max(10, int(os.environ.get("VIDEO_API_MAX_WAIT", "900"))))
-    return cfg
+def _config() -> list:
+    """读取 models.json 中的视频 API 号池；按列表顺序故障转移。"""
+    path = models_file_path()
+    if not path.is_file():
+        raise ValueError(f"找不到模型配置文件：{path}；请先复制 models.example.json 为 models.json")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"无法读取 {path}：{exc}") from exc
+    entries = data.get("video", [])
+    if not isinstance(entries, list) or not entries:
+        raise ValueError(f"{path} 中必须配置非空的 video 列表；请参照 models.example.json")
+    providers = []
+    for index, entry in enumerate(entries, 1):
+        if not isinstance(entry, dict):
+            raise ValueError(f"video[{index}] 必须是对象")
+        name = str(entry.get("name") or f"video-{index}").strip()
+        submit_url = str(entry.get("submit_url") or "").strip()
+        model = str(entry.get("model") or "").strip()
+        api_key = str(entry.get("api_key") or "").strip()
+        api_key_env = str(entry.get("api_key_env") or "").strip()
+        if not api_key and api_key_env:
+            api_key = os.environ.get(api_key_env, "").strip()
+        missing = [field for field, value in (("submit_url", submit_url), ("model", model), ("api_key 或 api_key_env", api_key)) if not value]
+        if missing:
+            raise ValueError(f"models.json 的 video[{index}]（{name}）缺少：{'、'.join(missing)}")
+        if urlparse(submit_url).scheme not in ("http", "https"):
+            raise ValueError(f"models.json 的 video[{index}]（{name}）submit_url 必须是 HTTP(S) URL")
+        providers.append({
+            "name": name, "VIDEO_API_SUBMIT_URL": submit_url, "VIDEO_API_KEY": api_key,
+            "VIDEO_API_MODEL": model,
+            "status_template": str(entry.get("status_url_template") or "").strip(),
+            "timeout": max(10, int(entry.get("timeout", 120))),
+            "poll": max(1, float(entry.get("poll_interval", 5))),
+            "max_wait": max(10, int(entry.get("max_wait", 900))),
+        })
+    return providers
 
 
 def _request(url: str, cfg: dict, body: Optional[dict] = None) -> dict:
@@ -163,34 +188,60 @@ def _download(url: str, target: Path, cfg: dict) -> None:
             tmp.unlink()
 
 
-def _submit(item: dict, manifest: dict, cfg: dict, root: Path, path: Path) -> None:
+def _submit(item: dict, manifest: dict, providers: list, root: Path, path: Path) -> None:
     if item.get("state") == "succeeded" and item.get("video_url"):
         return
     try:
-        if item.get("task_id") and cfg["status_template"]:
+        # 已有 task_id 时必须沿用原平台查询，避免重复创建付费任务。
+        if item.get("task_id"):
+            cfg = next((p for p in providers if p["name"] == item.get("provider")), None)
+            if cfg is None:
+                raise RuntimeError(
+                    f"任务 {item['task_id']} 记录的平台 {item.get('provider')!r} 不在当前 models.json video 号池中；"
+                    "请恢复该平台配置后续查"
+                )
             item["state"] = "polling"
             write_json(path, manifest)
             result = _poll(str(item["task_id"]), cfg)
         else:
-            item["state"], item["error"] = "submitting", None
-            write_json(path, manifest)
-            body = {"model": cfg["VIDEO_API_MODEL"], "prompt": item["prompt"],
-                    "duration": item["duration_seconds"], "aspect_ratio": manifest["aspect_ratio"]}
-            result = _request(cfg["VIDEO_API_SUBMIT_URL"], cfg, body)
-            url = _find(result, ("video_url", "videoUrl", "output_url", "download_url"))
-            task_id = _find(result, ("task_id", "taskId", "job_id", "jobId", "id"))
-            if task_id:
-                item["task_id"] = task_id
-            if not url and task_id:
-                item["state"] = "polling"
+            failures = []
+            result = None
+            cfg = None
+            for candidate in providers:
+                item["state"], item["error"] = "submitting", None
+                item["provider"] = candidate["name"]
                 write_json(path, manifest)
-                result = _poll(task_id, cfg)
-            elif not url:
-                raise RuntimeError("响应中找不到 video_url、output_url 或 task_id；需适配该平台响应格式")
+                body = {
+                    "model": candidate["VIDEO_API_MODEL"], "prompt": item["prompt"],
+                    "duration": item["duration_seconds"], "aspect_ratio": manifest["aspect_ratio"],
+                }
+                try:
+                    response = _request(candidate["VIDEO_API_SUBMIT_URL"], candidate, body)
+                    url = _find(response, ("video_url", "videoUrl", "output_url", "download_url"))
+                    task_id = _find(response, ("task_id", "taskId", "job_id", "jobId", "id"))
+                    if task_id:
+                        item["task_id"] = task_id
+                        item["provider"] = candidate["name"]
+                    if url:
+                        result, cfg = response, candidate
+                        break
+                    if task_id:
+                        # 已创建任务后不切换平台，避免重复生成和重复计费。
+                        item["state"] = "polling"
+                        write_json(path, manifest)
+                        result, cfg = _poll(task_id, candidate), candidate
+                        break
+                    raise RuntimeError("响应中找不到 video_url、output_url 或 task_id；需适配该平台响应格式")
+                except Exception as exc:
+                    if item.get("task_id"):
+                        raise
+                    failures.append(f"{candidate['name']}: {exc}")
+            if result is None or cfg is None:
+                raise RuntimeError("所有视频 API 备用平台均失败：" + "；".join(failures))
         url = _find(result, ("video_url", "videoUrl", "output_url", "download_url"))
         if not url:
             raise RuntimeError("任务结束但响应中没有视频 URL")
-        item.update(state="succeeded", video_url=url, error=None)
+        item.update(state="succeeded", video_url=url, error=None, provider=cfg["name"])
         try:
             target = root / "videos" / (_safe(item["id"]) + ".mp4")
             _download(url, target, cfg)
@@ -239,7 +290,7 @@ def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: 
     for item in manifest["items"]:
         old = previous.get(item["id"])
         if old and old.get("prompt") == item["prompt"]:
-            for key in ("state", "task_id", "video_url", "video_path", "error", "download_error"):
+            for key in ("state", "task_id", "provider", "video_url", "video_path", "error", "download_error"):
                 if key in old:
                     item[key] = old[key]
     manifest["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
