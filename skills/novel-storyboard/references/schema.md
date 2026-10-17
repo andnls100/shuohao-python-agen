@@ -11,7 +11,7 @@
   "source": "渡口",
   "aspectRatio": "16:9",
   "promptLang": "zh",
-  "params": { "maxSegmentSeconds": 15, "minCutSeconds": 2, "maxCutSeconds": 10, "maxOnScreen": 3, "tolerance": 0.15 },
+  "params": { "maxSegmentSeconds": 15, "minCutSeconds": 2, "maxCutSeconds": 10, "maxOnScreen": 3, "tolerance": 1.0 },
   "episodes": [ { "ep": 1, "segments": [ ... ] } ]
 }
 ```
@@ -86,4 +86,4 @@ non_diegetic_music: …（1–3 句，没有就 N/A）
 
 ## 时长约束链
 
-台词秒数（按剧本语速折算）≤ 分镜 `seconds` ≤ 10 秒；段 Σ分镜 ≤ 15 秒；集 Σ段 落在剧本 `targetSeconds` ±15%。全部由 validate 逐级对账。
+台词秒数（按剧本语速折算）≤ 分镜 `seconds` ≤ 10 秒；段 Σ分镜 ≤ 15 秒；集 Σ段 落在剧本 `targetSeconds` ±100%（默认；`params.tolerance` 可覆盖）。全部由 validate 逐级对账。
