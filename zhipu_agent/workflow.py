@@ -1,7 +1,7 @@
 """流水线编排：按技能包的接力顺序依次执行各阶段。
 
-    小说 → outline → characters → art → script → staging → storyboard
-                                  ↘ refs（可选，真出角色参考图）
+    小说 → outline → characters → art → images（可选，复用提示词批量出图） → script → staging → storyboard
+                                  ↘ refs（可选，角色锚点与派生参考图）
 
 每个阶段是 stages/ 下的一个模块，暴露 run / artifact / check。
 已经完成且通过校验的阶段会被跳过（--force 重做）。
