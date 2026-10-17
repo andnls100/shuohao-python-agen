@@ -144,7 +144,8 @@ def run_stage(ctx: Context, name: str, opts: Dict[str, Any]) -> Optional[Path]:
     if name == "storyboard":
         return module.run(ctx, eps=eps, aspect=opts.get("aspect", "16:9"),
                           prompt_lang=opts.get("prompt_lang", "en"),
-                          visual_style=opts.get("visual_style", "manju"))
+                          visual_style=opts.get("visual_style", "manju"),
+                          fight_enhancement=opts.get("fight_enhancement", "auto"))
     if name == "images":
         return module.run(ctx, generate=opts.get("images_gen", False), only=opts.get("images_only"))
     if name == "refs":
