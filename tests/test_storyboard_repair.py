@@ -5,11 +5,57 @@ from zhipu_agent.stages.storyboard_repair import (
     cut_violation_refs,
     extract_h3_cut_text,
     repair_deterministic_storyboard,
+    repair_dialogue_fit,
     repair_minor_cut_durations,
     segment_h3_violation_refs,
     replace_h3_cut_text,
     sync_segment_timing,
 )
+
+
+def _fit_fixture(line: str, seconds: float, max_cut=None):
+    segment = {
+        "id": "E01-01", "sceneIndex": 1,
+        "cuts": [{"seconds": seconds, "beats": [1, 1]}, {"seconds": 3.0, "beats": [2, 2]}],
+        "h3Prompt": (
+            "How the reference pictures align with the target video — "
+            "Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; "
+            "Picture 2 (from Shot 2) aligns with the %.2f-second mark of the target video.\n"
+            "[Shot 1] a\n[Shot 2] At 00:%06.3f, b" % (seconds, seconds)
+        ),
+    }
+    doc = {"episodes": [{"ep": 1, "segments": [segment]}]}
+    if max_cut is not None:
+        doc["params"] = {"maxCutSeconds": max_cut}
+    script = {"episodes": [{"ep": 1, "scenes": [{"flow": [{"line": line}, {"action": "x"}]}]}]}
+    return doc, script, segment
+
+
+class DialogueFitRepairTest(unittest.TestCase):
+    def test_cut_is_lengthened_to_dialogue_seconds_and_timing_resynced(self):
+        # 23 字 / 4.5 = 5.11 -> 5.1 秒，分镜 5 秒装不下
+        doc, script, segment = _fit_fixture("一二三四五六七八九十一二三四五六七八九十一二三", 5.0)
+        fixed = repair_dialogue_fit(doc, script, "en")
+        self.assertEqual(segment["cuts"][0]["seconds"], 5.1)
+        self.assertEqual(len(fixed), 1)
+        self.assertIn("5.10-second mark", segment["h3Prompt"])
+        self.assertIn("At 00:05.100", segment["h3Prompt"])
+
+    def test_default_cap_is_ten_not_five(self):
+        doc, script, segment = _fit_fixture("一二三四五六七八九十一二三四五六七八九十一二三", 5.0)
+        self.assertEqual(len(repair_dialogue_fit(doc, script, "en")), 1)
+        # 5.1s 的分镜在默认（10 秒）上限下不再被吞成 5.0
+        doc2 = {"episodes": [{"segments": [{"cuts": [{"seconds": 5.1}], "h3Prompt": "x"}]}]}
+        self.assertEqual(repair_minor_cut_durations(doc2, "en"), [])
+
+    def test_dialogue_longer_than_cap_is_left_for_the_model(self):
+        doc, script, segment = _fit_fixture("字" * 60, 5.0, max_cut=10)  # 60/4.5 = 13.3 秒
+        self.assertEqual(repair_dialogue_fit(doc, script, "en"), [])
+        self.assertEqual(segment["cuts"][0]["seconds"], 5.0)
+
+    def test_fitting_cut_is_untouched(self):
+        doc, script, segment = _fit_fixture("短句", 3.0)
+        self.assertEqual(repair_dialogue_fit(doc, script, "en"), [])
 
 
 class StoryboardRepairTest(unittest.TestCase):
@@ -30,7 +76,7 @@ class StoryboardRepairTest(unittest.TestCase):
         }
 
     def test_minor_overrun_is_snapped_and_alignment_rebuilt(self):
-        doc = {"episodes": [{"segments": [self._segment()]}]}
+        doc = {"params": {"maxCutSeconds": 5}, "episodes": [{"segments": [self._segment()]}]}
         fixed = repair_minor_cut_durations(doc, "en")
         segment = doc["episodes"][0]["segments"][0]
         self.assertEqual(fixed, ["E01-10#2: 5.1s -> 5.0s"])

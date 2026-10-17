@@ -1,6 +1,7 @@
 """Cheap, deterministic storyboard repairs that avoid regenerating whole episodes."""
 from __future__ import annotations
 
+import math
 import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -91,9 +92,9 @@ def repair_minor_cut_durations(doc: Dict[str, Any], lang: str = "en",
     """Snap tiny upper-bound overruns (e.g. 5.1s) to 5.0s, then resync H3 timing."""
     repaired: List[str] = []
     try:
-        upper = float((doc.get("params") or {}).get("maxCutSeconds", 5))
+        upper = float((doc.get("params") or {}).get("maxCutSeconds", 10))
     except (TypeError, ValueError):
-        upper = 5.0
+        upper = 10.0
     for segment in _segments(doc):
         cuts = segment.get("cuts")
         if not isinstance(cuts, list):
@@ -111,6 +112,64 @@ def repair_minor_cut_durations(doc: Dict[str, Any], lang: str = "en",
         if changed:
             sync_segment_timing(segment, lang)
     return repaired
+
+
+def _r1(x: float) -> float:
+    """与 Node 的 Math.round(n * 10) / 10 一致（四舍五入，非银行家舍入）。"""
+    return math.floor(x * 10 + 0.5) / 10
+
+
+def repair_dialogue_fit(doc: Dict[str, Any], script: Dict[str, Any], lang: str = "zh") -> List[str]:
+    """认领节拍的台词秒数 > 分镜秒数时，把分镜加长到台词秒数（不超过 maxCutSeconds），再重建 H3 时间。
+
+    台词秒数的算法和校验脚本一致：去空白字数 / charsPerSecond（默认 4.5），每句先四舍五入到 0.1 再求和。
+    台词本身超过上限的不动，留给模型回炉（要拆切或改剧本）。
+    """
+    params = doc.get("params") or {}
+    try:
+        upper = float(params.get("maxCutSeconds", 10))
+    except (TypeError, ValueError):
+        upper = 10.0
+    try:
+        cps = float((script.get("params") or {}).get("charsPerSecond", 4.5))
+    except (TypeError, ValueError):
+        cps = 4.5
+    if cps <= 0:
+        cps = 4.5
+    script_eps = {ep.get("ep"): ep for ep in script.get("episodes", [])}
+    fixes: List[str] = []
+    for episode in doc.get("episodes", []):
+        scenes = (script_eps.get(episode.get("ep")) or {}).get("scenes", [])
+        for segment in episode.get("segments", []):
+            try:
+                scene_index = int(segment.get("sceneIndex", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            scene = scenes[scene_index - 1] if 1 <= scene_index <= len(scenes) else {}
+            flow = scene.get("flow", []) if isinstance(scene, dict) else []
+            changed = False
+            for index, cut in enumerate(segment.get("cuts", []), 1):
+                bounds = cut.get("beats", [])
+                if not isinstance(bounds, list) or len(bounds) != 2:
+                    continue
+                try:
+                    start, end = int(bounds[0]), int(bounds[1])
+                    seconds = float(cut.get("seconds"))
+                except (TypeError, ValueError):
+                    continue
+                if not 1 <= start <= end <= len(flow):
+                    continue
+                dialogue = 0.0
+                for beat in flow[start - 1:end]:
+                    if isinstance(beat, dict) and isinstance(beat.get("line"), str):
+                        dialogue += _r1(len(re.sub(r"\s+", "", beat["line"])) / cps)
+                if dialogue > seconds + 1e-9 and _r1(dialogue) <= upper:
+                    cut["seconds"] = _r1(dialogue)
+                    fixes.append(f"{segment.get('id', '?')}#{index}: 台词 {_r1(dialogue):.1f}s，分镜 {seconds:.1f}s -> {cut['seconds']:.1f}s")
+                    changed = True
+            if changed:
+                sync_segment_timing(segment, lang)
+    return fixes
 
 
 def repair_deterministic_storyboard(doc: Dict[str, Any], lang: str = "en") -> List[str]:
