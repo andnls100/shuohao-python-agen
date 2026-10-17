@@ -3,7 +3,7 @@
 
 # shuohao-skills
 
-**面向各类 Agent 的 AI 短剧制作 skill 集合**：从一本小说到直接交给生成管线的制作素材——排大纲、拆角色、出场景与道具设定、写剧本、排开场站位、切分镜。每个 skill 都是自包含目录，任何能够读取 `SKILL.md` 并执行随附脚本的 Agent 都可以使用；Claude Code 和 Codex 只是其中两个运行示例，并非使用前提。
+**面向各类 Agent 的 AI 短剧制作 skill 集合**：从小说到制作素材——大纲、角色、美术、剧本、开场站位、分镜；另有 Python 智能体把这些阶段串成流水线，并在分镜后提供可选的视频生成阶段。每个 skill 都是自包含目录，任何能够读取 `SKILL.md` 并执行随附脚本的 Agent 都可以使用；Claude Code 和 Codex 只是其中两个运行示例，并非使用前提。
 
 仓库目前有 **7 个 skill：6 个制作阶段，加上可独立使用的角色参考图生成**。改编大纲收敛结构，角色、美术、剧本同步迭代；开场站位在分镜之前确定每场人物的位置。
 
@@ -22,6 +22,7 @@ flowchart TD
     staging -->|复制开场走位句| storyboard[novel-storyboard · 分镜]
     refs -. 参考图片 .-> storyboard
     storyboard --> production[视频投产包]
+    production --> video[video · 视频提示词与可选云端生成]
 ```
 
 | Skill | 做什么 |
@@ -207,9 +208,10 @@ python run_agent.py status             # 各阶段产物是否存在、是否通
 | 4 | `script` | novel-script：三集一批 |
 | 5 | `staging` | novel-staging：先出地点平面，再按地点写场景 |
 | 6 | `storyboard` | novel-storyboard：三集一批，最后导出投产包 |
-| 7 | `refs` | character-refs：可选，默认不跑 |
+| 7 | `refs` | character-refs：可选，默认不跑；可生成角色参考图 |
+| 8 | `video` | 视频阶段：读取分镜，生成逐段提示词、任务清单和人工质检清单；配置 API 并显式指定 `--video-submit` 后才会调用云端生成 |
 
-不加 `--stages` 时跑前六个阶段。已经完成并通过校验的阶段会被跳过。
+不加 `--stages`（或使用 `--stages all`）时只跑前六个制作阶段；`refs` 和 `video` 都需显式指定。视频阶段依赖已经生成的 `storyboard`。已经完成并通过校验的阶段会被跳过；视频阶段可以通过 `--eps` 按集执行。
 
 ### 各步骤的输出文件
 
@@ -224,6 +226,7 @@ python run_agent.py status             # 各阶段产物是否存在、是否通
 | 5 | `staging` | `staging/staging.json`：每个地点能站能坐的东西，以及每场的开场站位 | `blocking.txt`（每场一句开场走位句，分镜照抄）、`staging-report.html`（可拖动调整的俯视平面） | `work/staging/location-S01.json`（认图结果）、`scenes-*.json` |
 | 6 | `storyboard` | `storyboard/<书名>-storyboard.json`：段、分镜、分镜图提示词、H3 提示词 | `<书名>-storyboard.md`、`storyboard-report.html` | `storyboard/.gates.jsonl`（质量门失败的累积记录） |
 | 7 | `refs`（可选） | `character-refs/<角色名>/asset.json`：角色描述加每张参考图的全部版本 | 配了出图模型并加 `--refs-gen` 时，另有 `character-refs/character-refs.html` | `work/refs/<角色名>-intake.json`（模型整理出的角色描述） |
+| 8 | `video`（可选） | `video/video-manifest.json`：逐段提示词、时长、任务 ID、生成状态、视频 URL 和本地路径 | `video/prompts/<分段ID>.txt`、`video/qc-checklist.md`；下载成功的视频保存在 `video/videos/<分段ID>.mp4` | `video-manifest.json` 保存云端任务状态，重新执行可复用已保存的任务 ID 和已完成结果 |
 
 第 6 步还会在 `storyboard/` 下导出投产包：
 - `storyboard/E01-01/prompt.md`、`E01-02/prompt.md`……每一段一个文件夹，里面是这一段的 H3 提示词，以及按 Picture 序号列出的分镜图挂载说明。
@@ -258,6 +261,15 @@ python run_agent.py run --stages refs --refs-names 沈知微 --refs-look 动漫
 # 不暂停，骨架自动确认
 python run_agent.py run --yes ...
 
+# 视频阶段：先生成提示词和任务清单，不调用云端 API
+python run_agent.py run --stages video --eps 1
+
+# Seedance 风格提示词（仍然只是预览）
+python run_agent.py run --stages video --eps 1 --video-protocol seedance
+
+# 确认 API 配置、价格和提示词后，显式提交视频生成任务
+python run_agent.py run --stages video --eps 1 --video-submit
+
 # 忽略已有产物和缓存，全部重做
 python run_agent.py run --stages script --force
 ```
@@ -275,9 +287,53 @@ python run_agent.py run --stages script --force
 | `--aspect` | 分镜画幅 `16:9` 或 `9:16` |
 | `--prompt-lang` | H3 提示词语言 `en` 或 `zh`，默认 `en` |
 | `--images` | 场景设定图目录（staging 认图，需要视觉模型） |
+| `--refs-names` `--refs-look` `--refs-gen` | refs 阶段要处理的角色、画风，以及是否真正调用出图模型 |
+| `--video-protocol` | 视频提示词协议：`h3`（默认，沿用分镜中的 H3 提示词）或 `seedance`（根据结构化分镜字段拼接提示词） |
+| `--video-submit` | 明确授权调用配置好的视频 API；不加此参数只生成预览文件 |
 | `--yes` | 不暂停，骨架拍板点自动确认 |
 | `--force` | 忽略已有产物和缓存 |
 | `--concurrency` `--fix-rounds` | 同时进行的调用数（默认 3）、最多回炉几轮（默认 3） |
+
+### 视频生成阶段（可选）
+
+视频阶段接在 storyboard 之后，**不会在普通流水线中自动运行**。默认只生成提示词与清单，不会发起云端任务。
+
+```bash
+# 沿用分镜的 h3Prompt
+python run_agent.py run --stages video --eps 1
+
+# 根据结构化镜头字段生成 Seedance 风格提示词
+python run_agent.py run --stages video --eps 1 --video-protocol seedance
+```
+
+输出到 `output/video/`：
+
+- `video-manifest.json`：每段提示词、时长、任务 ID、状态、视频 URL 和本地路径。
+- `prompts/<分段ID>.txt`：可单独检查、修改的提示词。
+- `qc-checklist.md`：角色连续性、站位、台词、画面瑕疵和剪辑点的人工质检清单。
+- `videos/<分段ID>.mp4`：API 返回下载链接且下载成功时保存。
+
+在项目根目录的 `.env` 配置供应商的实际接口：
+
+```dotenv
+VIDEO_API_SUBMIT_URL=https://your-provider.example/v1/videos/generations
+VIDEO_API_STATUS_URL_TEMPLATE=https://your-provider.example/v1/videos/{task_id}
+VIDEO_API_KEY=your_api_key
+VIDEO_API_MODEL=your-video-model
+VIDEO_API_TIMEOUT=120
+VIDEO_API_POLL_INTERVAL=5
+VIDEO_API_MAX_WAIT=900
+```
+
+当前适配器使用通用 REST 约定：Bearer Token 鉴权，提交 JSON 字段为 `model`、`prompt`、`duration`、`aspect_ratio`。平台若使用不同请求字段、鉴权或响应格式，需要按官方文档调整 `zhipu_agent/stages/video.py`。**OpenAI 兼容文本 API 不代表一定支持视频生成。**
+
+确认平台文档、模型、费用和提示词后，才显式提交：
+
+```bash
+python run_agent.py run --stages video --eps 1 --video-submit
+```
+
+`--eps` 支持 `1-3` 或 `1,3,5`。失败会写入 manifest；配置状态 URL 后可轮询异步任务，已完成分段会跳过。下载失败会保留云端 URL 和错误信息。当前阶段**不会自动把所有片段拼接成整集 MP4**。详见 [视频生成阶段文档](docs/video-generation.md)。
 
 ### 题材怎么填
 
@@ -376,14 +432,3 @@ for f in skills/*/scripts/selftest.mjs; do node "$f"; done
 
 [Apache 2.0](LICENSE)
 
-
-## 视频生成阶段（可选）
-
-在分镜之后运行视频阶段，先检查提示词，不会自动产生视频 API 费用：
-
-```bash
-python run_agent.py run --stages video --eps 1
-python run_agent.py run --stages video --eps 1 --video-protocol seedance
-```
-
-确认供应商 API 的价格、请求格式和模型可用后，在 `.env` 配置 `VIDEO_API_SUBMIT_URL`、`VIDEO_API_KEY`、`VIDEO_API_MODEL`（异步接口还需要 `VIDEO_API_STATUS_URL_TEMPLATE`），并显式添加 `--video-submit` 才会提交任务。详见 [视频生成阶段文档](docs/video-generation.md)。通用适配器并不意味着所有视频平台都兼容相同的 API 格式。
