@@ -83,6 +83,19 @@ def _request_json(provider: dict, prompt: str) -> dict:
     }
     if provider.get("quality"):
         body["quality"] = provider["quality"]
+    # Log the actual HTTP request parameters for debugging. Never print the real API key.
+    print("[image-api] ===== HTTP 请求参数开始 =====", flush=True)
+    print("[image-api] method=POST", flush=True)
+    print(f"[image-api] url={provider['url']}", flush=True)
+    print("[image-api] headers=" + json.dumps({
+        "Authorization": "Bearer <REDACTED>",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }, ensure_ascii=False), flush=True)
+    print("[image-api] timeout_seconds=" + str(provider["timeout"]), flush=True)
+    print("[image-api] json_body=" + json.dumps(body, ensure_ascii=False, indent=2), flush=True)
+    print("[image-api] ===== HTTP 请求参数结束 =====", flush=True)
+
     req = urllib.request.Request(
         provider["url"],
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
