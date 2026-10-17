@@ -215,7 +215,7 @@ python run_agent.py status             # 各阶段产物是否存在、是否通
 
 产物都在 `--out` 指定的目录里（默认 `output/`），每个阶段一个子目录。下面的 `<书名>` 是从小说里的《……》或文件名推断出来的。**每个阶段的主文件是 `.json`**，后面的阶段读取的就是它；`.md` 和 `.html` 是从它渲染出来的，方便阅读。
 
-| 步骤 | 阶段 | 主文件 | 阅读用的文件 | 中间文件（缓存，续跑用） |
+| 步骤 | 阶段 | 主文件 | 供阅读的文件 | 中间文件（缓存，续跑时读取） |
 | --- | --- | --- | --- | --- |
 | 1 | `outline` | `outline/<书名>-outline.json`：改编说明、人物表、爽点表、分集梗概、资产清单 | `<书名>-outline.md`、`outline-report.html` | `work/outline/eps-*.json`（分批写的每集梗概） |
 | 2 | `characters` | `characters/<书名>-cast.json`：每个角色的人物画像、形象提示词、音色提示词 | `<书名>-cast.md`、`report.html` | `work/characters/`：`seed.json`（大纲预填的角色清单）、`merged.json`（归并结果）、`card-<角色名>.json`（每个角色的卡）、`summary.txt`（故事摘要） |
@@ -228,7 +228,7 @@ python run_agent.py status             # 各阶段产物是否存在、是否通
 第 6 步还会在 `storyboard/` 下导出投产包：
 - `storyboard/E01-01/prompt.md`、`E01-02/prompt.md`……每一段一个文件夹，里面是这一段的 H3 提示词，以及按 Picture 序号列出的分镜图挂载说明。
 - `storyboard/manifest.json`：每一段的时长、切点、提示词路径、分镜图路径，以及缺失的分镜图清单。
-- **分镜图（`f1.png`、`f2.png`……）本流水线不会产生**，需要你用出图工具按分镜图提示词另行生成，放进对应的段文件夹，再重新导出。
+- **分镜图（`f1.png`、`f2.png`……）本流水线不会产生**，需要你使用出图工具按分镜图提示词另行生成，放进对应的段文件夹，再重新导出。
 
 其他文件：
 - `source/`：转成 UTF-8 的小说原文副本。
