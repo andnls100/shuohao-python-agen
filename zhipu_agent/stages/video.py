@@ -67,7 +67,7 @@ def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str
             base_prompt = _prompt(segment, protocol)
             items.append({"id": sid, "ep": ep, "sceneIndex": segment.get("sceneIndex"),
                           "duration_seconds": _duration(segment),
-                          "prompt": base_prompt + "\\n\\n" + style_hint,
+                          "prompt": base_prompt + "\n\n" + style_hint,
                           "state": "planned", "task_id": None, "video_url": None,
                           "video_path": None, "error": None})
     if not items:
