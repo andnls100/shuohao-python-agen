@@ -1007,9 +1007,31 @@ function main(argv) {
     const outDir = resolve(path, '..');
     const imagesFlag = flag(rest, '--images');
     const imagesDir = imagesFlag ? resolve(imagesFlag) : join(outDir, 'images');
+    const manifestPath = join(outDir, '..', 'images', 'image-manifest.json');
+    let imageItems = [];
+    if (existsSync(manifestPath)) {
+      try {
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+        imageItems = Array.isArray(manifest.items) ? manifest.items : [];
+      } catch { /* malformed manifest: retain legacy image lookup */ }
+    }
+    const imageExtensions = ['.png', '.jpg', '.jpeg', '.webp'];
     for (const item of [...doc.scenes, ...(doc.props ?? [])]) {
-      const abs = join(imagesDir, `${slug(item.name)}-sheet.png`);
-      if (existsSync(abs)) item.sheetImage = relative(outDir, abs).split(sep).join('/');
+      const kind = doc.scenes.includes(item) ? 'scene' : 'prop';
+      const id = String(item.id ?? '');
+      const generated = imageItems.find((entry) =>
+        entry.kind === kind &&
+        entry.state === 'succeeded' &&
+        (String(entry.asset_id ?? '') === id || String(entry.name ?? '') === String(item.name ?? '')) &&
+        typeof entry.output_path === 'string' &&
+        existsSync(resolve(outDir, '..', entry.output_path))
+      );
+      let abs = generated ? resolve(outDir, '..', generated.output_path) : null;
+      if (!abs) {
+        abs = imageExtensions.map((ext) => join(imagesDir, `${slug(item.name)}-sheet${ext}`)
+          .find((candidate) => existsSync(candidate));
+      }
+      if (abs && existsSync(abs)) item.sheetImage = relative(outDir, abs).split(sep).join('/');
     }
     process.stdout.write((rest.includes('--html') ? renderHtml(doc, lang) : renderMarkdown(doc, lang)) + '\n');
     return;
