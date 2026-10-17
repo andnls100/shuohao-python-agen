@@ -1,6 +1,6 @@
 # 角色对白音频生成
 
-音频阶段读取现有的 `characters/*-cast.json` 和 `script/*-script.json`，将每句对白单独生成音频，不重新写剧本，也不重新生成分镜。
+音频阶段读取现有的角色卡与剧本，按句生成对白音频，不重新写剧本或分镜。角色音色 ID 存在输出目录中，不需要把每个角色的 ID 写进 `models.json`。
 
 ## 1. 先预览，不产生 API 费用
 
@@ -9,66 +9,88 @@ python run_agent.py run --stages audio --eps 1
 ```
 
 产物：
-
-- `output/audio/audio-manifest.json`：说话人、对白、角色音色指令、状态。
-- `output/audio/prompts/`：逐句配音提示词，便于人工检查。
+- `output/audio/character-voices.json`：角色音色注册表，保存稳定的 `character_id`、`voice_id`、音色描述、模型和状态。
+- `output/audio/audio-manifest.json`：逐句对白清单；每句都包含角色 ID、当前 voice ID、表演指令、生成状态与音频路径。
+- `output/audio/prompts/`：逐句配音提示词。
 - `output/audio/qc-checklist.md`：配音质检清单。
+- `output/audio/voice-previews/`：音色设计接口返回试听音频时保存的文件。
 - `output/audio/lines/`：提交 TTS 后保存的逐句音频文件。
 
-每句对白会把角色卡的英文 `voice.prompt` 作为音色设计指令，并附加剧本中的 `delivery`（本句语气、情绪、动作）。如果没有 `voice.prompt`，则回退到 `timbre/pitch/pace/accent/emotion/referenceHint`。
+预览模式只整理数据，不调用百炼 API。实际创建音色与合成音频需要显式传入 `--audio-submit`。
 
-## 2. 配置 TTS 服务
+## 2. 配置 CosyVoice
 
-在项目根目录的 `models.json` 增加 `audio` 配置。接口需要接受类似 OpenAI Speech API 的 JSON 请求，并**直接返回音频二进制**（不是 JSON 包装的 URL 或 base64）。不同供应商字段不一致时，需要按该供应商文档调整适配器。
+在项目根目录的 `models.json` 的 `audio` 列表中配置接口地址、模型和 API Key 环境变量。当前模型使用 `cosyvoice-v3.5-flash`，声音设计与合成均需使用北京地域的百炼服务和对应 API Key。
 
 ```json
 {
   "audio": [
     {
-      "name": "TTS 主用",
-      "speech_url": "https://你的TTS平台/v1/audio/speech",
-      "api_key_env": "AUDIO_PRIMARY_API_KEY",
-      "model": "支持语音合成的模型名",
-      "voice": "alloy",
-      "voice_map": {
-        "C01": "voice_id_1",
-        "C02": "voice_id_2",
-        "沈知微": "voice_id_1"
-      },
+      "name": "百炼-CosyVoice",
+      "provider": "cosyvoice_tts",
+      "speech_url": "https://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer",
+      "voice_design_url": "https://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/customization",
+      "api_key_env": "DASHSCOPE_API_KEY",
+      "model": "cosyvoice-v3.5-flash",
       "response_format": "mp3",
-      "instructions_field": "instructions",
+      "sample_rate": 24000,
+      "voice_language_hints": ["zh"],
+      "language_hints": ["zh"],
+      "voice_preview_text": "你好，我是这个故事中的角色，很高兴认识你。",
       "timeout": 120
     }
   ]
 }
 ```
 
-保留现有 `models.json` 里的其他字段，只添加或合并 `audio`。不要把真实 API Key 提交到 Git。
+将 `你的WorkspaceId` 替换为百炼控制台中的实际 Workspace ID。保留 `models.json` 里的其他字段，只添加或合并 `audio`；不要提交真实 API Key。
 
-- `voice` 是没有专属映射时的默认音色。
-- `voice_map` 可按角色 ID（如 `C01`）或角色名映射供应商音色 ID。若希望角色之间有稳定、明显的音色差异，优先配置供应商支持的不同音色 ID。
-- `instructions_field` 默认是 `instructions`。若供应商不支持这个字段，设为 `""`；但这样就不能保证自然语言音色提示被模型使用。
-- 供应商必须支持配置的模型、音色和响应格式。不能仅凭接口路径相似就认定兼容。
-
-Windows CMD 设置密钥示例：
-
+Windows CMD 设置密钥：
 ```bat
-set AUDIO_PRIMARY_API_KEY=你的TTS密钥
+set DASHSCOPE_API_KEY=你的百炼API密钥
 ```
 
-## 3. 正式生成
+## 3. 固定角色音色
 
-确认模型、价格、角色音色映射无误后：
+`character-voices.json` 示例：
+```json
+{
+  "version": 1,
+  "provider": "aliyun_bailian",
+  "characters": {
+    "C01": {
+      "character_id": "C01",
+      "name": "主角",
+      "model": "cosyvoice-v3.5-flash",
+      "voice_id": "由百炼接口返回的实际 ID",
+      "voice_description": "成年男性，中低音，略带沙哑",
+      "status": "ready"
+    }
+  }
+}
+```
 
+示例中的 ID 是占位文本。正式运行时，程序会从角色卡的 `voice.prompt`（或音色字段）读取描述，通过百炼声音设计接口创建音色，并将返回的 `output.voice_id` 写入注册表。后续集数和重跑会复用该 ID，不会按每句对白重复创建。也可以手动把真实 `voice_id` 写入 JSON。
+
+- 以稳定的 `character_id` 作为主键；角色改名但 ID 不变时会继续复用音色。
+- 缺少音色描述时会报错，不会静默切换成随机默认音色。
+- `voice_id` 与模型绑定。切换到 CosyVoice 后，之前为其他模型创建的 ID 不能直接复用；需要为 CosyVoice 创建新的音色 ID。
+- CosyVoice v3.5 Flash 声音设计仅支持北京地域；请使用匹配地域的 Workspace、API Key 和接口地址。
+
+## 4. 正式生成
+
+确认模型、地域、API 地址、音色描述和费用后：
 ```powershell
 python run_agent.py run --stages audio --eps 1 --audio-submit --yes
 ```
 
-`--audio-submit` 才会调用 TTS API；不加该参数只生成预览清单。生成结果是一句一个文件，便于重做单句和后期对口型、混音。重跑时会复用文本与音色指令未变化的既有状态；加 `--force` 会忽略已有产物，避免在没必要时使用。
+不加 `--audio-submit` 不会调用 API。生成结果是一句一个音频文件；重跑会复用已成功的结果和已登记的音色。
 
-## 4. 当前边界
+## 5. 当前边界
 
-- 本阶段生成的是**角色对白 TTS**，并非完整混音成片。
-- 角色音色字段提供设计指令；是否能按自然语言重塑音色取决于 TTS 模型。使用固定预设音色时，应通过 `voice_map` 给不同角色分配不同 voice ID。
-- 分镜里的环境音、音效和配乐目前仍是提示词内容；要实际生成这些音轨，需要接入支持音效/音乐生成的专用 API，再由 FFmpeg 按时间线混音。
+- 本阶段生成角色对白 TTS，不是完整混音成片。
+- 每个角色的 voice ID 固定，单句的情绪和表演要求通过 `instruction` 传递。
+- 环境音、音效、配乐还需要独立音频模型，再用 FFmpeg 按时间线混音。
 - 本阶段不会自动把逐句音频拼接成整集，也不会自动把音频合进视频。
+
+官方文档：[CosyVoice 声音设计](https://help.aliyun.com/zh/model-studio/voice-design-user-guide)；[CosyVoice HTTP API](https://help.aliyun.com/zh/model-studio/cosyvoice-tts-http-api)。
