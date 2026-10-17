@@ -24,5 +24,27 @@
       "api_key": "把这里换成平台一的 Key",
       "model": "glm-5.3-flashx"
     }
+  ],
+  "video": [
+    {
+      "name": "视频平台主用",
+      "submit_url": "https://你的主视频平台/v1/videos/generations",
+      "status_url_template": "https://你的主视频平台/v1/videos/{task_id}",
+      "api_key_env": "VIDEO_PRIMARY_API_KEY",
+      "model": "视频模型名",
+      "timeout": 120,
+      "poll_interval": 5,
+      "max_wait": 900
+    },
+    {
+      "name": "视频平台备用",
+      "submit_url": "https://你的备用视频平台/v1/videos/generations",
+      "status_url_template": "https://你的备用视频平台/v1/videos/{task_id}",
+      "api_key_env": "VIDEO_BACKUP_API_KEY",
+      "model": "备用视频模型名",
+      "timeout": 120,
+      "poll_interval": 5,
+      "max_wait": 900
+    }
   ]
 }
