@@ -17,7 +17,7 @@ def _render(value: Any, context: dict) -> Any:
     if not isinstance(value, str):
         return value
     if value.startswith("\${") and value.endswith("}") and value.count("\${") == 1:
-        key = value[2:-1]
+        key = value[2:-2]
         if key in context:
             return context[key]
     for key, replacement in context.items():
