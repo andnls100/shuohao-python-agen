@@ -1,6 +1,6 @@
 """Dialogue TTS stage with persistent per-character voice IDs.
 
-Preview mode never calls paid APIs. With --audio-submit, Qwen-Audio-TTS voices
+Preview mode never calls paid APIs. With --audio-submit, CosyVoice voices
 are created only when the output registry has no voice_id for that character.
 """
 from __future__ import annotations
@@ -61,15 +61,20 @@ def _load_audio_config() -> list[dict]:
             raise ValueError(f"models.json 的 audio[{i}]（{name}）缺少：{'、'.join(missing)}")
         if urlparse(url).scheme not in ("http", "https"):
             raise ValueError(f"models.json 的 audio[{i}]（{name}）speech_url 必须是 HTTP(S) URL")
-        provider = str(item.get("provider") or ("qwen_audio_tts" if model.startswith("qwen-audio-") else "openai_speech")).strip().lower()
+        default_provider = (
+            "cosyvoice_tts" if model.startswith("cosyvoice-")
+            else "qwen_audio_tts" if model.startswith("qwen-audio-")
+            else "openai_speech"
+        )
+        provider = str(item.get("provider") or default_provider).strip().lower()
         design_url = str(item.get("voice_design_url") or "").strip()
-        if provider == "qwen_audio_tts" and not design_url:
+        if provider in ("qwen_audio_tts", "cosyvoice_tts") and not design_url:
             suffix = "/api/v1/services/audio/tts/SpeechSynthesizer"
             if url.endswith(suffix):
                 design_url = url[:-len(suffix)] + "/api/v1/services/audio/tts/customization"
-        if provider == "qwen_audio_tts" and not design_url:
+        if provider in ("qwen_audio_tts", "cosyvoice_tts") and not design_url:
             raise ValueError(
-                f"models.json 的 audio[{i}]（{name}）使用 Qwen-Audio-TTS 时，"
+                f"models.json 的 audio[{i}]（{name}）使用 Qwen-Audio-TTS/CosyVoice 时，"
                 "speech_url 应为百炼 SpeechSynthesizer 地址，或显式配置 voice_design_url"
             )
         result.append({
@@ -203,7 +208,7 @@ def _load_or_sync_registry(ctx: Context, items: list[dict], model: str) -> dict:
         item["voice_id"] = voice_id or None
         item["voice_status"] = str(entry.get("status") or ("ready" if voice_id else "needs_voice"))
         item["voice_description"] = str(entry.get("voice_description") or item.get("voice_description") or "")
-    registry["provider"] = "aliyun_bailian" if model.startswith("qwen-audio-") else registry.get("provider", "manual")
+    registry["provider"] = "aliyun_bailian" if model.startswith(("qwen-audio-", "cosyvoice-")) else registry.get("provider", "manual")
     registry["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     write_json(path, registry)
     return registry
@@ -444,7 +449,7 @@ def _synthesize_generic(item: dict, cfg: dict, target: Path) -> None:
 
 
 def _synthesize(item: dict, cfg: dict, target: Path) -> None:
-    if cfg["provider"] == "qwen_audio_tts":
+    if cfg["provider"] in ("qwen_audio_tts", "cosyvoice_tts"):
         _synthesize_qwen(item, cfg, target)
     else:
         _synthesize_generic(item, cfg, target)
@@ -479,7 +484,7 @@ def run(ctx: Context, eps: Optional[list] = None, submit: bool = False) -> Path:
     cfg = providers[0] if providers else None
     if submit and cfg is None:
         raise ValueError("正式生成需要在 models.json 配置 audio")
-    model = cfg["model"] if cfg else "qwen-audio-3.1-tts-flash"
+    model = cfg["model"] if cfg else "cosyvoice-v3.5-flash"
     registry = _load_or_sync_registry(ctx, manifest["items"], model)
 
     # IDs are copied into every dialogue item, so the manifest is self-contained and auditable.
@@ -520,7 +525,7 @@ def run(ctx: Context, eps: Optional[list] = None, submit: bool = False) -> Path:
         ctx.log("预览模式：未调用 API。确认 models.json、音色描述和价格后，使用 --audio-submit 才会创建缺失音色并生成音频。")
         return path
 
-    if cfg["provider"] == "qwen_audio_tts":
+    if cfg["provider"] in ("qwen_audio_tts", "cosyvoice_tts"):
         _ensure_qwen_voices(ctx, manifest["items"], registry, cfg)
         for item in manifest["items"]:
             entry = registry["characters"][str(item["character_id"])]
@@ -536,7 +541,7 @@ def run(ctx: Context, eps: Optional[list] = None, submit: bool = False) -> Path:
         failures = []
         for provider in providers:
             try:
-                if provider["provider"] == "qwen_audio_tts" and not item.get("voice_id"):
+                if provider["provider"] in ("qwen_audio_tts", "cosyvoice_tts") and not item.get("voice_id"):
                     raise RuntimeError(f"角色 {item['character_id']} 没有 voice_id")
                 actual_target = target.with_suffix("." + provider["response_format"])
                 _synthesize(item, provider, actual_target)
