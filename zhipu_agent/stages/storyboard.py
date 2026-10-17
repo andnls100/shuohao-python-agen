@@ -127,7 +127,7 @@ def run(
                               if any(t in ln for t in (f"第 {ep} 集", f"第{ep}集", f"E{ep:02d}"))]
             prompt = (
                 f"## 任务\n给第 {ep} 集切分镜：先按剧情单元分段（每段 9–15 秒、不跨场），段内切 2–5 秒的分镜。\n\n"
-                f"## 画幅与语言\naspectRatio = {aspect}；promptLang = {prompt_lang}（h3Prompt 的正文语言，台词在 <d> 里保留原文）。\n\n"
+                f"## 画幅与语言\naspectRatio = {aspect}；promptLang = {prompt_lang}（h3Prompt 正文、对齐行、镜头标记、声景和配乐字段都必须使用该语言；台词在 <d> 里保留原文）。\n"\n                + ("## 中文模式硬约束\n除协议固定 token 和台词外，frame、shot、h3Prompt 全部使用简体中文。h3Prompt 必须按 references/h3-prompt.md 的中文格式输出：首行以“参考图与目标视频的对齐——”开头；字段使用“整体视听描述：”“整体音景：”“非叙事配乐：”；镜头标记使用“[镜头 1]”“[镜头 2]”依次连续编号；每个镜头独立一行，除第一镜外必须以累计切点时间开头。禁止输出英文版 How the reference pictures align、integrated_multimodal_description、overall_soundscape、non_diegetic_music 或 [Shot k]。\n\n" if prompt_lang == "zh" else "")\n                + ("## 英文模式硬约束\n除台词、歌词和画面可见文字外，h3Prompt 正文、对齐行、镜头标记、声景和配乐均使用英文；使用官方英文骨架和连续的 [Shot 1]、[Shot 2] 标记。\n\n" if prompt_lang == "en" else "")
                 f"## 工作底稿 seedScenes（节拍编号、台词、每拍秒数已算好，不要重估；镜头必须认领这些节拍）\n"
                 f"{json.dumps(seed_ep.get('seedScenes', []), ensure_ascii=False, indent=1)}\n\n"
                 f"## 场景卡\n{json.dumps(scene_cards, ensure_ascii=False, indent=1)}\n\n"
@@ -150,6 +150,12 @@ def run(
             ep = int(key)
             episode = {k: v for k, v in data.items() if k != "seedScenes"}
             episode["ep"] = ep
+            # The episode number is authoritative; do not trust IDs copied from another episode
+            # or from examples. Normalize segment IDs deterministically before validation.
+            for segment_index, segment in enumerate(episode["segments"], start=1):
+                if not isinstance(segment, dict):
+                    raise ValueError(f"第 {segment_index} 段必须是 JSON 对象")
+                segment["id"] = f"E{ep:02d}-{segment_index:02d}"
             _doc["episodes"] = sorted(
                 [e for e in _doc["episodes"] if e["ep"] != ep] + [episode], key=lambda e: e["ep"])
             write_json(_path, _doc)
@@ -174,7 +180,7 @@ def run(
                 return result
 
             repaired = 0
-            max_local_repairs = 6
+            max_local_repairs = 24
             for (segment_id, cut_index), errors in list(targets.items())[:max_local_repairs]:
                 episode = next((e for e in _doc.get("episodes", [])
                                 if any(s.get("id") == segment_id for s in e.get("segments", []))), None)
@@ -231,7 +237,7 @@ def run(
                     write_json(_p, _doc)
 
             if len(targets) > max_local_repairs:
-                ctx.log(f"[storyboard] 还有 {len(targets) - max_local_repairs} 个分镜未自动修复；为控制调用量停止")
+                ctx.log(f"[storyboard] 还有 {len(targets) - max_local_repairs} 个分镜未自动修复；单批局部修复上限为 {max_local_repairs}")
             if repaired:
                 result = ctx.run(sk, ["validate", _p, *_refs(ctx)], cwd=sb_dir)
             return result
