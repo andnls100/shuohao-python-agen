@@ -96,7 +96,12 @@ def run(
     todo = [e for e in wanted if e not in done]
     if not todo:
         ctx.log("所有集都已切好，跳过切镜")
-    system = build_system(sk, PASSES)
+    language_contract = (
+        "HARD OUTPUT CONTRACT: promptLang=zh requires Simplified Chinese for frame, shot, h3Prompt, alignment, shot markers, soundscape, and music fields. Preserve dialogue inside <d>, lyrics, and visible in-frame text. Use [镜头 k], 整体视听描述：, 整体音景：, 非叙事配乐：, and the Chinese alignment format from h3-prompt.md. Do not use English field names or [Shot k]."
+        if prompt_lang == "zh" else
+        "HARD OUTPUT CONTRACT: promptLang=en requires English for h3Prompt, alignment, shot markers, soundscape, and music fields. Use [Shot k] and official English field names. Preserve dialogue inside <d>, lyrics, and visible in-frame text in their source language."
+    )
+    system = build_system(sk, PASSES, extra=language_contract)
 
     for group in batches(todo, BATCH):
         seed = ctx.node_json(sk, ["seed", script_path, "--eps", f"{group[0]}-{group[-1]}", "--aspect", aspect])
