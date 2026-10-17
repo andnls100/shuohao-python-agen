@@ -28,7 +28,7 @@ export const DEFAULT_PARAMS = {
   minCutSeconds: 2,      // 单个分镜下限
   maxCutSeconds: 10,      // 单个分镜上限——3 秒左右是短剧的呼吸
   maxOnScreen: 3,        // 单个分镜同框人数上限，超了必须带拆解说明
-  tolerance: 0.15,       // 每集总时长对剧本目标的容差
+  tolerance: 1.0,        // 每集总时长对剧本目标的容差 ±100%
 };
 
 export function paramsOf(doc) {
