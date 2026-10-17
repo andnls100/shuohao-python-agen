@@ -1,10 +1,5 @@
 [![中文](https://img.shields.io/badge/%E4%B8%AD%E6%96%87-8b1a1a?style=for-the-badge)](README.zh.md)
 [![English](https://img.shields.io/badge/English-f2e3e3?style=for-the-badge&labelColor=f2e3e3&color=b07070)](README.md)
-[![关注作者 X](https://img.shields.io/badge/%E5%85%B3%E6%B3%A8%E4%BD%9C%E8%80%85-%40eternityspring-b07070?style=for-the-badge&labelColor=8b1a1a&logo=x&logoColor=f2e3e3)](https://x.com/eternityspring)
-
-🎬 **[AI视频工作台](https://studio.reelbenchai.com)**
-
-[![ReelBench AI视频工作台中文首屏](assets/reelbench-first-screen.png)](https://studio.reelbenchai.com)
 
 # shuohao-skills
 
@@ -40,14 +35,6 @@ flowchart TD
 | [**novel-storyboard**](skills/novel-storyboard) | 给 AI 短剧出分镜：段（一次生成 ≤15 秒）→ 分镜（2–5 秒硬门）→ 分镜图（主图钉 0.00 秒、子图钉各自切点），MiniMax H3 提示词的对齐指令与切点时刻逐字对账；分镜图拿设定图当参考图真出图，export 一键出 H3 / Seedance 投产包。18 道质量门全部脚本检查 |
 
 **六个制作阶段的报告都支持中英双语界面**：默认中文，`render --lang en` 出全英文报告（数据内容保持原文）。character-refs 的报告同样内置中英日界面，其他语言现场翻译。
-
-## AI 短剧交流社群
-
-我建了一个付费AI视频交流群，讨论 AI 视频的工作流、工具和实操。**交流群 ReelBench AI 视频工作台是两项独立服务。**
-
-有兴趣的加我：**微信 `hao_dev`**，添加时备注 **`github`**。
-
-<img src="assets/wechat.png" alt="烁皓微信二维码" width="180">
 
 ## 开场站位：输入、输出与分镜交接
 
@@ -320,11 +307,9 @@ for f in skills/*/scripts/selftest.mjs; do node "$f"; done
 
 > 这套结构来自《渡口》端到端 demo 的实际归档经验，demo 的工作目录在本仓库之外，这里只固化约定。
 
-
 ## Star 趋势
 
 [![Star 趋势曲线](https://api.star-history.com/svg?repos=eternityspring/shuohao-skills&type=Date)](https://star-history.com/#eternityspring/shuohao-skills&Date)
-
 
 ## License
 
