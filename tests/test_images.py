@@ -180,5 +180,86 @@ class OnlyFilterTest(unittest.TestCase):
         self.assertEqual(self.requests, [])
 
 
+PNG = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 32).decode()
+
+
+class OnlyFilterTest(unittest.TestCase):
+    """--images-only：只请求被选中的那几张，其余保持待生成；用本地假接口，不联网。"""
+
+    def setUp(self):
+        self.requests = []
+        outer = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_POST(self):
+                outer.requests.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+                payload = json.dumps({"data": [{"b64_json": PNG}]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(payload)
+
+        self.server = HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.tmp = Path(tempfile.mkdtemp(prefix="agent-test-images-"))
+        models = self.tmp / "models.json"
+        # 故意只写 image、不写 text：文本模型读 .env，models.json 可以只放图片 / 视频
+        models.write_text(json.dumps({"image": [{
+            "name": "fake", "base_url": f"http://127.0.0.1:{self.server.server_port}/v1",
+            "api_key": "k", "model": "fake-image", "size": "1024x1024"}]}), encoding="utf-8")
+        self.old_env = os.environ.get("AGENT_MODELS_FILE")
+        os.environ["AGENT_MODELS_FILE"] = str(models)
+        self.out = self.tmp / "out"
+        (self.out / "characters").mkdir(parents=True)
+        (self.out / "art").mkdir(parents=True)
+        shutil.copy(SKILLS / "novel-characters/examples/渡口-cast.json", self.out / "characters" / "渡口-cast.json")
+        shutil.copy(SKILLS / "novel-art/examples/渡口-art.json", self.out / "art" / "渡口-art.json")
+
+    def tearDown(self):
+        self.server.shutdown()
+        if self.old_env is None:
+            os.environ.pop("AGENT_MODELS_FILE", None)
+        else:
+            os.environ["AGENT_MODELS_FILE"] = self.old_env
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _run(self, only, force=False):
+        from zhipu_agent import workflow
+        from zhipu_agent.config import load_settings
+        ctx = workflow.build_context(load_settings(api_key="x", model="y"),
+                                     SKILLS / "novel-characters/examples/渡口.txt", self.out,
+                                     interactive=False, force=force)
+        workflow.run_pipeline(ctx, ["images"], {"params": {}, "images_gen": True, "images_only": only})
+        manifest = json.loads((self.out / "images" / "image-manifest.json").read_text(encoding="utf-8"))
+        return {item["name"]: item["state"] for item in manifest["items"]}
+
+    def test_only_selected_images_are_requested(self):
+        states = self._run(["沈知微"])
+        self.assertEqual(len(self.requests), 1)
+        self.assertIn("A real photograph", self.requests[0]["prompt"])
+        self.assertEqual(states["沈知微"], "succeeded")
+        self.assertGreater(len(states), 1)
+        self.assertTrue(all(v == "pending" for k, v in states.items() if k != "沈知微"), states)
+
+        states = self._run(["陆行远"])          # 再出另一张：第一张保持已完成，不重复请求
+        self.assertEqual(len(self.requests), 2)
+        self.assertEqual((states["沈知微"], states["陆行远"]), ("succeeded", "succeeded"))
+
+    def test_asset_id_works_and_force_only_resets_selected(self):
+        self._run(["沈知微", "C002"])
+        self.assertEqual(len(self.requests), 2)
+        states = self._run(["沈知微"], force=True)
+        self.assertEqual(len(self.requests), 3)                      # 只重出被选中的
+        self.assertEqual(states["陆行远"], "succeeded")              # 另一张没被 --force 重置
+
+    def test_unknown_name_lists_available_choices(self):
+        with self.assertRaisesRegex(ValueError, "找不到对应的图.*沈知微"):
+            self._run(["不存在的人"])
+        self.assertEqual(self.requests, [])
+
+
 if __name__ == "__main__":
     unittest.main()
