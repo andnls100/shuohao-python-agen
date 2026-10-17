@@ -13,17 +13,17 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .config import Settings
 from .skill_loader import load_pack
-from .stages import art, characters, outline, refs, script, staging, storyboard
+from .stages import art, characters, outline, refs, script, staging, storyboard, video
 from .stages.base import (
     Context, guess_title, read_text_auto, safe_name,
 )
 from .validator import check_node
 
-STAGES = ["outline", "characters", "art", "script", "staging", "storyboard", "refs"]
-DEFAULT_STAGES = STAGES[:-1]  # refs 要出图，默认不跑
+STAGES = ["outline", "characters", "art", "script", "staging", "storyboard", "refs", "video"]
+DEFAULT_STAGES = STAGES[:-2]  # refs 和 video 都是显式选择的可选阶段
 MODULES = {
     "outline": outline, "characters": characters, "art": art, "script": script,
-    "staging": staging, "storyboard": storyboard, "refs": refs,
+    "staging": staging, "storyboard": storyboard, "refs": refs, "video": video,
 }
 # 这些阶段内部按集续跑，指定了 --eps 时不能整体跳过
 PARTIAL_OK = ("script", "staging", "storyboard")
@@ -34,6 +34,7 @@ REQUIRES = {
     "staging": ["script", "art"],
     "storyboard": ["script"],
     "refs": ["characters"],
+    "video": ["storyboard"],
 }
 
 
@@ -117,6 +118,9 @@ def run_stage(ctx: Context, name: str, opts: Dict[str, Any]) -> Optional[Path]:
     if name == "refs":
         return module.run(ctx, names=opts.get("refs_names"), look=opts.get("refs_look", "动漫"),
                           gen=opts.get("refs_gen", False))
+    if name == "video":
+        return module.run(ctx, eps=eps, protocol=opts.get("video_protocol", "h3"),
+                          submit=opts.get("video_submit", False))
     raise ValueError(name)
 
 
