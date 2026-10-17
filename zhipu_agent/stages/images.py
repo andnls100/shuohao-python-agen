@@ -20,8 +20,18 @@ from ..validator import Result
 from .base import Context, read_json, safe_name, write_json
 
 
+# 只控制“图片请求参数”和“生图提示词”的调试日志，不影响其他 ctx.log / print。
+# True：打印；False：不打印。
+PRINT_IMAGE_PARAMS_AND_PROMPT = True
+
+
 def artifact(ctx: Context) -> Path:
     return ctx.out / "images" / "image-manifest.json"
+
+
+def _image_debug_log(message: str) -> None:
+    if PRINT_IMAGE_PARAMS_AND_PROMPT:
+        print(message, flush=True)
 
 
 def _image_providers() -> List[dict]:
@@ -83,18 +93,18 @@ def _request_json(provider: dict, prompt: str) -> dict:
     }
     if provider.get("quality"):
         body["quality"] = provider["quality"]
-    # Log the actual HTTP request parameters for debugging. Never print the real API key.
-    print("[image-api] ===== HTTP 请求参数开始 =====", flush=True)
-    print("[image-api] method=POST", flush=True)
-    print(f"[image-api] url={provider['url']}", flush=True)
-    print("[image-api] headers=" + json.dumps({
+    # 只受 PRINT_IMAGE_PARAMS_AND_PROMPT 控制，不影响其他日志。
+    _image_debug_log("[image-api] ===== HTTP 请求参数开始 =====")
+    _image_debug_log("[image-api] method=POST")
+    _image_debug_log(f"[image-api] url={provider['url']}")
+    _image_debug_log("[image-api] headers=" + json.dumps({
         "Authorization": "Bearer <REDACTED>",
         "Content-Type": "application/json",
         "Accept": "application/json",
-    }, ensure_ascii=False), flush=True)
-    print("[image-api] timeout_seconds=" + str(provider["timeout"]), flush=True)
-    print("[image-api] json_body=" + json.dumps(body, ensure_ascii=False, indent=2), flush=True)
-    print("[image-api] ===== HTTP 请求参数结束 =====", flush=True)
+    }, ensure_ascii=False))
+    _image_debug_log("[image-api] timeout_seconds=" + str(provider["timeout"]))
+    _image_debug_log("[image-api] json_body=" + json.dumps(body, ensure_ascii=False, indent=2))
+    _image_debug_log("[image-api] ===== HTTP 请求参数结束 =====")
 
     req = urllib.request.Request(
         provider["url"],
@@ -133,7 +143,6 @@ def _find_image_payload(result: dict) -> tuple[Optional[str], Optional[str]]:
             return b64, None
         if isinstance(url, str) and url:
             return None, url
-    # Some compatible providers use a top-level image_url or output_url.
     for key in ("image_url", "output_url", "url"):
         value = result.get(key)
         if isinstance(value, str) and value:
@@ -171,7 +180,6 @@ def _prompt_for(record: dict, kind: str) -> tuple[str, str]:
     negative = str(image.get("negativePrompt") or "").strip()
     if not prompt:
         raise ValueError(f"{kind}「{record.get('name', record.get('id', '?'))}」没有 image.sheet 或 image.prompt")
-    # The OpenAI Images API has no portable negative_prompt field; append it to the prompt.
     if negative:
         prompt += "\n\nAvoid the following visual elements: " + negative
     return prompt, negative
@@ -310,14 +318,14 @@ def run(ctx: Context, generate: bool = False) -> Path:
         write_json(path, manifest)
         for provider in providers:
             try:
-                # Log the exact prompt passed to the image API. Do not log credentials.
-                ctx.log(
-                    f"生图提示词 | 任务={item['id']} | 名称={item['name']} | "
-                    f"平台={provider['name']} | 模型={provider['model']} | 尺寸={provider['size']}"
-                )
-                ctx.log("----- 生图提示词开始 -----")
-                ctx.log(item["prompt"])
-                ctx.log("----- 生图提示词结束 -----")
+                if PRINT_IMAGE_PARAMS_AND_PROMPT:
+                    ctx.log(
+                        f"生图提示词 | 任务={item['id']} | 名称={item['name']} | "
+                        f"平台={provider['name']} | 模型={provider['model']} | 尺寸={provider['size']}"
+                    )
+                    ctx.log("----- 生图提示词开始 -----")
+                    ctx.log(item["prompt"])
+                    ctx.log("----- 生图提示词结束 -----")
                 result = _request_json(provider, item["prompt"])
                 b64, url = _find_image_payload(result)
                 if b64:
