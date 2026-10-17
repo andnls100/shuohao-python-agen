@@ -272,8 +272,9 @@ def run(
             # Cuts, timings, dialogue, and Seedance fields are immutable in this pass.
             segment_targets = segment_h3_violation_refs(result.violations)
             h3_repaired = 0
-            max_segment_h3_repairs = 24
-            for segment_id, errors in list(segment_targets.items())[:max_segment_h3_repairs]:
+            # Repair every affected segment in this batch. A fixed cap left later
+            # segments untouched, especially when several episodes had H3 failures.
+            for segment_id, errors in segment_targets.items():
                 segment = next((s for e in _doc.get("episodes", [])
                                 for s in e.get("segments", []) if s.get("id") == segment_id), None)
                 if not segment:
