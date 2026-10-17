@@ -154,8 +154,8 @@ def test_image_goes_to_vision_model_as_multimodal_message():
     png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 16)
     llm.set_backend(backend)
     try:
-        conv = llm.Conversation("sys", load_settings(api_key="k", model="text-model"))
-        conv.ask_json("认图", images=[png], model="vision-model")
+        conv = llm.Conversation("sys", load_settings(api_key="k", model="text-model", vision_model="vision-model"))
+        conv.ask_json("认图", images=[png], kind="vision")
     finally:
         llm.set_backend(None)
         shutil.rmtree(png.parent, ignore_errors=True)
@@ -163,6 +163,121 @@ def test_image_goes_to_vision_model_as_multimodal_message():
     kinds = [part["type"] for part in seen["content"]]
     assert kinds == ["text", "image_url"]
     assert seen["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def _pool_settings(strategy="failover", vision=True, **kw):
+    from zhipu_agent.config import Endpoint
+    text = (Endpoint("a", "http://a", "ka", "model-a"), Endpoint("b", "http://b", "kb", "model-b"),
+            Endpoint("c", "http://c", "kc", "model-c"))
+    pics = (Endpoint("v1", "http://v1", "kv1", "vision-1"), Endpoint("v2", "http://v2", "kv2", "vision-2")) if vision else ()
+    return load_settings(api_key="", model="", text_pool=text, vision_pool=pics, strategy=strategy,
+                         retries=0, cooldown=60, **kw)
+
+
+def test_pool_failover_order_and_cooldown():
+    """failover：平台 a 出错就换 b；a 进入冷却期，后面的调用先走 b；全部出错才报错并列出每个平台。"""
+    llm.reset_pool_state()
+    used = []
+
+    def backend(messages, *, model):
+        used.append(model)
+        if model == "model-a":
+            raise RuntimeError("a 欠费了")
+        return "ok"
+
+    llm.set_backend(backend)
+    try:
+        s = _pool_settings()
+        assert llm.chat([{"role": "user", "content": "x"}], s) == "ok"
+        assert used == ["model-a", "model-b"], used
+        used.clear()
+        assert llm.chat([{"role": "user", "content": "x"}], s) == "ok"
+        assert used == ["model-b"], f"a 在冷却期，应先走 b：{used}"
+
+        llm.reset_pool_state()
+        llm.set_backend(lambda messages, *, model: (_ for _ in ()).throw(RuntimeError(f"{model} 挂了")))
+        try:
+            llm.chat([{"role": "user", "content": "x"}], s)
+        except llm.LLMError as exc:
+            text = str(exc)
+            assert all(m in text for m in ("model-a", "model-b", "model-c")), text
+        else:
+            raise AssertionError("全部平台失败应当抛出 LLMError")
+    finally:
+        llm.set_backend(None)
+        llm.reset_pool_state()
+
+
+def test_pool_round_robin_spreads_calls_and_vision_uses_vision_pool():
+    llm.reset_pool_state()
+    used = []
+    llm.set_backend(lambda messages, *, model: used.append(model) or "ok")
+    try:
+        s = _pool_settings("round_robin")
+        for _ in range(4):
+            llm.chat([{"role": "user", "content": "x"}], s)
+        assert used == ["model-a", "model-b", "model-c", "model-a"], used
+        used.clear()
+        llm.chat([{"role": "user", "content": "x"}], s, kind="vision")
+        llm.chat([{"role": "user", "content": "x"}], s, kind="vision")
+        assert used == ["vision-1", "vision-2"], used
+        try:
+            llm.chat([{"role": "user", "content": "x"}], _pool_settings(vision=False), kind="vision")
+        except llm.LLMError as exc:
+            assert "视觉模型" in str(exc)
+        else:
+            raise AssertionError("没配视觉模型时应当报错")
+    finally:
+        llm.set_backend(None)
+        llm.reset_pool_state()
+
+
+def test_models_file_parsing_and_legacy_env():
+    import json
+    import os
+    from zhipu_agent.config import ConfigError, load_models_file
+    tmp = Path(tempfile.mkdtemp(prefix="agent-test-models-"))
+    try:
+        os.environ["POOL_TEST_KEY"] = "from-env"
+        good = tmp / "models.json"
+        good.write_text(json.dumps({
+            "strategy": "round_robin", "cooldown": 30,
+            "text": [{"name": "p1", "base_url": "http://p1/v1", "api_key": "k1", "model": "m1", "max_tokens": 4096},
+                     {"name": "p2", "base_url": "http://p2/v1", "api_key_env": "POOL_TEST_KEY", "model": "m2", "stream": False}],
+            "vision": [{"name": "v", "base_url": "http://v/v1", "api_key": "kv", "model": "mv"}],
+        }), encoding="utf-8")
+        cfg = load_models_file(good)
+        assert [e.model for e in cfg["text"]] == ["m1", "m2"] and cfg["text"][1].api_key == "from-env"
+        assert cfg["text"][0].max_tokens == 4096 and cfg["text"][1].stream is False and cfg["strategy"] == "round_robin"
+
+        def bad(obj, needle):
+            f = tmp / "bad.json"
+            f.write_text(json.dumps(obj), encoding="utf-8")
+            try:
+                load_models_file(f)
+            except ConfigError as exc:
+                assert needle in str(exc), (needle, str(exc))
+            else:
+                raise AssertionError(f"应当报错：{needle}")
+
+        bad({"text": []}, "text")
+        bad({"text": [{"name": "x", "base_url": "http://x", "model": "m"}]}, "api_key")
+        bad({"text": [{"name": "x", "base_url": "http://x", "api_key_env": "NO_SUCH_ENV_VAR_X", "model": "m"}]}, "NO_SUCH_ENV_VAR_X")
+        one = {"name": "x", "base_url": "http://x", "api_key": "k", "model": "m"}
+        bad({"text": [one, one]}, "重名")
+        bad({"text": [one], "strategy": "random"}, "strategy")
+
+        # 没有 models.json：沿用单平台配置；视觉模型默认同平台，也可以单独指定地址和 Key
+        legacy = load_settings(api_key="K", model="M", base_url="http://t", vision_model="V")
+        assert [(e.base_url, e.api_key, e.model) for e in legacy.text_endpoints()] == [("http://t", "K", "M")]
+        assert [(e.base_url, e.api_key, e.model) for e in legacy.vision_endpoints()] == [("http://t", "K", "V")]
+        split = load_settings(api_key="K", model="M", base_url="http://t", vision_model="V",
+                              vision_base_url="http://v", vision_api_key="KV")
+        assert [(e.base_url, e.api_key) for e in split.vision_endpoints()] == [("http://v", "KV")]
+        assert load_settings(api_key="K", model="M").vision_endpoints() == ()
+    finally:
+        os.environ.pop("POOL_TEST_KEY", None)
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def test_extract_json_tolerates_fences_and_chatter():
@@ -178,7 +293,10 @@ def test_extract_json_tolerates_fences_and_chatter():
 
 
 if __name__ == "__main__":
-    for test in (test_extract_json_tolerates_fences_and_chatter,
+    for test in (test_pool_failover_order_and_cooldown,
+                 test_pool_round_robin_spreads_calls_and_vision_uses_vision_pool,
+                 test_models_file_parsing_and_legacy_env,
+                 test_extract_json_tolerates_fences_and_chatter,
                  test_image_goes_to_vision_model_as_multimodal_message,
                  test_long_text_uses_volume_summaries,
                  test_refs_stage_builds_assets_without_image_model,

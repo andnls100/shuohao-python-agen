@@ -164,6 +164,27 @@ ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4/
 
 For an aggregator, set `ZHIPU_BASE_URL` to its OpenAI-compatible endpoint and use its model names. `.env` is git-ignored.
 
+### Multiple models and platforms (a pool)
+
+With one platform and one model, `.env` is enough. For several text models, several vision models, each with its own address and key (like an account pool), copy `models.example.json` to `models.json` and fill it in. It is git-ignored; when it exists, the model/address/key variables in `.env` are no longer used (other options such as concurrency still come from `.env`).
+
+```json
+{
+  "strategy": "failover",
+  "cooldown": 120,
+  "text":   [ { "name": "p1", "base_url": "https://…/v1", "api_key": "…", "model": "…" },
+              { "name": "p2", "base_url": "https://…/v1", "api_key_env": "P2_KEY", "model": "…" } ],
+  "vision": [ { "name": "v1", "base_url": "https://…/v1", "api_key": "…", "model": "…" } ]
+}
+```
+
+- `text` serves all text generation; `vision` is used only when staging reads scene images (omit it or use `[]` if you do not need it).
+- Each entry has its own `base_url`, `api_key` (or `api_key_env` to read it from an environment variable) and `model`; optional `temperature`, `max_tokens`, `timeout`, `stream`, `json_mode` apply to that entry only. `name` must be unique within a list.
+- `failover` (default): use entries in order, the next one only when the previous fails. `round_robin`: each call starts from the next entry, spreading concurrent calls across platforms.
+- When a platform fails, the agent retries briefly, then moves to the next one; the failed platform goes to the back of the line for `cooldown` seconds (five times as long for 401/402/403). If every platform fails, the error lists each one's reason.
+- Without a file, a vision model on a different platform can be set with `ZHIPU_VISION_BASE_URL` and `ZHIPU_VISION_API_KEY` in `.env`; unset, it shares the text model's platform.
+- `python run_agent.py doctor --ping` calls every entry once and shows which work.
+
 ### Run
 
 The entry point is `run_agent.py` (same as `python -m zhipu_agent.main`; use it if `-m` cannot find the package, e.g. when Python runs in isolated mode):

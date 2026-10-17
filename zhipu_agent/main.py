@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .config import ConfigError, REPO_ROOT, load_settings
-from .llm import LLMError, chat
+from .llm import LLMError, ping_all
 from .validator import NodeError, StageFailed, check_node
 from . import workflow
 
@@ -87,18 +87,24 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         line(not missing, f"技能包 {settings.skills_dir}（{len(pack.names)} 个技能）" + (f"，缺：{missing}" if missing else ""))
     except Exception as exc:  # noqa: BLE001
         line(False, str(exc))
-    line(bool(settings.api_key), f"API Key：{_mask(settings.api_key)}")
-    line(bool(settings.model), f"模型：{settings.model or '（未设置 ZHIPU_MODEL）'}")
-    line(None, f"接口地址：{settings.base_url}")
-    line(None, f"视觉模型：{settings.vision_model or '（未设置；staging 将只能按提示词推算站位）'}")
+    if settings.models_file:
+        line(True, f"模型配置：{settings.models_file}（策略 {settings.strategy}，出错平台冷却 {settings.cooldown:.0f}s）")
+    else:
+        line(None, "模型配置：环境变量 / .env（单平台）。要配置多个模型或平台，见 models.example.json")
+    for kind, title in (("text", "文本模型"), ("vision", "视觉模型")):
+        eps = settings.endpoints(kind)
+        if not eps:
+            if kind == "text":
+                line(False, "文本模型：未配置（设置 ZHIPU_API_KEY 和 ZHIPU_MODEL，或创建 models.json）")
+            else:
+                line(None, "视觉模型：未配置（staging 将只能按提示词推算站位）")
+            continue
+        for ep in eps:
+            line(True, f"{title} {ep.name}：{ep.model} · {ep.base_url} · Key {_mask(ep.api_key)}")
     line(None, f"并发 {settings.concurrency} · 回炉 {settings.fix_rounds} 轮 · 整本直读阈值 {settings.direct_chars} 字")
-    if args.ping and settings.api_key and settings.model:
-        started = time.time()
-        try:
-            reply = chat([{"role": "user", "content": "只回复两个字母：OK"}], settings)
-            line(True, f"模型可用（{time.time() - started:.1f}s）：{reply.strip()[:40]!r}")
-        except (LLMError, ConfigError) as exc:
-            line(False, f"模型调用失败：{exc}")
+    if args.ping and settings.text_endpoints():
+        for kind, label, ok, note, secs in ping_all(settings):
+            line(ok, f"{'文本' if kind == 'text' else '视觉'} {label}：" + (f"可用（{secs:.1f}s）{note!r}" if ok else f"调用失败 {note}"))
     print("环境正常。" if not problems else f"有 {problems} 项需要处理。")
     return 1 if problems else 0
 

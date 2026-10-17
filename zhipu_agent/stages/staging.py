@@ -80,11 +80,11 @@ def run(ctx: Context, eps: Optional[List[int]] = None) -> Path:
         image = _find_image(ctx, sk, loc["name"])
         mode = "prompt"
         images: List[Path] = []
-        model = None
-        if image and ctx.settings.vision_model:
-            mode, images, model = "picture", [image], ctx.settings.vision_model
+        kind = "text"
+        if image and ctx.settings.vision_endpoints():
+            mode, images, kind = "picture", [image], "vision"
         elif image:
-            ctx.log(f"⚠ 找到了「{loc['name']}」的场景图，但没有配置 ZHIPU_VISION_MODEL，只能按提示词推算（草稿）")
+            ctx.log(f"⚠ 找到了「{loc['name']}」的场景图，但没有配置视觉模型（ZHIPU_VISION_MODEL 或 models.json 的 vision），只能按提示词推算（草稿）")
         else:
             ctx.log(f"「{loc['name']}」没有场景图，按美术提示词推算（草稿，出图后需要重新认一遍）")
         modes[loc["sceneId"]] = mode
@@ -99,7 +99,7 @@ def run(ctx: Context, eps: Optional[List[int]] = None) -> Path:
               f"sceneId 固定为 {loc['sceneId']}，name 固定为「{loc['name']}」。"
         )
         items.append(Item(loc["sceneId"], read_system, prompt, tokens=[loc["name"], loc["sceneId"]],
-                          images=images, model=model, cache=work / f"location-{loc['sceneId']}.json"))
+                          images=images, kind=kind, cache=work / f"location-{loc['sceneId']}.json"))
 
     def apply_location(key: str, data: Any) -> None:
         if not isinstance(data, dict) or not isinstance(data.get("items"), list):

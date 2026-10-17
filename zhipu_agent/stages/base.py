@@ -227,7 +227,7 @@ class Item:
     prompt: str
     tokens: List[str] = field(default_factory=list)   # 用来在报错行里认出它
     images: List[Path] = field(default_factory=list)
-    model: Optional[str] = None                        # 带图时可指定视觉模型
+    kind: str = "text"                                 # "vision" = 用视觉模型池（带图的条目）
     cache: Optional[Path] = None                       # 已有缓存就不重新调用模型
 
 
@@ -285,7 +285,7 @@ def run_items(
                 images = item.images
             else:
                 user, images = fix_prompt(feedback, hint), []
-            return conv.ask_json(user, images=images, model=item.model), False
+            return conv.ask_json(user, images=images, kind=item.kind), False
 
         outputs = parallel_map(work, keys, settings.concurrency)
         structural: Dict[str, List[str]] = {}

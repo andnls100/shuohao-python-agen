@@ -1,0 +1,28 @@
+{
+  "strategy": "failover",
+  "cooldown": 120,
+  "text": [
+    {
+      "name": "智谱-flash",
+      "base_url": "https://open.bigmodel.cn/api/paas/v4/",
+      "api_key": "把这里换成平台一的 Key",
+      "model": "glm-5.3-flash"
+    },
+    {
+      "name": "聚合平台-备用",
+      "base_url": "https://你的聚合平台地址/v1",
+      "api_key_env": "AGGREGATOR_API_KEY",
+      "model": "平台上的模型名",
+      "max_tokens": 8192,
+      "stream": true
+    }
+  ],
+  "vision": [
+    {
+      "name": "智谱-视觉",
+      "base_url": "https://open.bigmodel.cn/api/paas/v4/",
+      "api_key": "把这里换成平台一的 Key",
+      "model": "glm-5.3-flashx"
+    }
+  ]
+}

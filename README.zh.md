@@ -162,7 +162,28 @@ ZHIPU_MODEL=模型名
 ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4/
 ```
 
-聚合平台把 `ZHIPU_BASE_URL` 换成它提供的 OpenAI 兼容地址，模型名写它平台上的名字。`.env` 已被 `.gitignore` 忽略，不会提交。
+聚合平台把 `ZHIPU_BASE_URL` 换成它提供的 OpenAI 兼容地址，模型名写它平台上的名字。视觉模型（可选，只有 staging 认场景图时才需要）写 `ZHIPU_VISION_MODEL`，默认和文本模型在同一个平台。`.env` 已被 `.gitignore` 忽略，不会提交。
+
+### 多个模型和多个平台（号池）
+
+只有一个平台和一个模型时，填 `.env` 就够了。想要多个文本模型、多个视觉模型，并且每个模型各自配置地址和 Key（类似号池），就复制 `models.example.json` 为 `models.json`，按里面的格式填写。`models.json` 已被 `.gitignore` 忽略；它存在时，`.env` 里的模型、地址、Key 不再生效，其他选项（并发、回炉轮数等）仍然读 `.env`。
+
+```json
+{
+  "strategy": "failover",
+  "cooldown": 120,
+  "text":   [ { "name": "平台一", "base_url": "https://…/v1", "api_key": "…", "model": "…" },
+              { "name": "平台二", "base_url": "https://…/v1", "api_key_env": "PLATFORM2_KEY", "model": "…" } ],
+  "vision": [ { "name": "视觉一", "base_url": "https://…/v1", "api_key": "…", "model": "…" } ]
+}
+```
+
+- `text` 是文本模型列表，所有阶段的文字生成都走它；`vision` 是视觉模型列表，只有 staging 阶段给场景图认东西时才走它，不需要就删掉或写 `[]`。
+- 每一项都有自己的 `base_url`、`api_key`（或 `api_key_env`，从环境变量读取，Key 就不用写进文件）和 `model`。可选项 `temperature`、`max_tokens`、`timeout`、`stream`、`json_mode` 只对这一项生效。`name` 用来在日志里区分，同一个列表里不能重复。
+- `strategy: "failover"`（默认）：按列表顺序，前一项出错才使用后一项。`strategy: "round_robin"`：每次调用轮流从下一项开始，把并发的调用分摊到各个平台，适合每个平台限速较严的情况。
+- 一个平台出错（网络、限流、欠费、模型名不对等）时，先在它上面少量重试，然后自动换下一个平台，整条流水线不会中断。出错的平台在 `cooldown` 秒内排到最后，等它恢复；Key 失效或欠费（401、402、403）的冷却时间是五倍。所有平台都失败时，报错会列出每个平台各自的原因。
+- 不想写文件时，视觉模型和文本模型在不同平台，也可以只用 `.env`：设置 `ZHIPU_VISION_BASE_URL` 和 `ZHIPU_VISION_API_KEY`；不设置就沿用文本模型的平台。
+- `python run_agent.py doctor --ping` 会把每个平台都调用一次，逐个显示是否可用。
 
 ### 运行
 
