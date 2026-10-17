@@ -158,6 +158,15 @@ def _collect(ctx: Context, eps: Optional[list]) -> dict:
                 name = str(character.get("name") or speaker or "VO")
                 character_id = str(character.get("id") or speaker or name)
                 description = _voice_description(character)
+                # VO is narration rather than a cast member; use a stable neutral narrator profile.
+                if not description and (
+                    speaker.casefold() in {"vo", "voiceover", "voice-over", "narrator"}
+                    or name.casefold() in {"vo", "voiceover", "voice-over", "narrator", "旁白"}
+                ):
+                    description = (
+                        "成年中文旁白音色，自然清晰，普通话发音标准，语速适中，"
+                        "咬字清楚，情绪稳定克制，适合小说和短剧叙事解说。"
+                    )
                 delivery = _delivery_instruction(str(beat.get("delivery") or ""))
                 item_id = f"E{ep:02d}-S{scene_idx:02d}-L{beat_idx:03d}"
                 items.append({
@@ -308,6 +317,14 @@ def _create_qwen_voice(ctx: Context, item: dict, registry: dict, cfg: dict) -> s
     cid = str(item["character_id"])
     entry = registry["characters"][cid]
     description = str(entry.get("voice_description") or "").strip()
+    if not description and cid.casefold() in {"vo", "voiceover", "voice-over", "narrator", "旁白"}:
+        description = (
+            "成年中文旁白音色，自然清晰，普通话发音标准，语速适中，"
+            "咬字清楚，情绪稳定克制，适合小说和短剧叙事解说。"
+        )
+        entry["voice_description"] = description
+        registry["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        write_json(voice_registry_artifact(ctx), registry)
     if not description:
         raise RuntimeError(
             f"角色 {cid}（{item['character_name']}）没有音色描述。请先在角色卡的 voice.prompt "
