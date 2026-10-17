@@ -126,8 +126,8 @@ def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str
     return {"version": 2, "source": ctx.title, "protocol": protocol, "visual_style": visual_style,
             "aspect_ratio": board.get("aspectRatio", "16:9"), "items": items}
 
-def _config() -> list:
-    """读取 models.json 中的视频 API 号池；按列表顺序故障转移。"""
+def _config(model_key: Optional[str] = None) -> list:
+    """Read video provider configs; explicit model selection disables cross-model failover."""
     path = models_file_path()
     if not path.is_file():
         raise ValueError(f"找不到模型配置文件：{path}；请先复制 models.example.json 为 models.json")
@@ -138,38 +138,66 @@ def _config() -> list:
     entries = data.get("video", [])
     if not isinstance(entries, list) or not entries:
         raise ValueError(f"{path} 中必须配置非空的 video 列表；请参照 models.example.json")
+    if model_key:
+        matched = [e for e in entries if isinstance(e, dict) and model_key in
+                   (str(e.get("key") or ""), str(e.get("name") or ""), str(e.get("model") or ""))]
+        if not matched:
+            raise ValueError(f"models.json 的 video 列表中找不到模型 {model_key!r}；请用 key/name/model 指定")
+        if all(e.get("enabled", True) is False for e in matched):
+            raise ValueError(f"模型 {model_key!r} 当前 enabled=false；请先核实接口文档并配置后再启用")
+        entries = [e for e in matched if e.get("enabled", True) is not False]
+    else:
+        enabled = [e for e in entries if isinstance(e, dict) and e.get("enabled", True) is not False]
+        active = [e for e in enabled if e.get("active") is True]
+        entries = active or enabled
     providers = []
     for index, entry in enumerate(entries, 1):
         if not isinstance(entry, dict):
             raise ValueError(f"video[{index}] 必须是对象")
         name = str(entry.get("name") or f"video-{index}").strip()
+        key = str(entry.get("key") or name).strip()
+        adapter = str(entry.get("adapter") or "generic").strip().lower()
         submit_url = str(entry.get("submit_url") or "").strip()
+        status_template = str(entry.get("status_url_template") or "").strip()
+        workspace_env = str(entry.get("workspace_id_env") or "").strip()
+        workspace_id = str(entry.get("workspace_id") or (os.environ.get(workspace_env, "") if workspace_env else "")).strip()
+        if "{workspace_id}" in submit_url.lower():
+            submit_url = re.sub(r"\{workspace_id\}", workspace_id, submit_url, flags=re.I)
+        if "{workspace_id}" in status_template.lower():
+            status_template = re.sub(r"\{workspace_id\}", workspace_id, status_template, flags=re.I)
         model = str(entry.get("model") or "").strip()
         api_key = str(entry.get("api_key") or "").strip()
         api_key_env = str(entry.get("api_key_env") or "").strip()
         if not api_key and api_key_env:
             api_key = os.environ.get(api_key_env, "").strip()
         missing = [field for field, value in (("submit_url", submit_url), ("model", model), ("api_key 或 api_key_env", api_key)) if not value]
+        if adapter == "aliyun_wan" and not workspace_id:
+            missing.append("workspace_id 或 workspace_id_env")
         if missing:
-            raise ValueError(f"models.json 的 video[{index}]（{name}）缺少：{'、'.join(missing)}")
+            raise ValueError(f"models.json 的视频模型 {key}（{name}）缺少：{'、'.join(missing)}")
         if urlparse(submit_url).scheme not in ("http", "https"):
-            raise ValueError(f"models.json 的 video[{index}]（{name}）submit_url 必须是 HTTP(S) URL")
+            raise ValueError(f"models.json 的视频模型 {key}（{name}）submit_url 必须是 HTTP(S) URL")
         providers.append({
-            "name": name, "VIDEO_API_SUBMIT_URL": submit_url, "VIDEO_API_KEY": api_key,
-            "VIDEO_API_MODEL": model,
-            "status_template": str(entry.get("status_url_template") or "").strip(),
-            "timeout": max(10, int(entry.get("timeout", 120))),
-            "poll": max(1, float(entry.get("poll_interval", 5))),
+            "key": key, "name": name, "adapter": adapter,
+            "VIDEO_API_SUBMIT_URL": submit_url, "VIDEO_API_KEY": api_key, "VIDEO_API_MODEL": model,
+            "status_template": status_template, "timeout": max(10, int(entry.get("timeout", 120))),
+            "poll": max(1, float(entry.get("poll_interval", 15 if adapter == "aliyun_wan" else 5))),
             "max_wait": max(10, int(entry.get("max_wait", 900))),
+            "resolution": str(entry.get("resolution") or "480P"), "ratio": str(entry.get("ratio") or ""),
+            "prompt_extend": entry.get("prompt_extend", True), "request_template": entry.get("request_template"),
+            "headers": entry.get("headers", {}),
+            "video_url_keys": entry.get("video_url_keys", ["video_url", "videoUrl", "output_url", "download_url"]),
+            "task_id_keys": entry.get("task_id_keys", ["task_id", "taskId", "job_id", "jobId", "id"]),
+            "status_keys": entry.get("status_keys", ["status", "state", "task_status"]),
+            "failed_states": entry.get("failed_states", ["failed", "error", "cancelled", "canceled", "rejected"]),
         })
+    if not providers:
+        raise ValueError("models.json 的 video 配置没有启用的模型；请设置 enabled=true")
     return providers
-
-
 def _request(url: str, cfg: dict, body: Optional[dict] = None) -> dict:
+    from .video_adapters import request_headers
     data = None if body is None else json.dumps(body, ensure_ascii=False).encode()
-    headers = {"Authorization": "Bearer " + cfg["VIDEO_API_KEY"], "Accept": "application/json"}
-    if data is not None:
-        headers["Content-Type"] = "application/json"
+    headers = request_headers(cfg, has_body=data is not None)
     req = urllib.request.Request(url, data=data, headers=headers, method="GET" if data is None else "POST")
     try:
         with urllib.request.urlopen(req, timeout=cfg["timeout"]) as res:
@@ -185,8 +213,6 @@ def _request(url: str, cfg: dict, body: Optional[dict] = None) -> dict:
     if not isinstance(result, dict):
         raise RuntimeError("视频 API JSON 顶层必须是对象")
     return result
-
-
 def _find(obj, keys: tuple):
     if isinstance(obj, dict):
         for key in keys:
@@ -212,10 +238,10 @@ def _poll(task_id: str, cfg: dict) -> dict:
     deadline = time.monotonic() + cfg["max_wait"]
     while True:
         result = _request(url, cfg)
-        if _find(result, ("video_url", "videoUrl", "output_url", "download_url")):
+        if _find(result, tuple(cfg.get("video_url_keys") or ["video_url", "videoUrl", "output_url", "download_url"])):
             return result
-        state = (_find(result, ("status", "state", "task_status")) or "").lower()
-        if state in ("failed", "error", "cancelled", "canceled", "rejected"):
+        state = (_find(result, tuple(cfg.get("status_keys") or ["status", "state", "task_status"])) or "").lower()
+        if state in {str(x).lower() for x in (cfg.get("failed_states") or ["failed", "error", "cancelled", "canceled", "rejected"])}:
             raise RuntimeError("视频任务失败：" + json.dumps(result, ensure_ascii=False)[:800])
         if time.monotonic() >= deadline:
             raise TimeoutError(f"任务 {task_id} 等待超时；任务 ID 已保存，可重试续查")
@@ -265,14 +291,12 @@ def _submit(item: dict, manifest: dict, providers: list, root: Path, path: Path)
                 item["state"], item["error"] = "submitting", None
                 item["provider"] = candidate["name"]
                 write_json(path, manifest)
-                body = {
-                    "model": candidate["VIDEO_API_MODEL"], "prompt": item["prompt"],
-                    "duration": item["duration_seconds"], "aspect_ratio": manifest["aspect_ratio"],
-                }
+                from .video_adapters import build_request
+                body = build_request(candidate, item, manifest)
                 try:
                     response = _request(candidate["VIDEO_API_SUBMIT_URL"], candidate, body)
-                    url = _find(response, ("video_url", "videoUrl", "output_url", "download_url"))
-                    task_id = _find(response, ("task_id", "taskId", "job_id", "jobId", "id"))
+                    url = _find(response, tuple(candidate.get("video_url_keys") or ["video_url", "videoUrl", "output_url", "download_url"]))
+                    task_id = _find(response, tuple(candidate.get("task_id_keys") or ["task_id", "taskId", "job_id", "jobId", "id"]))
                     if task_id:
                         item["task_id"] = task_id
                         item["provider"] = candidate["name"]
@@ -292,7 +316,7 @@ def _submit(item: dict, manifest: dict, providers: list, root: Path, path: Path)
                     failures.append(f"{candidate['name']}: {exc}")
             if result is None or cfg is None:
                 raise RuntimeError("所有视频 API 备用平台均失败：" + "；".join(failures))
-        url = _find(result, ("video_url", "videoUrl", "output_url", "download_url"))
+        url = _find(result, tuple(cfg.get("video_url_keys") or ["video_url", "videoUrl", "output_url", "download_url"]))
         if not url:
             raise RuntimeError("任务结束但响应中没有视频 URL")
         item.update(state="succeeded", video_url=url, error=None, provider=cfg["name"])
@@ -322,7 +346,7 @@ def check(ctx: Context) -> Result:
 
 
 def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: bool = False,
-        visual_style: str = "manju", shots: Optional[list] = None) -> Path:
+        visual_style: str = "manju", shots: Optional[list] = None, video_model: Optional[str] = None) -> Path:
     root = ctx.out / "video"
     root.mkdir(parents=True, exist_ok=True)
     path = artifact(ctx)
@@ -369,7 +393,7 @@ def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: 
     if not submit:
         ctx.log("预览模式：未调用视频 API。检查提示词后再加 --video-submit 发起生成。")
         return path
-    cfg = _config()
+    cfg = _config(video_model)
     selected_shots = {str(value).strip() for value in (shots or []) if str(value).strip()}
     for item in manifest["items"]:
         if selected_shots and item["id"] not in selected_shots:

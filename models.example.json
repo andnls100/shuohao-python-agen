@@ -5,7 +5,10 @@
     {
       "name": "智谱-flash",
       "base_url": "https://open.bigmodel.cn/api/paas/v4/",
-      "api_keys": ["Key1", "Key2"],
+      "api_keys": [
+        "Key1",
+        "Key2"
+      ],
       "model": "glm-5.3-flash"
     },
     {
@@ -62,32 +65,79 @@
       "model": "cosyvoice-v3.5-flash",
       "response_format": "mp3",
       "sample_rate": 24000,
-      "voice_language_hints": ["zh"],
-      "language_hints": ["zh"],
+      "voice_language_hints": [
+        "zh"
+      ],
+      "language_hints": [
+        "zh"
+      ],
       "voice_preview_text": "你好，我是这个故事中的角色，很高兴认识你。",
       "timeout": 120
     }
   ],
   "video": [
     {
-      "name": "视频平台主用",
-      "submit_url": "https://你的主视频平台/v1/videos/generations",
-      "status_url_template": "https://你的主视频平台/v1/videos/{task_id}",
-      "api_key_env": "VIDEO_PRIMARY_API_KEY",
-      "model": "视频模型名",
+      "key": "wan_prime",
+      "name": "阿里云百炼-Wan3.0-Video-Prime",
+      "adapter": "aliyun_wan",
+      "enabled": true,
+      "active": true,
+      "submit_url": "https://{workspace_id}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis",
+      "status_url_template": "https://{workspace_id}.cn-beijing.maas.aliyuncs.com/api/v1/tasks/{task_id}",
+      "workspace_id_env": "DASHSCOPE_WORKSPACE_ID",
+      "api_key_env": "DASHSCOPE_API_KEY",
+      "model": "wan3.0-video-prime",
+      "resolution": "480P",
+      "ratio": "16:9",
+      "prompt_extend": true,
       "timeout": 120,
-      "poll_interval": 5,
-      "max_wait": 900
+      "poll_interval": 15,
+      "max_wait": 1800,
+      "note": "已按阿里云百炼 Wan3.0 官方异步 API 配置；模型、Workspace ID 和 Key 必须属于同一区域。默认 480P 控制成本。"
     },
     {
-      "name": "视频平台备用",
-      "submit_url": "https://你的备用视频平台/v1/videos/generations",
-      "status_url_template": "https://你的备用视频平台/v1/videos/{task_id}",
-      "api_key_env": "VIDEO_BACKUP_API_KEY",
-      "model": "备用视频模型名",
+      "key": "seedance_cheapdev",
+      "name": "Cheap.dev-Seedance-2.0-Mini",
+      "adapter": "generic",
+      "enabled": false,
+      "active": false,
+      "submit_url": "",
+      "status_url_template": "",
+      "api_key_env": "CHEAPDEV_API_TOKEN",
+      "model": "FILL_FROM_CHEAPDEV_MODEL_CATALOG",
+      "resolution": "480P",
       "timeout": 120,
       "poll_interval": 5,
-      "max_wait": 900
+      "max_wait": 1800,
+      "request_template": {
+        "model": "{{model}}",
+        "prompt": "{{prompt}}",
+        "duration": "{{duration_seconds}}",
+        "aspect_ratio": "{{aspect_ratio}}"
+      },
+      "note": "暂未启用：需要从 Cheap.dev 模型目录/OpenAPI 确认精确 model ID、submit endpoint、请求体、查询 endpoint 和返回字段后再填写。"
+    },
+    {
+      "key": "cogvideox3_zhipu",
+      "name": "智谱-CogVideoX",
+      "adapter": "generic",
+      "enabled": false,
+      "active": false,
+      "submit_url": "",
+      "status_url_template": "",
+      "api_key_env": "ZHIPU_VIDEO_API_KEY",
+      "model": "FILL_FROM_ZHIPU_VIDEO_API_DOCS",
+      "resolution": "480P",
+      "timeout": 120,
+      "poll_interval": 5,
+      "max_wait": 1800,
+      "request_template": {
+        "model": "{{model}}",
+        "prompt": "{{prompt}}",
+        "duration": "{{duration_seconds}}",
+        "aspect_ratio": "{{aspect_ratio}}"
+      },
+      "note": "暂未启用：目前未核实智谱开放平台存在可直接调用的 CogVideoX-3 托管视频生成 API。请勿将智谱清言网页产品或开源权重名当作 API 模型名。"
     }
   ]
 }
