@@ -486,4 +486,23 @@ def run(ctx: Context, generate: bool = False, only: Optional[List[str]] = None) 
 
     result = check(ctx)
     ctx.log(f"批量生图结果：{result.stdout}")
+    _refresh_reports(ctx)
     return path
+
+
+def _refresh_reports(ctx: Context) -> None:
+    """把最新 manifest 关联到角色/美术报告，并在生图后自动重渲染。"""
+    cast_path = ctx.artifact("characters")
+    art_path = ctx.artifact("art")
+    if cast_path.is_file():
+        ctx.render_to(
+            ctx.skill("novel-characters"),
+            ["render", str(cast_path), "--html"],
+            ctx.out / "characters" / "report.html",
+        )
+    if art_path.is_file():
+        ctx.render_to(
+            ctx.skill("novel-art"),
+            ["render", str(art_path), "--html"],
+            ctx.out / "art" / "art-report.html",
+        )
