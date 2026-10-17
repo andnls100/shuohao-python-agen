@@ -152,7 +152,8 @@ def run_stage(ctx: Context, name: str, opts: Dict[str, Any]) -> Optional[Path]:
     if name == "video":
         return module.run(ctx, eps=eps, protocol=opts.get("video_protocol", "h3"),
                           submit=opts.get("video_submit", False),
-                          visual_style=opts.get("visual_style", "manju"))
+                          visual_style=opts.get("visual_style", "manju"),
+                          shots=opts.get("video_shots"))
     raise ValueError(name)
 
 
