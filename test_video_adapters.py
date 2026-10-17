@@ -41,6 +41,21 @@ class VideoAdapterTests(unittest.TestCase):
         self.assertEqual(body["parameters"]["duration"], 4.5)
         self.assertIsInstance(body["parameters"]["duration"], float)
 
+    def test_cogvideox3_request_shape(self):
+        provider = {
+            "adapter": "cogvideox_zhipu",
+            "VIDEO_API_MODEL": "cogvideox-3",
+            "VIDEO_API_KEY": "test-key",
+            "size": "1920x1080",
+            "quality": True,
+        }
+        body = build_request(provider, self.item, self.manifest)
+        self.assertEqual(body["model"], "cogvideox-3")
+        self.assertEqual(body["prompt"], "cinematic shot")
+        self.assertEqual(body["duration"], 5)
+        self.assertEqual(body["size"], "1920x1080")
+        self.assertTrue(body["quality"])
+
     def test_custom_headers(self):
         provider = {
             "adapter": "generic", "VIDEO_API_KEY": "test-key",
