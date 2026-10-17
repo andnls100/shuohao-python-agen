@@ -68,7 +68,7 @@ def _image_providers() -> List[dict]:
             "api_key": api_key,
             "model": model,
             "size": str(entry.get("size") or "1536x1024"),
-            "quality": str(entry.get("quality") or "high"),
+            #"quality": str(entry.get("quality") or "high"),
             "timeout": max(10, int(entry.get("timeout", 180))),
         })
     return providers
