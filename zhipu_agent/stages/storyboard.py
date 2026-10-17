@@ -91,7 +91,12 @@ def run(
     todo = [e for e in wanted if e not in done]
     if not todo:
         ctx.log("所有集都已切好，跳过切镜")
-    system = build_system(sk, PASSES)
+    language_contract = (
+        "HARD OUTPUT CONTRACT: promptLang=zh requires Simplified Chinese for frame, shot, h3Prompt, alignment, shot markers, soundscape, and music fields. Preserve dialogue inside <d>, lyrics, and visible in-frame text. Use [镜头 k], 整体视听描述：, 整体音景：, 非叙事配乐：, and the Chinese alignment format from h3-prompt.md. Do not use English field names or [Shot k]."
+        if prompt_lang == "zh" else
+        "HARD OUTPUT CONTRACT: promptLang=en requires English for h3Prompt, alignment, shot markers, soundscape, and music fields. Use [Shot k] and official English field names. Preserve dialogue inside <d>, lyrics, and visible in-frame text in their source language."
+    )
+    system = build_system(sk, PASSES, extra=language_contract)
 
     for group in batches(todo, BATCH):
         seed = ctx.node_json(sk, ["seed", script_path, "--eps", f"{group[0]}-{group[-1]}", "--aspect", aspect])
@@ -122,7 +127,9 @@ def run(
                               if any(t in ln for t in (f"第 {ep} 集", f"第{ep}集", f"E{ep:02d}"))]
             prompt = (
                 f"## 任务\n给第 {ep} 集切分镜：先按剧情单元分段（每段 9–15 秒、不跨场），段内切 2–5 秒的分镜。\n\n"
-                f"## 画幅与语言\naspectRatio = {aspect}；promptLang = {prompt_lang}（h3Prompt 的正文语言，台词在 <d> 里保留原文）。\n\n"
+                f"## 画幅与语言\naspectRatio = {aspect}；promptLang = {prompt_lang}（h3Prompt 正文、对齐行、镜头标记、声景和配乐字段都必须使用该语言；台词在 <d> 里保留原文）。\n\n"
+                + ("## 中文模式硬约束\n除协议固定 token 和台词外，frame、shot、h3Prompt 全部使用简体中文。h3Prompt 使用“参考图与目标视频的对齐——”开头，字段为“整体视听描述：”“整体音景：”“非叙事配乐：”，镜头标记使用连续的 [镜头 1]、[镜头 2]。禁止使用英文版 How the reference pictures align、integrated_multimodal_description、overall_soundscape、non_diegetic_music 或 [Shot k]。\n\n" if prompt_lang == "zh" else "")
+                + ("## 英文模式硬约束\nh3Prompt 正文、对齐行、镜头标记、声景和配乐字段全部使用英文及官方英文骨架，镜头标记使用连续的 [Shot 1]、[Shot 2]。\n\n" if prompt_lang == "en" else "")
                 f"## 工作底稿 seedScenes（节拍编号、台词、每拍秒数已算好，不要重估；镜头必须认领这些节拍）\n"
                 f"{json.dumps(seed_ep.get('seedScenes', []), ensure_ascii=False, indent=1)}\n\n"
                 f"## 场景卡\n{json.dumps(scene_cards, ensure_ascii=False, indent=1)}\n\n"
@@ -131,7 +138,7 @@ def run(
                 + (f"## 每场第一段的开场走位句（blocking 请照抄对应那一场的这一句）\n" + "\n".join(first_blocking) + "\n\n"
                    if first_blocking else "")
                 + "## 输出\n只输出这一集的 JSON 对象：{\"ep\": N, \"segments\": [...]}，不要 seedScenes。"
-                  "改秒数必须同步改 h3Prompt（对齐指令和 [Shot k] 切点时刻由分镜秒数推导，逐字对账）。"
+                  "改秒数必须同步改 h3Prompt（对齐指令和 [Shot k]/[镜头 k] 切点时刻由分镜秒数推导，逐字对账；标记语言必须与 promptLang 一致）。"
             )
             items.append(Item(str(ep), system, prompt, tokens=ep_tokens(ep), cache=work / f"ep-{ep:03d}.json"))
 
@@ -145,6 +152,11 @@ def run(
             ep = int(key)
             episode = {k: v for k, v in data.items() if k != "seedScenes"}
             episode["ep"] = ep
+            # The task key is authoritative; models sometimes copy segment IDs from examples.
+            for segment_index, segment in enumerate(episode["segments"], start=1):
+                if not isinstance(segment, dict):
+                    raise ValueError(f"第 {segment_index} 段必须是 JSON 对象")
+                segment["id"] = f"E{ep:02d}-{segment_index:02d}"
             _doc["episodes"] = sorted(
                 [e for e in _doc["episodes"] if e["ep"] != ep] + [episode], key=lambda e: e["ep"])
             write_json(_path, _doc)
