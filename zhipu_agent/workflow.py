@@ -23,7 +23,7 @@ STAGES = ["outline", "characters", "art", "images", "script", "audio", "staging"
 # 生图、角色参考图和视频调用都可能产生额外费用，默认流水线不自动触发。
 DEFAULT_STAGES = [name for name in STAGES if name not in ("images", "refs", "video")]
 MODULES = {
-    "outline": outline, "characters": characters, "art": art, "images": images, "script": script,
+    "outline": outline, "characters": characters, "art": art, "images": images, "script": script, "audio": audio,
     "staging": staging, "storyboard": storyboard, "refs": refs, "video": video,
 }
 # 这些阶段内部按集续跑，指定了 --eps 时不能整体跳过
@@ -33,6 +33,7 @@ REQUIRES = {
     "art": ["outline"],
     "images": ["characters", "art"],
     "script": ["outline"],
+    "audio": ["characters", "script"],
     "staging": ["script", "art"],
     "storyboard": ["script"],
     "refs": ["characters"],
@@ -137,6 +138,8 @@ def run_stage(ctx: Context, name: str, opts: Dict[str, Any]) -> Optional[Path]:
         return module.run(ctx, visual_style=opts.get("visual_style", "manju"))
     if name in ("script", "staging"):
         return module.run(ctx, eps=eps)
+    if name == "audio":
+        return module.run(ctx, eps=eps, submit=opts.get("audio_submit", False))
     if name == "storyboard":
         return module.run(ctx, eps=eps, aspect=opts.get("aspect", "16:9"),
                           prompt_lang=opts.get("prompt_lang", "en"),
