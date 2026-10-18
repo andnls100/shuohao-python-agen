@@ -101,6 +101,8 @@ def _reference_media(provider: dict, item: dict) -> list[dict]:
             if urlparse(voice).scheme not in ("http", "https") and not voice.startswith("data:audio/"):
                 raise ValueError(f"reference_media[{index}].reference_voice 必须是 HTTP(S) URL")
             normalized["reference_voice"] = voice
+        if entry.get("label"):
+            normalized["label"] = str(entry["label"]).strip()
         result.append(normalized)
     if len(result) > 5:
         raise ValueError("Wan R2V 参考图/视频最多 5 个；当前 character/art 引用超过 5 个")
@@ -168,7 +170,8 @@ def build_request(provider: dict, item: dict, manifest: dict) -> dict:
     }
 
     images = list(item.get("images") or [])
-    if images and adapter != "cogvideox_zhipu":
+    is_wan_r2v = adapter == "aliyun_wan" and "r2v" in str(context["model"]).lower()
+    if images and adapter != "cogvideox_zhipu" and not is_wan_r2v:
         raise ValueError(f"适配器 {adapter!r} 暂未支持图生视频；目前只有 cogvideox_zhipu 支持")
 
     if adapter == "cogvideox_zhipu":
