@@ -17,6 +17,7 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -67,6 +68,8 @@ def _providers() -> List[dict]:
             "max_references": max(0, int(entry.get("max_references", 4))),
             "request_template": entry.get("request_template"),
             "headers": entry.get("headers") if isinstance(entry.get("headers"), dict) else {},
+            "adapter": str(entry.get("adapter") or "openai_image").strip().lower(),
+            "raw": entry,
         })
     return providers
 
@@ -122,6 +125,44 @@ def _post(provider: dict, body: dict) -> dict:
         raise RuntimeError("出图 API 返回的 JSON 顶层必须是对象")
     return result
 
+
+def _modelscope_generate(provider: dict, prompt: str, refs: List[dict], files: List[Path], size: str) -> bytes:
+    """直接读取 output 下已生成的角色、场景、道具参考图，不要求在 models.json 中配置图片 URL。"""
+    cfg = provider.get("raw") or {}
+    encoded_refs = [_encode(path, "data_uri") for path in files[:provider["max_references"]]]
+    payload = {"prompt": prompt, "negative_prompt": str(cfg.get("negative_prompt") or ""),
+               "image_size": size, "num_images": 1, "reference_images": encoded_refs,
+               "ref_weight": float(cfg.get("ref_weight", 0.68))}
+    result = _post(provider, payload)
+    if result.get("status_code") not in (None, 200, "200"):
+        raise RuntimeError(f"ModelScope 提交失败：{result}")
+    task = result.get("result") if isinstance(result.get("result"), dict) else {}
+    task_id = task.get("task_id")
+    if not task_id:
+        raise RuntimeError(f"ModelScope 响应中找不到 result.task_id：{result}")
+    status_url = str(cfg.get("status_url_template") or "https://api-inference.modelscope.cn/api/v1/tasks/{task_id}").format(
+        task_id=urllib.parse.quote(str(task_id), safe=""))
+    deadline = time.time() + int(cfg.get("max_wait", 900))
+    headers = {"Authorization": "Bearer " + provider["api_key"], "Accept": "application/json"}
+    while time.time() < deadline:
+        req = urllib.request.Request(status_url, headers=headers, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=provider["timeout"]) as response:
+                data = json.loads(response.read().decode("utf-8", "replace"))
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f"ModelScope 查询 HTTP {exc.code}: {exc.read().decode('utf-8', 'replace')[:700]}") from exc
+        state = str(data.get("status") or "").upper()
+        if state == "FAILED":
+            raise RuntimeError(f"ModelScope 生图失败：{data}")
+        if state == "SUCCEEDED":
+            task_result = data.get("result") if isinstance(data.get("result"), dict) else {}
+            images = task_result.get("images") or []
+            image_url = images[0].get("url") if images and isinstance(images[0], dict) else None
+            if not image_url:
+                raise RuntimeError(f"ModelScope 任务成功但没有图片 URL：{data}")
+            return _download_image(str(image_url), provider["timeout"])
+        time.sleep(max(1, int(cfg.get("poll_interval", 3))))
+    raise TimeoutError(f"ModelScope 任务 {task_id} 超过最大等待时间")
 
 def _redacted(body: dict) -> dict:
     def walk(value):
@@ -341,21 +382,27 @@ def run(ctx: Context, eps: Optional[list] = None, generate: bool = False,
         for provider in providers:
             try:
                 files = [ctx.out / r["path"] for r in item["references"][:provider["max_references"]]]
-                images = [_encode(f, provider["image_encoding"]) for f in files]
                 size = _size_for(provider, ratio)
-                body = build_request(provider, item["prompt"], size, images)
+                if provider["adapter"] == "modelscope":
+                    data = _modelscope_generate(provider, item["prompt"], item["references"], files, size)
+                    body = None
+                else:
+                    images = [_encode(f, provider["image_encoding"]) for f in files]
+                    body = build_request(provider, item["prompt"], size, images)
                 if PRINT_FRAME_REQUEST:
                     ctx.log(f"分镜图 {item['id']} | 平台={provider['name']} | 模型={provider['model']} | 尺寸={size} | "
                             f"参考图={[Path(r['path']).name for r in item['references'][:provider['max_references']]]}")
-                    ctx.log("请求体：" + json.dumps(_redacted(body), ensure_ascii=False))
-                result = _post(provider, body)
-                b64, url = _find_image_payload(result)
-                if b64:
-                    data = base64.b64decode(b64, validate=True)
-                elif url:
-                    data = _download_image(url, provider["timeout"])
-                else:
-                    raise RuntimeError("响应中找不到 data[0].b64_json 或图片 URL")
+                    if body is not None:
+                        ctx.log("请求体：" + json.dumps(_redacted(body), ensure_ascii=False))
+                if provider["adapter"] != "modelscope":
+                    result = _post(provider, body)
+                    b64, url = _find_image_payload(result)
+                    if b64:
+                        data = base64.b64decode(b64, validate=True)
+                    elif url:
+                        data = _download_image(url, provider["timeout"])
+                    else:
+                        raise RuntimeError("响应中找不到 data[0].b64_json 或图片 URL")
                 target = (ctx.out / item["output_base"]).with_suffix(_extension(data))
                 target.parent.mkdir(parents=True, exist_ok=True)
                 temp = target.with_suffix(target.suffix + ".part")

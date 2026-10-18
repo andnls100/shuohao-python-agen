@@ -327,6 +327,20 @@ python run_agent.py run --stages audio --eps 1 --audio-submit --yes
 
 详见[角色对白音频生成文档](docs/audio-generation.md)。CosyVoice v3.5 Flash 的声音设计仅支持北京地域，需要使用对应的 Workspace ID、接口地址和 API Key。
 
+### 独立优化一集的分镜提示词（不生视频）
+
+对已经生成的分镜，单独调用 `novel-storyboard` skill 及其镜头正文、H3、分镜图和打戏规范，逐段优化该集所有 `frame`、`shot`、`h3Prompt` 等提示词。原分镜文件不会被覆盖；不会生成图片或视频。
+
+```bash
+# 自动查找 output/storyboard/ 下唯一的 *-storyboard.json，优化第 1 集
+python run_agent.py optimize-prompts --episode 1
+
+# 明确指定分镜文件与结果文件
+python run_agent.py optimize-prompts --episode 1 --input output/storyboard/书名-storyboard.json --output-file output/storyboard/书名-E01-optimized-prompts.json
+```
+
+默认结果写入 `output/storyboard/<书名>-E01-optimized-prompts.json`。该文件只包含所选集，保持原有分镜结构；每段完成后立即保存。此命令需要已配置的文本模型 API。
+
 ### 视频生成阶段（可选）
 
 视频阶段接在 storyboard 之后，**不会在普通流水线中自动运行**。默认只生成提示词与清单，不会发起云端任务。
