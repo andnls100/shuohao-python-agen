@@ -140,8 +140,25 @@ def _wan_r2v_prompt(item: dict) -> str:
     return ("；".join(labels) + "。\n\n" + prompt) if labels else prompt
 
 
+def _prepare_prompt(provider: dict, item: dict) -> None:
+    """在真正提交当前镜头前，只优化这一镜头一次；保留原始/优化结果供调试。"""
+    from ..video_middleware import optimize_prompt_with_skill
+
+    adapter = str(provider.get("adapter") or "generic").strip().lower()
+    original = str(item.get("prompt_original") or item.get("prompt") or "").strip()
+    if item.get("prompt_optimized_adapter") == adapter and item.get("prompt_optimized"):
+        item["prompt"] = item["prompt_optimized"]
+        return
+    optimized = optimize_prompt_with_skill(adapter, original)
+    item["prompt_original"] = original
+    item["prompt_optimized"] = optimized
+    item["prompt_optimized_adapter"] = adapter
+    item["prompt"] = optimized
+
+
 def build_request(provider: dict, item: dict, manifest: dict) -> dict:
     adapter = str(provider.get("adapter") or "generic").lower()
+    _prepare_prompt(provider, item)
     context = {
         "model": provider["VIDEO_API_MODEL"],
         "prompt": item["prompt"],
