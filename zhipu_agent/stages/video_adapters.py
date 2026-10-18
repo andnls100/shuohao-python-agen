@@ -170,9 +170,9 @@ def build_request(provider: dict, item: dict, manifest: dict) -> dict:
     }
 
     images = list(item.get("images") or [])
-    is_wan_r2v = adapter == "aliyun_wan" and "r2v" in str(context["model"]).lower()
-    if images and adapter != "cogvideox_zhipu" and not is_wan_r2v:
-        raise ValueError(f"适配器 {adapter!r} 暂未支持图生视频；目前只有 cogvideox_zhipu 支持")
+    is_wan_r2v = adapter == "aliyun_wan" and "wan_r2v" in str(context["model"]).lower()
+    #if images and adapter != "cogvideox_zhipu" and not is_wan_r2v:
+        #raise ValueError(f"适配器 {adapter!r} 暂未支持图生视频；目前只有 cogvideox_zhipu 支持")
 
     if adapter == "cogvideox_zhipu":
         if str(context["model"]).strip() != "vidu2-reference":
