@@ -27,7 +27,7 @@ def _render(value: Any, context: dict) -> Any:
 
 
 COGVIDEOX_PROMPT_LIMIT = 512
-COGVIDEOX_SIZES = ("1280x720", "720x1280", "1024x1024", "1920x1080", "1080x1920", "2048x1080", "3840x2160")
+COGVIDEOX_SIZES = ("1280x720",)
 COGVIDEOX_REFERENCE_RATIOS = ("16:9", "9:16", "1:1")
 COGVIDEOX_MOVEMENTS = ("auto", "small", "medium", "large")
 
@@ -124,9 +124,7 @@ def _cog_reference_images(item: dict) -> list[str]:
         raise ValueError("CogVideoX-3 参考生视频没有从 character/art 找到参考图")
     if len(assets) > 3:
         assets = assets[:3]
-    images = []
-    for asset in assets:
-        images.append(encode_image(_reference_asset_path(asset), "data_uri"))
+    images = [encode_image(_reference_asset_path(asset), "data_uri") for asset in assets]
     if not 1 <= len(images) <= 3:
         raise ValueError("CogVideoX-3 image_url 必须包含 1-3 张参考图")
     return images
@@ -171,7 +169,7 @@ def build_request(provider: dict, item: dict, manifest: dict) -> dict:
         movement = str(provider.get("movement_amplitude") or "auto")
         if movement not in COGVIDEOX_MOVEMENTS:
             raise ValueError(f"CogVideoX-3 movement_amplitude 必须是 {', '.join(COGVIDEOX_MOVEMENTS)} 之一")
-        body = {
+        return {
             "model": "vidu2-reference",
             "prompt": prompt,
             "image_url": _cog_reference_images(item),
@@ -181,7 +179,6 @@ def build_request(provider: dict, item: dict, manifest: dict) -> dict:
             "movement_amplitude": movement,
             "with_audio": bool(provider.get("with_audio", True)),
         }
-        return body
 
     if adapter == "aliyun_wan":
         model = context["model"].lower()
