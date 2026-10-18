@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""ComfyUI 本地文生图冒烟测试。
-
-读取同目录的 image_sdxl_simple.json（ComfyUI API 格式工作流），替换提示词和常用生成参数后提交给远程 ComfyUI。
-"""
+"""ComfyUI 文生图冒烟测试：读取同目录 sdxl_api.json 并按节点标题替换提示词。"""
 from __future__ import annotations
 
 import base64
@@ -15,8 +12,9 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-# -------------------- 可直接修改的测试参数 --------------------
 COMFY_URL = "http://127.0.0.1:8188"
+CLIENT_ID = "short_drama_batch"
+
 PROMPT = (
     "电影级写实风格，古代中国客栈内部，夜晚，暖色油灯照明，"
     "一名身穿深蓝色长袍的年轻男子坐在木桌旁，神情警觉，"
@@ -27,57 +25,81 @@ WIDTH = 1152
 HEIGHT = 896
 STEPS = 20
 CFG = 2.5
-SHIFT = 3.1
 SEED = int(time.time()) % 2**32
 TIMEOUT_SECONDS = 1200
 POLL_SECONDS = 2
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+WORKFLOW_PATH = SCRIPT_DIR / "sdxl_api.json"
+OUTPUT_DIR = SCRIPT_DIR.parent / "output" / "comfyui-test"
 
-OUTPUT_DIR = Path(__file__).resolve().parents[1] / "output" / "comfyui-test"
-FILENAME_PREFIX = "comfyui-test"
-# ------------------------------------------------------------
+
+def auth_headers() -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    user, password = os.getenv("COMFY_USER"), os.getenv("COMFY_PASS")
+    if user:
+        token = base64.b64encode(f"{user}:{password or ''}".encode()).decode()
+        headers["Authorization"] = f"Basic {token}"
+    return headers
 
 
 def request_json(path: str, method: str = "GET", body: dict | None = None) -> dict:
     url = COMFY_URL.rstrip("/") + path
     data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
-    headers = {"Content-Type": "application/json"} if data is not None else {}
-    user, password = os.getenv("COMFY_USER"), os.getenv("COMFY_PASS")
-    if user:
-        token = base64.b64encode(f"{user}:{password or ''}".encode()).decode()
-        headers["Authorization"] = f"Basic {token}"
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    req = urllib.request.Request(url, data=data, headers=auth_headers(), method=method)
     try:
         with urllib.request.urlopen(req, timeout=60) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", "replace")[:1500]
+        detail = exc.read().decode("utf-8", "replace")[:2000]
         raise RuntimeError(f"ComfyUI HTTP {exc.code}: {detail}") from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"无法连接 ComfyUI：{url}；请确认 ComfyUI 正在运行。原因：{exc}") from exc
+        raise RuntimeError(f"无法连接 ComfyUI：{url}；请确认服务正在运行。原因：{exc}") from exc
 
 
 def load_workflow() -> dict:
-    """读取与本脚本同目录的 ComfyUI API 格式工作流，并更新测试参数。"""
-    workflow_path = Path(__file__).resolve().with_name("image_sdxl_simple.json")
-    if not workflow_path.is_file():
-        raise FileNotFoundError(f"找不到工作流文件：{workflow_path}")
+    if not WORKFLOW_PATH.is_file():
+        raise FileNotFoundError(f"找不到工作流文件：{WORKFLOW_PATH}")
 
-    data = json.loads(workflow_path.read_text(encoding="utf-8-sig"))
-    # 兼容文件直接保存 API prompt，或外层包含 prompt 字段的格式。
+    data = json.loads(WORKFLOW_PATH.read_text(encoding="utf-8-sig"))
     workflow = data.get("prompt", data) if isinstance(data, dict) else data
     if not isinstance(workflow, dict) or not workflow:
-        raise RuntimeError(f"工作流不是有效的 ComfyUI API 格式：{workflow_path}")
+        raise RuntimeError(f"不是有效的 ComfyUI API 格式工作流：{WORKFLOW_PATH}")
 
-    text_nodes = []
+    found_positive = False
+    found_negative = False
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict) or node.get("class_type") != "CLIPTextEncode":
+            continue
+        inputs = node.get("inputs", {})
+        if "text" not in inputs:
+            continue
+        title = str(node.get("_meta", {}).get("title", "")).strip()
+        if title == "正面提示词":
+            inputs["text"] = PROMPT
+            found_positive = True
+        elif title == "负面提示词":
+            inputs["text"] = NEGATIVE_PROMPT
+            found_negative = True
+
+    if not found_positive or not found_negative:
+        missing = []
+        if not found_positive:
+            missing.append("正面提示词")
+        if not found_negative:
+            missing.append("负面提示词")
+        raise RuntimeError(
+            "工作流缺少以下 CLIPTextEncode 节点标题：" + "、".join(missing)
+            + "。请在 ComfyUI 工作流中设置对应标题并重新导出 API 格式 JSON。"
+        )
+
+    # 更新工作流中存在的常用生成参数，不依赖具体模型文件名。
     for node in workflow.values():
         if not isinstance(node, dict) or not isinstance(node.get("inputs"), dict):
             continue
         node_type = node.get("class_type", "")
         inputs = node["inputs"]
-        if node_type == "CLIPTextEncode" and "text" in inputs:
-            text_nodes.append(inputs)
-        elif node_type in ("EmptySD3LatentImage", "EmptyLatentImage"):
+        if node_type in ("EmptyLatentImage", "EmptySD3LatentImage"):
             if "width" in inputs:
                 inputs["width"] = WIDTH
             if "height" in inputs:
@@ -90,33 +112,50 @@ def load_workflow() -> dict:
             if "seed" in inputs:
                 inputs["seed"] = SEED
 
-    if not text_nodes:
-        raise RuntimeError(
-            "工作流中没有找到 CLIPTextEncode 节点。请使用 ComfyUI 导出的 API 格式 JSON。"
-        )
-    # 常见 API 工作流中第一个 CLIPTextEncode 是正向提示词，第二个是负向提示词。
-    text_nodes[0]["text"] = PROMPT
-    if len(text_nodes) > 1:
-        text_nodes[1]["text"] = NEGATIVE_PROMPT
-
-    print(f"已加载工作流：{workflow_path}")
+    print(f"已加载工作流：{WORKFLOW_PATH}")
     print(f"工作流节点数：{len(workflow)}")
     return workflow
 
 
-def main() -> None:
+def download_image(image_info: dict) -> Path:
+    query = urllib.parse.urlencode({
+        "filename": image_info["filename"],
+        "subfolder": image_info.get("subfolder", ""),
+        "type": image_info.get("type", "output"),
+    })
+    url = COMFY_URL.rstrip("/") + "/view?" + query
+    req = urllib.request.Request(url, headers=auth_headers())
+    try:
+        with urllib.request.urlopen(req, timeout=300) as response:
+            content = response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:1500]
+        raise RuntimeError(f"下载图片失败，HTTP {exc.code}: {detail}") from exc
+
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    suffix = Path(image_info["filename"]).suffix or ".png"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    target = OUTPUT_DIR / f"test_{timestamp}{suffix}"
+    target.write_bytes(content)
+    print(f"已保存：{target.resolve()}")
+    return target
+
+
+def main() -> None:
     print(f"ComfyUI: {COMFY_URL}")
     print(f"尺寸: {WIDTH}x{HEIGHT} | steps={STEPS} | seed={SEED}")
     print(f"提示词: {PROMPT}")
 
-    unet_name, clip_name, vae_name = discover_models()
-    workflow = build_workflow(unet_name, clip_name, vae_name)
-    submitted = request_json("/prompt", "POST", {"prompt": workflow})
+    workflow = load_workflow()
+    submitted = request_json(
+        "/prompt",
+        "POST",
+        {"prompt": workflow, "client_id": CLIENT_ID},
+    )
     prompt_id = submitted.get("prompt_id")
     if not prompt_id:
-        raise RuntimeError(f"ComfyUI 未返回 prompt_id：{submitted}")
-    print(f"任务已提交：{prompt_id}")
+        raise RuntimeError(f"ComfyUI 未返回 prompt_id：{json.dumps(submitted, ensure_ascii=False)}")
+    print(f"已提交任务：{prompt_id}")
 
     deadline = time.monotonic() + TIMEOUT_SECONDS
     while time.monotonic() < deadline:
@@ -127,9 +166,10 @@ def main() -> None:
             continue
 
         status = task.get("status", {})
-        if status.get("status_str") == "error" or status.get("completed") is False and status.get("messages"):
-            messages = status.get("messages", [])
-            raise RuntimeError("ComfyUI 执行失败：" + json.dumps(messages, ensure_ascii=False)[:2000])
+        if status.get("status_str") == "error":
+            raise RuntimeError(
+                "ComfyUI 执行失败：" + json.dumps(status.get("messages", []), ensure_ascii=False)[:2000]
+            )
 
         images = [
             image
@@ -137,24 +177,8 @@ def main() -> None:
             for image in node_output.get("images", [])
         ]
         if images:
-            image = images[0]
-            query = urllib.parse.urlencode({
-                "filename": image["filename"],
-                "subfolder": image.get("subfolder", ""),
-                "type": image.get("type", "output"),
-            })
-            url = COMFY_URL.rstrip("/") + "/view?" + query
-            req = urllib.request.Request(url)
-            user, password = os.getenv("COMFY_USER"), os.getenv("COMFY_PASS")
-            if user:
-                token = base64.b64encode(f"{user}:{password or ''}".encode()).decode()
-                req.add_header("Authorization", f"Basic {token}")
-            with urllib.request.urlopen(req, timeout=300) as response:
-                data = response.read()
-            suffix = Path(image["filename"]).suffix or ".png"
-            target = OUTPUT_DIR / f"test_{datetime.now():%Y%m%d_%H%M%S}{suffix}"
-            target.write_bytes(data)
-            print(f"OK：图片已保存到 {target.resolve()}")
+            for image_info in images:
+                download_image(image_info)
             return
         time.sleep(POLL_SECONDS)
 
