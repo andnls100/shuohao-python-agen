@@ -147,7 +147,15 @@ class ImageToVideoTest(unittest.TestCase):
             ctx = self._ctx(tmp)
             with mock.patch.object(video, "_config", return_value=self._cfg()), \
                  mock.patch.object(video, "_request", side_effect=fake_request), \
+                 mock.patch.object(video, "_request_get", return_value={
+                     "task_status": "SUCCESS", "video_result": [{"url": "http://x/v.mp4"}]
+                 }), \
                  mock.patch.object(video, "_download", side_effect=lambda u, t, c: None):
+                path = video.run(ctx, eps=[1], protocol="i2v", submit=True, flf=True)
+                submitted = json.loads(path.read_text(encoding="utf-8"))
+                self.assertTrue(all(i["state"] == "submitted" for i in submitted["items"]))
+                self.assertTrue(all(i["task_id"] for i in submitted["items"]))
+                # A subsequent invocation polls saved task IDs and downloads completed videos.
                 path = video.run(ctx, eps=[1], protocol="i2v", submit=True, flf=True)
             manifest = json.loads(path.read_text(encoding="utf-8"))
         items = manifest["items"]

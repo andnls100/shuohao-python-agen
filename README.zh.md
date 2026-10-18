@@ -264,6 +264,7 @@ python run_agent.py run --stages video --eps 1 --video-protocol seedance
 
 # 确认 API 配置、价格和提示词后，显式提交视频生成任务
 python run_agent.py run --stages video --eps 1 --video-submit
+# 首次运行异步提交任务；稍后再次运行同一命令，查询任务状态并下载已完成视频
 
 # 忽略已有产物和缓存，全部重做
 python run_agent.py run --stages script --force

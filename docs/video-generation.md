@@ -73,7 +73,7 @@ set VIDEO_BACKUP_API_KEY=你的备用Key
 python run_agent.py run --stages video --eps 1 --video-submit
 ```
 
-未指定 `--video-submit` 时绝不调用视频 API。提交模式会逐段保存任务状态；已成功生成的分段会跳过。生成失败会记录到 manifest，不会悄悄当作成功。
+未指定 `--video-submit` 时绝不调用视频 API。首次提交会异步创建云端任务并立即保存 `task_id`，不会逐段阻塞等待视频渲染；再次运行相同命令时，会查询已保存的任务并下载完成的视频。已成功生成的分段会跳过。生成失败会记录到 manifest，不会悄悄当作成功。
 
 ## 4. 当前边界
 
