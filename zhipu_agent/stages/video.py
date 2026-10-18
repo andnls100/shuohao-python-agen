@@ -469,10 +469,15 @@ def _submit(item: dict, manifest: dict, providers: list, root: Path, path: Path)
                         result, cfg = response, candidate
                         break
                     if task_id:
-                        item["state"] = "polling"
+                        # Submit asynchronously and persist the task ID; polling happens on a later run.
+                        # This lets the pipeline submit every segment without blocking on each render.
+                        item["state"] = "submitted"
                         write_json(path, manifest)
-                        result, cfg = _poll(task_id, candidate), candidate
-                        break
+                        print(
+                            f"视频任务已异步提交：{item['id']} | task_id={task_id}",
+                            flush=True,
+                        )
+                        return
                     raise RuntimeError("响应中找不到 video_url、output_url 或 task_id；需适配该平台响应格式")
                 except Exception as exc:
                     if item.get("task_id"):
