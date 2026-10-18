@@ -11,6 +11,7 @@ import mimetypes
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 
 def _render(value: Any, context: dict) -> Any:
@@ -28,6 +29,8 @@ def _render(value: Any, context: dict) -> Any:
     for key, replacement in context.items():
         value = value.replace("{{" + key + "}}", str(replacement))
     return value
+
+
 COGVIDEOX_PROMPT_LIMIT = 512
 COGVIDEOX_SIZES = ("1280x720", "720x1280", "1024x1024", "1920x1080", "1080x1920", "2048x1080", "3840x2160")
 
@@ -76,6 +79,34 @@ def encode_image(path: Path, encoding: str = "data_uri") -> str:
     return b64 if encoding == "base64" else f"data:{mime};base64,{b64}"
 
 
+def _reference_media(provider: dict, item: dict) -> list[dict]:
+    """Validate Wan R2V media. Reference media must be publicly reachable HTTP(S) URLs."""
+    media = item.get("reference_media")
+    if media is None:
+        media = provider.get("reference_media") or []
+    if not isinstance(media, list):
+        raise ValueError("reference_media 必须是数组")
+    result = []
+    allowed_types = {"reference_image", "reference_video"}
+    for index, entry in enumerate(media, 1):
+        if not isinstance(entry, dict):
+            raise ValueError(f"reference_media[{index}] 必须是对象")
+        media_type = str(entry.get("type") or "").strip()
+        url = str(entry.get("url") or "").strip()
+        if media_type not in allowed_types:
+            raise ValueError(f"reference_media[{index}].type 必须是 reference_image 或 reference_video")
+        if urlparse(url).scheme not in ("http", "https"):
+            raise ValueError(f"reference_media[{index}].url 必须是 HTTP(S) URL；不能直接提交本地文件路径")
+        normalized = {"type": media_type, "url": url}
+        if entry.get("reference_voice"):
+            voice = str(entry["reference_voice"]).strip()
+            if urlparse(voice).scheme not in ("http", "https"):
+                raise ValueError(f"reference_media[{index}].reference_voice 必须是 HTTP(S) URL")
+            normalized["reference_voice"] = voice
+        result.append(normalized)
+    return result
+
+
 def build_request(provider: dict, item: dict, manifest: dict) -> dict:
     """Build the request body for the selected provider adapter."""
     adapter = str(provider.get("adapter") or "generic").lower()
@@ -92,7 +123,6 @@ def build_request(provider: dict, item: dict, manifest: dict) -> dict:
         raise ValueError(f"适配器 {adapter!r} 暂未支持图生视频；目前只有 cogvideox_zhipu 支持")
 
     if adapter == "cogvideox_zhipu":
-        # Zhipu videos API accepts 5 or 10 seconds for CogVideoX-3.
         duration = 5 if float(item["duration_seconds"]) <= 5 else 10
         ratio = context["aspect_ratio"]
         size = provider.get("size") or ("1920x1080" if ratio == "16:9" else "1080x1920" if ratio == "9:16" else "1024x1024")
@@ -116,24 +146,27 @@ def build_request(provider: dict, item: dict, manifest: dict) -> dict:
         if images:
             if len(images) > 2:
                 raise ValueError("CogVideoX-3 最多传 2 张图（首帧、尾帧）")
-            # 单张是首帧；两张时第一张首帧、第二张尾帧（官方）。首尾帧模式只支持 speed。
             body["image_url"] = images[0] if len(images) == 1 else images
             if len(images) == 2:
                 body["quality"] = "speed"
             if not provider.get("size"):
-                body.pop("size")  # 不传 size：按图片比例决定画幅，和分镜图一致
+                body.pop("size")
         return body
 
     if adapter == "aliyun_wan":
-        # Wan 3.0 official API: input.prompt + parameters.duration/resolution/ratio.
-        # Wan takes an integer duration; short storyboard shots are rounded to seconds.
-        duration = max(2, min(30, int(round(float(item["duration_seconds"])))))
+        duration = max(2, min(30, int(round(float(item["duration_seconds"])))) )
         ratio = context["aspect_ratio"]
         if ratio not in ("16:9", "9:16", "4:3", "1:1", "3:4", "adaptive"):
             ratio = "adaptive"
+        input_body = {"prompt": context["prompt"]}
+        if str(provider.get("mode") or "t2v").lower() == "r2v":
+            media = _reference_media(provider, item)
+            if not media:
+                raise ValueError("Wan R2V 已启用，但没有配置 reference_media")
+            input_body["media"] = media
         return {
             "model": context["model"],
-            "input": {"prompt": context["prompt"]},
+            "input": input_body,
             "parameters": {
                 "resolution": context["resolution"],
                 "ratio": provider.get("ratio") or ratio,
@@ -146,8 +179,6 @@ def build_request(provider: dict, item: dict, manifest: dict) -> dict:
     if isinstance(template, dict) and template:
         return _render(template, context)
 
-    # Backwards-compatible generic shape for existing providers. New providers
-    # with a different API contract should supply request_template in models.json.
     return {
         "model": context["model"],
         "prompt": context["prompt"],
