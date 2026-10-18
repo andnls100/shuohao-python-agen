@@ -1,4 +1,4 @@
-"""统一视频中间层：模型技能路由、提示词标准化和能力信息。
+"""统一视频中间层：模型技能路由、单镜头提示词优化和能力信息。
 
 中间层不负责 HTTP 请求；具体平台请求仍由 video_adapters 处理。
 技能包负责模型侧提示词规则，适配器只负责把标准化结果转换成 API payload。
@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
+from .llm import chat
 from .skill_loader import SkillError, load_pack
 
 
@@ -31,7 +32,7 @@ def resolve_skill(adapter: str) -> VideoSkill | None:
 
 
 def skill_instructions(adapter: str) -> str:
-    """返回模型技能包中的提示词规则，供上游 LLM 做二次优化。"""
+    """返回模型技能包中的提示词规则。"""
     skill = resolve_skill(adapter)
     if skill is None:
         return ""
@@ -68,6 +69,35 @@ def optimize_prompt(adapter: str, prompt: str) -> str:
         return text.strip()
 
     return text
+
+
+def optimize_prompt_with_skill(adapter: str, prompt: str) -> str:
+    """每次只优化一个即将提交的视频镜头；不保留跨镜头对话历史。"""
+    text = str(prompt or "").strip()
+    rules = skill_instructions(adapter)
+    if not rules:
+        return optimize_prompt(adapter, text)
+
+    system = (
+        "你是视频生成提示词优化器。只优化当前一个镜头，不处理其他镜头。\n"
+        "严格遵守下面的模型技能包规则。保留原提示词中的事实、人物、动作、镜头和时序意图，"
+        "不要虚构剧情；删除冗余说明；输出只允许是一段可直接提交给视频模型的最终 prompt，"
+        "不要解释、不要 Markdown、不要前后引号。\n\n"
+        f"模型技能包规则：\n{rules}"
+    )
+    try:
+        optimized = chat(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": text},
+            ],
+            kind="text",
+            temperature=0,
+        ).strip()
+    except Exception:
+        # 优化器失败时不阻断视频生成，仍执行确定性模型约束。
+        optimized = text
+    return optimize_prompt(adapter, optimized)
 
 
 def prepare_prompt(provider: dict, prompt: str) -> str:
