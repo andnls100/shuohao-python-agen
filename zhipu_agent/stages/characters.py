@@ -178,9 +178,17 @@ def run(ctx: Context, max_chars: int = 30, visual_style: str = "manju") -> Path:
             "## 输出\n只输出这一个角色的角色卡 JSON 对象（结构见《数据结构》的「单张角色卡」）。"
             "persona.evidence 里的引文必须逐字取自上面的片段；image.prompt 等出图提示词不得出现任何角色名。"
         )
+        # 缓存文件名不能以 card- 开头：校验器会把 work 目录里所有 card-*.json 当成角色卡，重名就报「有两份卡」。
+        cache_path = work / f"cache-{safe_name(name)}-{visual_style}.json"
+        legacy = work / f"card-{safe_name(name)}-{visual_style}.json"
+        if legacy.is_file():  # 旧版本留下的缓存：改名沿用，同时让它不再被当成角色卡
+            if cache_path.exists():
+                legacy.unlink()
+            else:
+                legacy.replace(cache_path)
         # 报错里角色名有两种写法："[陆行远] image.prompt …" 和 "胡二爷 与 岸上挑灯的更夫 的提示词雷同"
         items.append(Item(name, card_system, prompt,
-                          tokens=[f"[{name}]", f"card-{safe_name(name)}", name], cache=work / f"card-{safe_name(name)}-{visual_style}.json"))
+                          tokens=[f"[{name}]", f"card-{safe_name(name)}", name], cache=cache_path))
 
     def apply_card(key: str, data: Any) -> None:
         if isinstance(data, dict) and isinstance(data.get("character"), dict):
