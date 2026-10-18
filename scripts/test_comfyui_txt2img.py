@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """ComfyUI 本地文生图冒烟测试。
 
-按仓库 character-refs 的 Qwen Image 2.1 工作流构建 API prompt：
-UNETLoader -> ModelSamplingAuraFlow -> KSampler -> VAEDecode -> SaveImage。
-运行前确认本机 ComfyUI 已加载对应模型；若文件名不同，修改下方模型配置。
+通过远程 ComfyUI HTTP API 提交工作流。模型文件由 ComfyUI 服务端管理，脚本会从服务端自动发现可用模型。
 """
 from __future__ import annotations
 
@@ -34,9 +32,6 @@ SEED = int(time.time()) % 2**32
 TIMEOUT_SECONDS = 1200
 POLL_SECONDS = 2
 
-UNET_NAME = "qwen_image_2.1_int8_convrot.safetensors"
-CLIP_NAME = "qwen3vl_8b_int8_convrot.safetensors"
-VAE_NAME = "qwen_image_2.1_vae_bf16.safetensors"
 
 OUTPUT_DIR = Path(__file__).resolve().parents[1] / "output" / "comfyui-test"
 FILENAME_PREFIX = "comfyui-test"
@@ -62,17 +57,40 @@ def request_json(path: str, method: str = "GET", body: dict | None = None) -> di
         raise RuntimeError(f"无法连接 ComfyUI：{url}；请确认 ComfyUI 正在运行。原因：{exc}") from exc
 
 
-def build_workflow() -> dict:
+def discover_models() -> tuple[str, str, str]:
+    """从远程 ComfyUI 的 object_info 中发现模型文件名；模型由服务端加载。"""
+    info = request_json("/object_info")
+    try:
+        unets = info["UNETLoader"]["input"]["required"]["unet_name"][0]
+        clips = info["CLIPLoader"]["input"]["required"]["clip_name"][0]
+        vaes = info["VAELoader"]["input"]["required"]["vae_name"][0]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError("远程 ComfyUI 未提供标准模型列表，请确认服务端工作流节点可用") from exc
+
+    def choose(options, keywords, label):
+        matches = [name for name in options if all(k in name.lower() for k in keywords)]
+        if not matches:
+            raise RuntimeError(f"远程 ComfyUI 找不到匹配的 {label} 模型；请检查服务端安装的模型类型。")
+        return matches[0]
+
+    unet = choose(unets, ("qwen", "image"), "Qwen Image UNET")
+    clip = choose(clips, ("qwen",), "Qwen CLIP")
+    vae = choose(vaes, ("qwen", "image"), "Qwen Image VAE")
+    print(f"远程服务端模型：UNET={unet} | CLIP={clip} | VAE={vae}")
+    return unet, clip, vae
+
+
+def build_workflow(unet_name: str, clip_name: str, vae_name: str) -> dict:
     return {
         "unet": {
             "class_type": "UNETLoader",
-            "inputs": {"unet_name": UNET_NAME, "weight_dtype": "default"},
+            "inputs": {"unet_name": unet_name, "weight_dtype": "default"},
         },
         "clip": {
             "class_type": "CLIPLoader",
-            "inputs": {"clip_name": CLIP_NAME, "type": "qwen_image", "device": "default"},
+            "inputs": {"clip_name": clip_name, "type": "qwen_image", "device": "default"},
         },
-        "vae": {"class_type": "VAELoader", "inputs": {"vae_name": VAE_NAME}},
+        "vae": {"class_type": "VAELoader", "inputs": {"vae_name": vae_name}},
         "sampling": {
             "class_type": "ModelSamplingAuraFlow",
             "inputs": {"model": ["unet", 0], "shift": SHIFT, "sampling": "flow"},
@@ -121,7 +139,8 @@ def main() -> None:
     print(f"尺寸: {WIDTH}x{HEIGHT} | steps={STEPS} | seed={SEED}")
     print(f"提示词: {PROMPT}")
 
-    workflow = build_workflow()
+    unet_name, clip_name, vae_name = discover_models()
+    workflow = build_workflow(unet_name, clip_name, vae_name)
     submitted = request_json("/prompt", "POST", {"prompt": workflow})
     prompt_id = submitted.get("prompt_id")
     if not prompt_id:
