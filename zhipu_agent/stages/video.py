@@ -450,9 +450,9 @@ def _submit(item: dict, manifest: dict, providers: list, root: Path, path: Path)
                     submitted_prompt = body.get("input", {}).get("prompt") if isinstance(body.get("input"), dict) else body.get("prompt")
                     if submitted_prompt:
                         print(
-                            f"\\n===== 视频提示词（{item['id']} | {candidate['name']} | 技能优化后，实际提交内容）=====\\n"
-                            f"{submitted_prompt}\\n"
-                            f"===== 提示词结束：{item['id']} =====\\n",
+                            f"\n===== 视频提示词（{item['id']} | {candidate['name']} | 技能优化后，实际提交内容）=====\n"
+                            f"{submitted_prompt}\n"
+                            f"===== 提示词结束：{item['id']} =====\n",
                             flush=True,
                         )
                     response = _request(candidate["VIDEO_API_SUBMIT_URL"], candidate, body)
