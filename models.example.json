@@ -50,17 +50,10 @@
       "resolution": "720P",
       "ratio": "16:9",
       "prompt_extend": false,
-      "request_template": {
-        "reference_media": [
-          {"type": "reference_image", "url": "https://example.com/reference-character.jpg", "reference_voice": "https://example.com/reference-character.mp3"},
-          {"type": "reference_video", "url": "https://example.com/reference-video.mp4", "reference_voice": "https://example.com/reference-video-voice.mp3"},
-          {"type": "reference_image", "url": "https://example.com/object.png"}
-        ]
-      },
       "timeout": 120,
       "poll_interval": 15,
       "max_wait": 1800,
-      "note": "Wan R2V：将 request_template.reference_media 中的示例 URL 替换成真实公网 HTTP(S) URL；可混合 reference_image/reference_video，并可附 reference_voice。选择 --video-model wan_r2v。"
+      "note": "Wan R2V：参考图自动从当前分镜引用的 character/art 资产读取，不在 models.json 中配置参考图；使用 --video-model wan_r2v。"
     },
     {
       "key": "seedance_cheapdev",
