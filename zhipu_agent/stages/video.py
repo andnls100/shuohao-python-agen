@@ -88,6 +88,15 @@ def _motion_prompt(cut: dict, shot_id: str) -> str:
     return "\n".join(parts)
 
 
+def _frame_file(base: Path, sid: str, index: int) -> Path:
+    """分镜图可能是 png / jpg（出图接口返回什么就存什么）：优先用已存在的，都没有时按 png 记。"""
+    for suffix in (".png", ".jpg", ".jpeg"):
+        candidate = base / sid / f"f{index}{suffix}"
+        if candidate.is_file():
+            return candidate
+    return base / sid / f"f{index}.png"
+
+
 def _rel(path: Path, base: Path) -> str:
     try:
         return str(path.resolve().relative_to(base.resolve()))
@@ -122,8 +131,8 @@ def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str
                         duration = 0
                     if duration <= 0:
                         raise ValueError(f"镜头 {shot_id} 的 seconds 必须大于 0")
-                    first = base / sid / f"f{cut_idx}.png"
-                    last = base / sid / f"f{cut_idx + 1}.png" if flf and cut_idx < len(cuts) else None
+                    first = _frame_file(base, sid, cut_idx)
+                    last = _frame_file(base, sid, cut_idx + 1) if flf and cut_idx < len(cuts) else None
                     items.append({
                         "id": shot_id, "ep": ep, "sceneIndex": segment.get("sceneIndex"),
                         "segmentId": sid, "shotIndex": cut_idx, "duration_seconds": duration,

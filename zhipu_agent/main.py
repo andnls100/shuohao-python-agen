@@ -54,6 +54,8 @@ def _build_parser() -> argparse.ArgumentParser:
             s.add_argument("--refs-gen", action="store_true", help="refs 阶段真的出图（需先配置 character-refs 的出图模型）")
             s.add_argument("--images-gen", action="store_true", help="从已保存的 cast.json / art.json 提示词批量出角色、场景和道具图；需配置 models.json 的 image 号池")
             s.add_argument("--images-only", help="只出这几张图：写任务名、角色名、场景名或编号，逗号分隔，如 徐今朝 或 C03,S01；配合 --images-gen")
+            s.add_argument("--frames-gen", action="store_true", help="frames 阶段真的出分镜图（需配置 models.json 的 frame 号池）；不加只整理任务和参考图引用")
+            s.add_argument("--frames-only", help="只出这些分镜图：分镜编号 E01-01-C01、段号 E01-01（整段）或 E01（整集），逗号分隔")
             s.add_argument("--video-protocol", default="h3", choices=["h3", "seedance", "i2v"], help="视频提示词协议（默认 h3）；i2v = 按分镜图生视频（首帧取 <frames-dir>/<段号>/f<切序>.png）")
             s.add_argument("--frames-dir", help="分镜图目录（i2v 用），默认 output/frames")
             s.add_argument("--video-flf", action="store_true", help="i2v 下用同段下一张分镜图作尾帧（首尾帧模式，仅 speed 画质）")
@@ -156,7 +158,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     settings = load_settings(**overrides)
     stages = workflow.parse_stages(args.stages)
     # Images/video consume saved production JSON and do not need a text-model credential.
-    if any(stage not in ("images", "video", "audio") for stage in stages):
+    if any(stage not in ("images", "frames", "video", "audio") for stage in stages):
         settings.require()
 
     interactive = not args.yes and sys.stdin.isatty()
@@ -185,7 +187,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         "images_gen": args.images_gen,
         "images_only": [n.strip() for n in args.images_only.split(",") if n.strip()] if args.images_only else None,
         "video_protocol": args.video_protocol, "video_submit": args.video_submit,
-        "video_model": args.video_model, "frames_dir": args.frames_dir, "video_flf": args.video_flf,
+        "video_model": args.video_model, "frames_dir": args.frames_dir, "frames_gen": args.frames_gen,
+        "frames_only": [n.strip() for n in args.frames_only.split(",") if n.strip()] if args.frames_only else None, "video_flf": args.video_flf,
         "video_shots": [n.strip() for n in args.shots.split(",") if n.strip()] if args.shots else None,
         "audio_submit": args.audio_submit,
         "refs_names": [n.strip() for n in args.refs_names.split(",")] if args.refs_names else None,
@@ -194,7 +197,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         from .stages.base import parse_eps
         opts["eps"] = parse_eps(args.eps)
 
-    ctx = _ctx_from(args, settings, skip_source=all(stage in ("images", "continuity") for stage in stages))
+    ctx = _ctx_from(args, settings, skip_source=all(stage in ("images", "frames", "continuity") for stage in stages))
     results = workflow.run_pipeline(ctx, stages, opts)
     ctx.log("全部完成：")
     for name, path in results.items():
