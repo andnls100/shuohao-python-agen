@@ -75,7 +75,7 @@ def build_workflow() -> dict:
         "vae": {"class_type": "VAELoader", "inputs": {"vae_name": VAE_NAME}},
         "sampling": {
             "class_type": "ModelSamplingAuraFlow",
-            "inputs": {"model": ["unet", 0], "shift": SHIFT},
+            "inputs": {"model": ["unet", 0], "shift": SHIFT, "sampling": "flow"},
         },
         "positive": {
             "class_type": "CLIPTextEncode",
