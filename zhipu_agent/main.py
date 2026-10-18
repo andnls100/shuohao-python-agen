@@ -67,6 +67,12 @@ def _build_parser() -> argparse.ArgumentParser:
             s.add_argument("--yes", action="store_true", help="不暂停：骨架拍板点自动确认")
             s.add_argument("--concurrency", type=int, help="同时进行的模型调用数（默认 3）")
             s.add_argument("--fix-rounds", type=int, help="校验不过时最多回炉几轮（默认 1）")
+    op = sub.add_parser("optimize-prompts", help="使用分镜 skill 优化一集所有提示词，不生成图片或视频")
+    op.add_argument("--out", default=str(REPO_ROOT / "output"), help="项目输出目录，默认 output/")
+    op.add_argument("--episode", "--eps", dest="episode", type=int, required=True, help="要优化的集号，例如 1")
+    op.add_argument("--input", help="分镜 JSON 路径；不指定时自动查找 --out/storyboard/*-storyboard.json")
+    op.add_argument("--output-file", help="优化结果 JSON 路径；不指定时写入 storyboard/<书名>-E01-optimized-prompts.json")
+
     return p
 
 
@@ -205,6 +211,20 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_optimize_prompts(args: argparse.Namespace) -> int:
+    from .prompt_optimizer import optimize_episode
+
+    settings = load_settings()
+    settings.require()
+    optimize_episode(
+        episode=args.episode,
+        out_dir=Path(args.out),
+        input_file=Path(args.input) if args.input else None,
+        output_file=Path(args.output_file) if args.output_file else None,
+    )
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -213,7 +233,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             pass
     args = _build_parser().parse_args(argv)
     try:
-        return {"doctor": cmd_doctor, "run": cmd_run, "status": cmd_status}[args.command](args)
+        return {"doctor": cmd_doctor, "run": cmd_run, "status": cmd_status, "optimize-prompts": cmd_optimize_prompts}[args.command](args)
     except KeyboardInterrupt:
         print("\n已中断。已完成的条目都缓存在 output/work/ 里，重新运行会接着做。")
         return 130
