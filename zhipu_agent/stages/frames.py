@@ -17,6 +17,7 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -125,23 +126,12 @@ def _post(provider: dict, body: dict) -> dict:
     return result
 
 
-def _modelscope_generate(provider: dict, prompt: str, refs: List[dict]) -> bytes:
-    """ModelScope 示例 API 需要参考图 URL；在 models.json 中按资产名称/文件名映射。"""
+def _modelscope_generate(provider: dict, prompt: str, refs: List[dict], files: List[Path], size: str) -> bytes:
+    """直接读取 output 下已生成的角色、场景、道具参考图，不要求在 models.json 中配置图片 URL。"""
     cfg = provider.get("raw") or {}
-    mapping = cfg.get("reference_image_urls") or {}
-    urls, missing = [], []
-    for ref in refs[:provider["max_references"]]:
-        path = str(ref.get("path") or "").replace("\\", "/")
-        name = str(ref.get("name") or "")
-        value = mapping.get(name) or mapping.get(path) or mapping.get(Path(path).name)
-        if not isinstance(value, str) or urllib.parse.urlparse(value).scheme not in ("http", "https"):
-            missing.append(name or path)
-        else:
-            urls.append(value)
-    if missing:
-        raise ValueError("请先把 ModelScope 参考图上传为可访问 URL，并在 models.json 的 reference_image_urls 中映射：" + "、".join(missing))
+    encoded_refs = [_encode(path, "data_uri") for path in files[:provider["max_references"]]]
     payload = {"prompt": prompt, "negative_prompt": str(cfg.get("negative_prompt") or ""),
-               "image_size": provider["size"], "num_images": 1, "reference_images": urls,
+               "image_size": size, "num_images": 1, "reference_images": encoded_refs,
                "ref_weight": float(cfg.get("ref_weight", 0.68))}
     result = _post(provider, payload)
     if result.get("status_code") not in (None, 200, "200"):
@@ -173,7 +163,6 @@ def _modelscope_generate(provider: dict, prompt: str, refs: List[dict]) -> bytes
             return _download_image(str(image_url), provider["timeout"])
         time.sleep(max(1, int(cfg.get("poll_interval", 3))))
     raise TimeoutError(f"ModelScope 任务 {task_id} 超过最大等待时间")
-
 
 def _redacted(body: dict) -> dict:
     def walk(value):
@@ -395,7 +384,7 @@ def run(ctx: Context, eps: Optional[list] = None, generate: bool = False,
                 files = [ctx.out / r["path"] for r in item["references"][:provider["max_references"]]]
                 size = _size_for(provider, ratio)
                 if provider["adapter"] == "modelscope":
-                    data = _modelscope_generate(provider, item["prompt"], item["references"])
+                    data = _modelscope_generate(provider, item["prompt"], item["references"], files, size)
                     body = None
                 else:
                     images = [_encode(f, provider["image_encoding"]) for f in files]
