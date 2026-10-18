@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ComfyUI 文生图冒烟测试：读取同目录 sdxl_api.json 并按节点标题替换提示词。"""
+"""ComfyUI 文生图冒烟测试：读取同目录 sdxl.json，转换画布工作流并提交。"""
 from __future__ import annotations
 
 import base64
@@ -30,7 +30,7 @@ TIMEOUT_SECONDS = 1200
 POLL_SECONDS = 2
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-WORKFLOW_PATH = SCRIPT_DIR / "image_sdxl_simple.json"
+WORKFLOW_PATH = SCRIPT_DIR / "sdxl.json"
 OUTPUT_DIR = SCRIPT_DIR.parent / "output" / "comfyui-test"
 
 
@@ -57,92 +57,126 @@ def request_json(path: str, method: str = "GET", body: dict | None = None) -> di
         raise RuntimeError(f"无法连接 ComfyUI：{url}；请确认服务正在运行。原因：{exc}") from exc
 
 
+def canvas_to_api(data: dict) -> dict:
+    """将 ComfyUI 前端画布导出的 JSON 转为 /prompt 接受的 API prompt 格式。"""
+    nodes = {
+        str(node["id"]): node
+        for node in data.get("nodes", [])
+        if isinstance(node, dict) and "id" in node and node.get("type") != "MarkdownNote"
+    }
+    links = {
+        link[0]: link
+        for link in data.get("links", [])
+        if isinstance(link, list) and len(link) >= 6
+    }
+    workflow = {}
+
+    for node_id, node in nodes.items():
+        api_inputs = {}
+
+        # 先恢复节点连线；/prompt 使用 [上游节点 ID, 输出端口序号]。
+        for port in node.get("inputs", []):
+            if not isinstance(port, dict):
+                continue
+            name, link_id = port.get("name"), port.get("link")
+            if name and link_id in links:
+                link = links[link_id]
+                api_inputs[name] = [str(link[1]), int(link[2])]
+
+        # 画布 JSON 的 widgets_values_named 比 widgets_values 更可靠，
+        # 因为某些节点的 widgets_values 还包含 control_after_generate 等额外值。
+        named = node.get("widgets_values_named")
+        if isinstance(named, dict):
+            api_inputs.update(named)
+        else:
+            widget_names = [
+                port.get("widget", {}).get("name")
+                for port in node.get("inputs", [])
+                if isinstance(port, dict)
+                and isinstance(port.get("widget"), dict)
+                and port["widget"].get("name")
+            ]
+            values = node.get("widgets_values", [])
+            for index, name in enumerate(widget_names):
+                if index < len(values):
+                    api_inputs[name] = values[index]
+
+        # ComfyUI 画布的节点标题转换成 API 格式的 _meta.title，便于识别提示词节点。
+        api_node = {"class_type": node["type"], "inputs": api_inputs}
+        if node.get("title"):
+            api_node["_meta"] = {"title": str(node["title"])}
+        workflow[node_id] = api_node
+
+    return workflow
+
+
 def load_workflow() -> dict:
-    """读取工作流；自动把 ComfyUI 画布 JSON 转成 /prompt 所需的 API 格式。"""
     if not WORKFLOW_PATH.is_file():
         raise FileNotFoundError(f"找不到工作流文件：{WORKFLOW_PATH}")
 
     data = json.loads(WORKFLOW_PATH.read_text(encoding="utf-8-sig"))
     if isinstance(data, dict) and isinstance(data.get("nodes"), list):
-        nodes = {
-            str(node["id"]): node
-            for node in data["nodes"]
-            if "id" in node and node.get("type") != "MarkdownNote"
-        }
-        links = {
-            link[0]: link
-            for link in data.get("links", [])
-            if isinstance(link, list) and len(link) >= 6
-        }
-        workflow = {}
-        for node_id, node in nodes.items():
-            api_inputs = {}
-            for port in node.get("inputs", []):
-                name, link_id = port.get("name"), port.get("link")
-                if name and link_id in links:
-                    link = links[link_id]
-                    api_inputs[name] = [str(link[1]), int(link[2])]
-
-            named = node.get("widgets_values_named") or {}
-            widget_names = [
-                port.get("widget", {}).get("name")
-                for port in node.get("inputs", [])
-                if port.get("widget", {}).get("name")
-            ]
-            values = node.get("widgets_values", [])
-            for index, name in enumerate(widget_names):
-                if name in named:
-                    api_inputs[name] = named[name]
-                elif index < len(values):
-                    api_inputs[name] = values[index]
-
-            # KSampler 画布数据含 control_after_generate，API prompt 不接受此字段。
-            if node.get("type") == "KSampler":
-                for key in ("seed", "steps", "cfg", "sampler_name", "scheduler", "denoise"):
-                    if key in named:
-                        api_inputs[key] = named[key]
-                api_inputs.pop("control_after_generate", None)
-
-            api_node = {"class_type": node["type"], "inputs": api_inputs}
-            if node.get("title"):
-                api_node["_meta"] = {"title": node["title"]}
-            workflow[node_id] = api_node
+        workflow = canvas_to_api(data)
     else:
-        # 也兼容原生 API prompt JSON。
+        # 兼容原生 API prompt JSON，或外层包含 prompt 字段的 JSON。
         workflow = data.get("prompt", data) if isinstance(data, dict) else data
 
     if not isinstance(workflow, dict) or not workflow:
         raise RuntimeError(f"不是有效的 ComfyUI 工作流 JSON：{WORKFLOW_PATH}")
 
     text_nodes = []
-    for node in workflow.values():
+    for node_id, node in workflow.items():
         if not isinstance(node, dict) or not isinstance(node.get("inputs"), dict):
             continue
-        node_type, inputs = node.get("class_type", ""), node["inputs"]
+        node_type = node.get("class_type", "")
+        inputs = node["inputs"]
         title = str(node.get("_meta", {}).get("title", "")).strip().lower()
+
         if node_type == "CLIPTextEncode" and "text" in inputs:
-            text_nodes.append((title, inputs))
+            text_nodes.append((node_id, title, inputs))
         elif node_type in ("EmptyLatentImage", "EmptySD3LatentImage"):
-            inputs.update({"width": WIDTH, "height": HEIGHT})
+            if "width" in inputs:
+                inputs["width"] = WIDTH
+            if "height" in inputs:
+                inputs["height"] = HEIGHT
         elif node_type == "KSampler":
-            inputs.update({"steps": STEPS, "cfg": CFG, "seed": SEED})
+            if "steps" in inputs:
+                inputs["steps"] = STEPS
+            if "cfg" in inputs:
+                inputs["cfg"] = CFG
+            if "seed" in inputs:
+                inputs["seed"] = SEED
 
     if not text_nodes:
-        raise RuntimeError("工作流中没有找到 CLIPTextEncode 节点。")
+        raise RuntimeError(
+            "工作流中没有 CLIPTextEncode 节点；请确认 sdxl.json 是 ComfyUI 工作流导出文件。"
+        )
 
-    positive = next((inputs for title, inputs in text_nodes if "positive" in title or "正面" in title or "正向" in title), None)
-    negative = next((inputs for title, inputs in text_nodes if "negative" in title or "负面" in title or "负向" in title), None)
+    # 兼容英文/中文标题；若标题缺失，则按工作流中 CLIPTextEncode 节点的顺序兜底。
+    positive = next(
+        (item for item in text_nodes if any(k in item[1] for k in ("positive", "正面", "正向"))),
+        None,
+    )
+    negative = next(
+        (item for item in text_nodes if any(k in item[1] for k in ("negative", "负面", "负向"))),
+        None,
+    )
     if positive is None:
-        positive = text_nodes[0][1]
-    positive["text"] = PROMPT
-    if negative is None and len(text_nodes) > 1:
-        negative = text_nodes[1][1]
+        positive = text_nodes[0]
+    positive[2]["text"] = PROMPT
+
+    if negative is None:
+        negative = next((item for item in text_nodes if item[0] != positive[0]), None)
     if negative is not None:
-        negative["text"] = NEGATIVE_PROMPT
+        negative[2]["text"] = NEGATIVE_PROMPT
 
     print(f"已加载工作流：{WORKFLOW_PATH}")
     print(f"工作流节点数：{len(workflow)}")
+    print(f"正向提示词节点：{positive[0]}（{positive[1] or '未命名'}）")
+    if negative is not None:
+        print(f"负向提示词节点：{negative[0]}（{negative[1] or '未命名'}）")
     return workflow
+
 
 def download_image(image_info: dict) -> Path:
     query = urllib.parse.urlencode({
