@@ -356,6 +356,41 @@ def _request_get(url: str, provider: dict) -> dict:
     return data
 
 
+def _download(url: str, target: Path, provider: dict) -> None:
+    if urlparse(url).scheme not in ("http", "https"):
+        raise RuntimeError("视频 URL 必须为 HTTP(S)")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    headers = {"Accept": "video/mp4,video/*,application/octet-stream"}
+    key = provider.get("VIDEO_API_KEY")
+    if key:
+        headers["Authorization"] = "Bearer " + key
+    custom = provider.get("headers") or {}
+    if isinstance(custom, dict):
+        for name, value in custom.items():
+            headers[str(name)] = str(value)
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    temp = target.with_suffix(target.suffix + ".part")
+    try:
+        with urllib.request.urlopen(req, timeout=provider.get("timeout", 120)) as response:
+            with temp.open("wb") as stream:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    stream.write(chunk)
+        if not temp.is_file() or temp.stat().st_size <= 0:
+            raise RuntimeError("视频下载完成但文件为空")
+        temp.replace(target)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")
+        raise RuntimeError(f"视频下载 HTTP {exc.code}: {detail[:500]}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"视频下载失败：{exc}") from exc
+    finally:
+        if temp.exists():
+            temp.unlink(missing_ok=True)
+
+
 def _resolve(base: Path, value: str) -> Path:
     p = Path(value)
     return p if p.is_absolute() else base / p
@@ -435,13 +470,9 @@ def _submit(item: dict, manifest: dict, providers: list, root: Path, path: Path)
         url = _find(result, tuple(cfg.get("video_url_keys") or ["video_url", "videoUrl", "output_url", "download_url"]))
         if not url:
             raise RuntimeError("任务结束但响应中没有视频 URL")
-        item.update(state="succeeded", video_url=url, error=None, provider=cfg["name"])
-        try:
-            target = root / "videos" / (_safe(item["id"]) + ".mp4")
-            _download(url, target, cfg)
-            item["video_path"] = str(target.relative_to(root))
-        except Exception as exc:
-            item["video_path"], item["download_error"] = None, str(exc)
+        target = root / "videos" / (_safe(item["id"]) + ".mp4")
+        _download(url, target, cfg)
+        item.update(state="succeeded", video_url=url, error=None, provider=cfg["name"], video_path=str(target.relative_to(root)), download_error=None)
     except Exception as exc:
         item.update(state="failed", error=str(exc))
     write_json(path, manifest)
