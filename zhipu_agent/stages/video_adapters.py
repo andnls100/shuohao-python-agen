@@ -83,7 +83,11 @@ def _reference_media(provider: dict, item: dict) -> list[dict]:
     """Validate Wan R2V media. Reference media must be publicly reachable HTTP(S) URLs."""
     media = item.get("reference_media")
     if media is None:
-        media = provider.get("reference_media") or []
+        media = provider.get("reference_media")
+    if media is None:
+        template = provider.get("request_template")
+        media = template.get("reference_media") if isinstance(template, dict) else None
+    media = media or []
     if not isinstance(media, list):
         raise ValueError("reference_media 必须是数组")
     result = []
@@ -133,15 +137,10 @@ def build_request(provider: dict, item: dict, manifest: dict) -> dict:
             quality = "quality" if quality else "speed"
         if quality not in ("quality", "speed"):
             raise ValueError("CogVideoX-3 quality 必须为 'quality' 或 'speed'")
-
         body = {
-            "model": context["model"],
-            "prompt": fit_cogvideox_prompt(context["prompt"]),
-            "duration": duration,
-            "size": size,
-            "quality": quality,
-            "with_audio": bool(provider.get("with_audio", True)),
-            "fps": int(provider.get("fps", 30)),
+            "model": context["model"], "prompt": fit_cogvideox_prompt(context["prompt"]),
+            "duration": duration, "size": size, "quality": quality,
+            "with_audio": bool(provider.get("with_audio", True)), "fps": int(provider.get("fps", 30)),
         }
         if images:
             if len(images) > 2:
@@ -159,39 +158,35 @@ def build_request(provider: dict, item: dict, manifest: dict) -> dict:
         if ratio not in ("16:9", "9:16", "4:3", "1:1", "3:4", "adaptive"):
             ratio = "adaptive"
         input_body = {"prompt": context["prompt"]}
-        if str(provider.get("mode") or "t2v").lower() == "r2v":
+        model = context["model"].lower()
+        template = provider.get("request_template")
+        mode = str(provider.get("mode") or "").lower()
+        if not mode and "r2v" in model:
+            mode = "r2v"
+        if mode == "r2v":
             media = _reference_media(provider, item)
             if not media:
                 raise ValueError("Wan R2V 已启用，但没有配置 reference_media")
             input_body["media"] = media
         return {
-            "model": context["model"],
-            "input": input_body,
+            "model": context["model"], "input": input_body,
             "parameters": {
-                "resolution": context["resolution"],
-                "ratio": provider.get("ratio") or ratio,
-                "duration": duration,
-                "prompt_extend": bool(provider.get("prompt_extend", True)),
+                "resolution": context["resolution"], "ratio": provider.get("ratio") or ratio,
+                "duration": duration, "prompt_extend": bool(provider.get("prompt_extend", True)),
             },
         }
 
     template = provider.get("request_template")
     if isinstance(template, dict) and template:
         return _render(template, context)
-
     return {
-        "model": context["model"],
-        "prompt": context["prompt"],
-        "duration": context["duration_seconds"],
-        "aspect_ratio": context["aspect_ratio"],
+        "model": context["model"], "prompt": context["prompt"],
+        "duration": context["duration_seconds"], "aspect_ratio": context["aspect_ratio"],
     }
 
 
 def request_headers(provider: dict, has_body: bool = True) -> dict:
-    headers = {
-        "Authorization": "Bearer " + provider["VIDEO_API_KEY"],
-        "Accept": "application/json",
-    }
+    headers = {"Authorization": "Bearer " + provider["VIDEO_API_KEY"], "Accept": "application/json"}
     if has_body:
         headers["Content-Type"] = "application/json"
     if str(provider.get("adapter") or "").lower() == "aliyun_wan":
