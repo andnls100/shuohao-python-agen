@@ -26,12 +26,7 @@
       "ref_weight": 0.68,
       "negative_prompt": "动漫，二次元，手绘，卡通，插画，漫画，3D渲染，CG，畸形五官，扭曲肢体，文字，字幕，水印，logo",
       "poll_interval": 3,
-      "max_wait": 900,
-      "reference_image_urls": {
-        "角色名": "https://上传到魔搭后得到的参考图URL",
-        "场景名": "https://上传到魔搭后得到的参考图URL",
-        "道具名": "https://上传到魔搭后得到的参考图URL"
-      }
+      "max_wait": 900
     }
   ],
   "image_style": {"look": "写实", "character_mode": "portrait", "negative": "omit"},
