@@ -276,6 +276,10 @@ def _headers(provider: dict) -> dict:
     key = provider.get("VIDEO_API_KEY")
     if key:
         headers.setdefault("Authorization", "Bearer " + key)
+    # Aliyun Wan video-synthesis (including Wan R2V) only supports async HTTP calls.
+    # Missing this header causes AccessDenied: current user api does not support synchronous calls.
+    if str(provider.get("adapter") or "").strip().lower() == "aliyun_wan":
+        headers["X-DashScope-Async"] = "enable"
     return headers
 
 
