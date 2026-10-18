@@ -482,6 +482,10 @@ def _submit(item: dict, manifest: dict, providers: list, root: Path, path: Path)
         target = root / "videos" / (_safe(item["id"]) + ".mp4")
         _download(url, target, cfg)
         item.update(state="succeeded", video_url=url, error=None, provider=cfg["name"], video_path=str(target.relative_to(root)), download_error=None)
+        print(
+            f"视频下载成功：{item['id']}\n下载位置：{target.resolve()}",
+            flush=True,
+        )
     except Exception as exc:
         item.update(state="failed", error=str(exc))
     write_json(path, manifest)
