@@ -10,7 +10,7 @@
   ],
   "image": [
     {"name": "图片平台主用", "base_url": "https://你的图片平台/v1", "api_key": "替换成图片平台 Key", "model": "平台支持的生图模型名", "endpoint": "/images/generations", "size": "1536x1024", "quality": "high", "timeout": 180},
-    {"name": "图片平台备用", "base_url": "https://你的备用图片平台/v1", "api_key": "替换成备用图片平台 Key", "model": "备用平台支持的生图模型名", "endpoint": "/images/generations", "size": "1536x1024", "quality": "high", "timeout": 180}
+    {"name": "图片平台备用", "base_url": "https://你的备用图片平台/v1", "api_key": "替换成备用图片平台 Key", "model": "备用图片平台支持的生图模型名", "endpoint": "/images/generations", "size": "1536x1024", "quality": "high", "timeout": 180}
   ],
   "image_style": {"look": "写实", "character_mode": "portrait", "negative": "omit"},
   "audio": [
@@ -74,24 +74,24 @@
     },
     {
       "key": "cogvideox3_zhipu",
-      "name": "智谱开放平台-CogVideoX-3",
+      "name": "智谱开放平台-CogVideoX-3-参考生视频",
       "adapter": "cogvideox_zhipu",
       "enabled": true,
       "active": false,
       "submit_url": "https://open.bigmodel.cn/api/paas/v4/videos/generations",
       "status_url_template": "https://open.bigmodel.cn/api/paas/v4/async-result/{task_id}",
       "api_key_env": "ZHIPUAI_API_KEY",
-      "model": "cogvideox-3",
-      "resolution": "480P",
+      "model": "vidu2-reference",
+      "resolution": "1280x720",
+      "size": "1280x720",
+      "quality": "quality",
+      "with_audio": true,
+      "movement_amplitude": "auto",
       "timeout": 120,
       "poll_interval": 5,
       "max_wait": 900,
       "request_template": null,
-      "duration": 5,
-      "quality": "quality",
-      "with_audio": true,
-      "fps": 30,
-      "video_url_keys": ["url"],
+      "video_url_keys": ["url", "video_url", "videoUrl", "output_url", "download_url"],
       "task_id_keys": ["id", "task_id", "taskId"],
       "status_keys": ["task_status", "status", "state"],
       "failed_states": ["failed", "fail", "failure", "error", "cancelled", "canceled"]
