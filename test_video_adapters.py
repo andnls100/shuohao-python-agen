@@ -68,3 +68,34 @@ class VideoAdapterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CogVideoXFixesTest(unittest.TestCase):
+    def test_prompt_is_fitted_to_512_and_alignment_line_dropped(self):
+        from zhipu_agent.stages.video_adapters import fit_cogvideox_prompt
+        prompt = "How the reference pictures align with the target video — Picture 1 aligns.\n" + "镜头描述。" * 200
+        out = fit_cogvideox_prompt(prompt)
+        self.assertLessEqual(len(out), 512)
+        self.assertNotIn("How the reference", out)
+        self.assertTrue(out.endswith("。"))
+        self.assertEqual(fit_cogvideox_prompt("短提示"), "短提示")
+
+    def test_vertical_ratio_and_invalid_size(self):
+        from zhipu_agent.stages.video_adapters import build_request
+        provider = {"adapter": "cogvideox_zhipu", "VIDEO_API_MODEL": "cogvideox-3"}
+        item = {"prompt": "p", "duration_seconds": 7.5}
+        body = build_request(provider, item, {"aspect_ratio": "9:16"})
+        self.assertEqual((body["size"], body["duration"]), ("1080x1920", 10))
+        with self.assertRaises(ValueError):
+            build_request({**provider, "size": "800x600"}, item, {"aspect_ratio": "16:9"})
+
+    def test_fail_status_is_treated_as_failure(self):
+        import json as _json
+        from unittest import mock
+        from zhipu_agent.stages import video
+        cfg = {"status_template": "http://x/{task_id}", "max_wait": 5, "poll": 1,
+               "video_url_keys": ["url"], "status_keys": ["task_status"],
+               "failed_states": ["failed", "fail"]}
+        with mock.patch.object(video, "_request", return_value={"task_status": "FAIL"}):
+            with self.assertRaises(RuntimeError):
+                video._poll("t1", cfg)

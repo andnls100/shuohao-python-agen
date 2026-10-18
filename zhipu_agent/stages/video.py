@@ -191,7 +191,7 @@ def _config(model_key: Optional[str] = None) -> list:
             "video_url_keys": entry.get("video_url_keys", ["video_url", "videoUrl", "output_url", "download_url"]),
             "task_id_keys": entry.get("task_id_keys", ["task_id", "taskId", "job_id", "jobId", "id"]),
             "status_keys": entry.get("status_keys", ["status", "state", "task_status"]),
-            "failed_states": entry.get("failed_states", ["failed", "error", "cancelled", "canceled", "rejected"]),
+            "failed_states": entry.get("failed_states", ["failed", "fail", "error", "cancelled", "canceled", "rejected"]),
         })
     if not providers:
         raise ValueError("models.json 的 video 配置没有启用的模型；请设置 enabled=true")
@@ -243,7 +243,7 @@ def _poll(task_id: str, cfg: dict) -> dict:
         if _find(result, tuple(cfg.get("video_url_keys") or ["video_url", "videoUrl", "output_url", "download_url"])):
             return result
         state = (_find(result, tuple(cfg.get("status_keys") or ["status", "state", "task_status"])) or "").lower()
-        if state in {str(x).lower() for x in (cfg.get("failed_states") or ["failed", "error", "cancelled", "canceled", "rejected"])}:
+        if state in {str(x).lower() for x in (cfg.get("failed_states") or ["failed", "fail", "error", "cancelled", "canceled", "rejected"])}:
             raise RuntimeError("视频任务失败：" + json.dumps(result, ensure_ascii=False)[:800])
         if time.monotonic() >= deadline:
             raise TimeoutError(f"任务 {task_id} 等待超时；任务 ID 已保存，可重试续查")

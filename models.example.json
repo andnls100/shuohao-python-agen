@@ -132,9 +132,8 @@
       "poll_interval": 5,
       "max_wait": 900,
       "request_template": null,
-      "note": "智谱开放平台 CogVideoX-3 官方 API 配置。调用前需设置 ZHIPUAI_API_KEY；每次生成时长按官方支持值取 5 或 10 秒。",
+      "note": "智谱开放平台 CogVideoX-3 官方 API 配置。调用前需设置 ZHIPUAI_API_KEY；每次生成时长按官方支持值取 5 或 10 秒。 size 不填时按分镜画幅自动选择（16:9→1920x1080，9:16→1080x1920）；prompt 超过 512 字符会自动压缩截断。",
       "duration": 5,
-      "size": "1920x1080",
       "quality": "quality",
       "with_audio": true,
       "fps": 30,
@@ -153,6 +152,7 @@
       ],
       "failed_states": [
         "failed",
+        "fail",
         "failure",
         "error",
         "cancelled",

@@ -37,11 +37,15 @@ $env:DASHSCOPE_API_KEY = "你的百炼API Key"
 
 建议先使用 Seedance 2.0 Mini 480P 做低成本验证，并在控制台确认当前模型 ID、实际计费档位和失败任务是否退款。
 
-## CogVideoX / 智谱
+## CogVideoX-3（智谱开放平台）
 
-示例配置保持 `enabled: false`。目前未核实智谱开放平台提供名为 `CogVideoX-3` 的托管视频生成 API。CogVideoX 是模型系列/开源推理项目的名称，不能仅凭“智谱清言”产品名称推断可调用的 API 模型 ID 或接口地址。
+使用官方异步 API：提交 `POST https://open.bigmodel.cn/api/paas/v4/videos/generations`，查询 `GET .../api/paas/v4/async-result/{task_id}`，视频地址取 `video_result[0].url`，失败状态为 `FAIL`。适配器 `cogvideox_zhipu` 的行为：
 
-请先确认智谱开放平台的具体模型产品页、模型 ID、提交与查询接口，再按其文档填入 `submit_url`、`status_url_template`、`request_template` 和鉴权头。若实际使用的是自部署 CogVideoX 推理服务，则需要按该服务暴露的 HTTP API 配置，而不是智谱清言网页地址。
+- 时长只支持 5 或 10 秒：不超过 5 秒取 5，其余取 10。
+- `size` 不填时按分镜画幅选择（16:9 为 1920x1080，9:16 为 1080x1920，其余 1024x1024）；填写时必须是官方支持的尺寸，否则报错。
+- `prompt` 最多 512 字符：适配器会去掉图片对齐指令行、压缩空白，超长时按句子边界截断。完整提示词仍保存在 `video-manifest.json` 与 `prompts/` 里。
+- `with_audio` 只生成 AI 音效，不保证台词和口型；本适配器暂不传入首帧图片。
+- Key 通过 `ZHIPUAI_API_KEY` 环境变量提供。
 
 ## 已知限制
 
