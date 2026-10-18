@@ -67,7 +67,6 @@ def request_json(url):
     headers = {
         "Accept": "application/json",
         "Authorization": "Bearer " + VIDEO_CONFIG["api_key"].strip(),
-        "X-DashScope-Async": "enable",
     }
     req = urllib.request.Request(url, headers=headers, method="GET")
     try:
