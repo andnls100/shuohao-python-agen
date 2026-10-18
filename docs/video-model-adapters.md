@@ -47,6 +47,19 @@ $env:DASHSCOPE_API_KEY = "你的百炼API Key"
 - `with_audio` 只生成 AI 音效，不保证台词和口型；本适配器暂不传入首帧图片。
 - Key 通过 `ZHIPUAI_API_KEY` 环境变量提供。
 
+### 图生视频（i2v）
+
+```powershell
+# 每个分镜一条任务，首帧取 output/frames/<段号>/f<切序>.png
+python run_agent.py run --stages video --eps 1 --video-protocol i2v --video-model cogvideox3_zhipu
+# 同段内用下一张分镜图作尾帧（首尾帧，仅 speed 画质）
+python run_agent.py run --stages video --eps 1 --video-protocol i2v --video-flf --video-model cogvideox3_zhipu
+# 提交（只提交指定镜头先小额试）
+python run_agent.py run --stages video --eps 1 --video-protocol i2v --video-submit --shots E01-01-C01
+```
+
+分镜图目录可用 `--frames-dir` 指定；分镜图缺失时该镜头记为失败，不会调用 API。图片编码方式可在模型配置里用 `image_encoding` 切换（`data_uri` 默认，或 `base64` 纯字符串）。目前只有 `cogvideox_zhipu` 适配器支持图生视频，其他适配器收到图片会报错。
+
 ## 已知限制
 
 - 通用适配器能配置请求体和请求头，但任务 ID、状态和视频 URL 的解析目前使用常见字段名递归查找；若服务商使用特殊字段名，需要进一步扩展响应字段映射。

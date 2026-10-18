@@ -75,7 +75,28 @@ def _shot_prompt(segment: dict, cut: dict, shot_index: int, visual_style: str) -
     return "\n\n".join(parts)
 
 
-def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str, shots: Optional[list] = None) -> dict:
+def _motion_prompt(cut: dict, shot_id: str) -> str:
+    """图生视频只写"怎么动"：外观由首帧图决定，不重复描述；视频提示词不含角色名（分镜 shot 字段已是通用身份）。"""
+    parts = []
+    for label, key in (("运镜", "camera"), ("画面", "shot"), ("音效", "sfx")):
+        value = str(cut.get(key) or "").strip()
+        if value:
+            parts.append(f"{label}：{value}")
+    if not any(p.startswith("画面") for p in parts):
+        raise ValueError(f"镜头 {shot_id} 缺少 shot 字段，无法生成图生视频提示词")
+    parts.append("保持首帧画面中人物外观、服装和场景不变；无字幕、无水印。")
+    return "\n".join(parts)
+
+
+def _rel(path: Path, base: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(base.resolve()))
+    except ValueError:
+        return str(path.resolve())
+
+
+def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str, shots: Optional[list] = None,
+             frames_dir: Optional[Path] = None, flf: bool = False) -> dict:
     source = ctx.artifact("storyboard")
     if not source.is_file():
         raise FileNotFoundError(f"找不到分镜文件：{source}；请先运行 storyboard 阶段")
@@ -88,7 +109,31 @@ def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str
             continue
         for idx, segment in enumerate(episode.get("segments", []), 1):
             sid = str(segment.get("id") or f"E{ep:02d}-{idx:02d}")
-            if protocol == "seedance" and segment.get("cuts"):
+            if protocol == "i2v":
+                cuts = segment.get("cuts") or []
+                if not cuts:
+                    raise ValueError(f"分段 {sid} 没有 cuts，无法按分镜图生视频")
+                base = Path(frames_dir) if frames_dir else ctx.out / "frames"
+                for cut_idx, cut in enumerate(cuts, 1):
+                    shot_id = f"{sid}-C{cut_idx:02d}"
+                    try:
+                        duration = round(float(cut.get("seconds", 0) or 0), 2)
+                    except (TypeError, ValueError):
+                        duration = 0
+                    if duration <= 0:
+                        raise ValueError(f"镜头 {shot_id} 的 seconds 必须大于 0")
+                    first = base / sid / f"f{cut_idx}.png"
+                    last = base / sid / f"f{cut_idx + 1}.png" if flf and cut_idx < len(cuts) else None
+                    items.append({
+                        "id": shot_id, "ep": ep, "sceneIndex": segment.get("sceneIndex"),
+                        "segmentId": sid, "shotIndex": cut_idx, "duration_seconds": duration,
+                        "mode": "flf" if last else "i2v",
+                        "first_frame": _rel(first, ctx.out), "last_frame": _rel(last, ctx.out) if last else None,
+                        "prompt": _motion_prompt(cut, shot_id),
+                        "state": "planned", "task_id": None, "video_url": None,
+                        "video_path": None, "error": None,
+                    })
+            elif protocol == "seedance" and segment.get("cuts"):
                 # Seedance 模式下每个 cut 独立生成一个视频镜头，方便单镜头重试和跳过已完成项。
                 for cut_idx, cut in enumerate(segment.get("cuts", []), 1):
                     shot_id = f"{sid}-C{cut_idx:02d}"
@@ -187,7 +232,7 @@ def _config(model_key: Optional[str] = None) -> list:
             "prompt_extend": entry.get("prompt_extend", True), "request_template": entry.get("request_template"),
             "size": str(entry.get("size") or ""), "quality": entry.get("quality", "quality"),
             "with_audio": entry.get("with_audio", True), "fps": int(entry.get("fps", 30)),
-            "headers": entry.get("headers", {}),
+            "headers": entry.get("headers", {}), "image_encoding": str(entry.get("image_encoding") or "data_uri"),
             "video_url_keys": entry.get("video_url_keys", ["video_url", "videoUrl", "output_url", "download_url"]),
             "task_id_keys": entry.get("task_id_keys", ["task_id", "taskId", "job_id", "jobId", "id"]),
             "status_keys": entry.get("status_keys", ["status", "state", "task_status"]),
@@ -270,6 +315,11 @@ def _download(url: str, target: Path, cfg: dict) -> None:
             tmp.unlink()
 
 
+def _resolve(base: Path, value: str) -> Path:
+    p = Path(value)
+    return p if p.is_absolute() else base / p
+
+
 def _submit(item: dict, manifest: dict, providers: list, root: Path, path: Path) -> None:
     if item.get("state") == "succeeded" and item.get("video_url"):
         return
@@ -289,13 +339,18 @@ def _submit(item: dict, manifest: dict, providers: list, root: Path, path: Path)
             failures = []
             result = None
             cfg = None
+            frames = [item.get(k) for k in ("first_frame", "last_frame") if item.get(k)]
+            missing = [f for f in frames if not _resolve(root.parent, f).is_file()]
+            if missing:
+                raise FileNotFoundError("缺少分镜图：" + "、".join(missing) + "；请先生成分镜图（默认目录 output/frames/<段号>/f<切序>.png，或用 --frames-dir 指定）")
             for candidate in providers:
                 item["state"], item["error"] = "submitting", None
                 item["provider"] = candidate["name"]
                 write_json(path, manifest)
-                from .video_adapters import build_request
-                body = build_request(candidate, item, manifest)
+                from .video_adapters import build_request, encode_image
                 try:
+                    images = [encode_image(_resolve(root.parent, f), candidate.get("image_encoding", "data_uri")) for f in frames]
+                    body = build_request(candidate, {**item, "images": images}, manifest)
                     response = _request(candidate["VIDEO_API_SUBMIT_URL"], candidate, body)
                     url = _find(response, tuple(candidate.get("video_url_keys") or ["video_url", "videoUrl", "output_url", "download_url"]))
                     task_id = _find(response, tuple(candidate.get("task_id_keys") or ["task_id", "taskId", "job_id", "jobId", "id"]))
@@ -348,11 +403,12 @@ def check(ctx: Context) -> Result:
 
 
 def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: bool = False,
-        visual_style: str = "manju", shots: Optional[list] = None, video_model: Optional[str] = None) -> Path:
+        visual_style: str = "manju", shots: Optional[list] = None, video_model: Optional[str] = None,
+        frames_dir: Optional[Path] = None, flf: bool = False) -> Path:
     root = ctx.out / "video"
     root.mkdir(parents=True, exist_ok=True)
     path = artifact(ctx)
-    manifest = _collect(ctx, eps, protocol, visual_style, shots)
+    manifest = _collect(ctx, eps, protocol, visual_style, shots, frames_dir, flf)
     previous = {}
     if path.is_file() and not ctx.force:
         try:
@@ -374,7 +430,8 @@ def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: 
         manifest["items"].sort(key=lambda item: (int(item.get("ep", 0)), str(item.get("id", ""))))
     for item in manifest["items"]:
         old = previous.get(item["id"])
-        if old and old.get("prompt") == item["prompt"]:
+        if old and old.get("prompt") == item["prompt"] and all(
+                old.get(k) == item.get(k) for k in ("mode", "first_frame", "last_frame")):
             for key in ("state", "task_id", "provider", "video_url", "video_path", "error", "download_error"):
                 if key in old:
                     item[key] = old[key]
@@ -392,6 +449,10 @@ def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: 
            for x in manifest["items"]]
     (root / "qc-checklist.md").write_text("\n".join(qc) + "\n", encoding="utf-8")
     ctx.log(f"视频阶段：已生成 {len(manifest['items'])} 个提示词和任务清单：{path}")
+    absent = [f for it in manifest["items"] for f in (it.get("first_frame"), it.get("last_frame"))
+              if f and not _resolve(ctx.out, f).is_file()]
+    if absent:
+        ctx.log(f"⚠ 有 {len(set(absent))} 张分镜图尚不存在（例如 {absent[0]}）；提交前需要先生成。")
     if not submit:
         ctx.log("预览模式：未调用视频 API。检查提示词后再加 --video-submit 发起生成。")
         return path

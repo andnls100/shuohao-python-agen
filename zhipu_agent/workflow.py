@@ -158,7 +158,9 @@ def run_stage(ctx: Context, name: str, opts: Dict[str, Any]) -> Optional[Path]:
                           submit=opts.get("video_submit", False),
                           visual_style=opts.get("visual_style", "manju"),
                           shots=opts.get("video_shots"),
-                          video_model=opts.get("video_model"))
+                          video_model=opts.get("video_model"),
+                          frames_dir=Path(opts["frames_dir"]) if opts.get("frames_dir") else None,
+                          flf=opts.get("video_flf", False))
     raise ValueError(name)
 
 

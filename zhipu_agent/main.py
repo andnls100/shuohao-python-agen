@@ -54,7 +54,9 @@ def _build_parser() -> argparse.ArgumentParser:
             s.add_argument("--refs-gen", action="store_true", help="refs 阶段真的出图（需先配置 character-refs 的出图模型）")
             s.add_argument("--images-gen", action="store_true", help="从已保存的 cast.json / art.json 提示词批量出角色、场景和道具图；需配置 models.json 的 image 号池")
             s.add_argument("--images-only", help="只出这几张图：写任务名、角色名、场景名或编号，逗号分隔，如 徐今朝 或 C03,S01；配合 --images-gen")
-            s.add_argument("--video-protocol", default="h3", choices=["h3", "seedance"], help="视频提示词协议（默认 h3）")
+            s.add_argument("--video-protocol", default="h3", choices=["h3", "seedance", "i2v"], help="视频提示词协议（默认 h3）；i2v = 按分镜图生视频（首帧取 <frames-dir>/<段号>/f<切序>.png）")
+            s.add_argument("--frames-dir", help="分镜图目录（i2v 用），默认 output/frames")
+            s.add_argument("--video-flf", action="store_true", help="i2v 下用同段下一张分镜图作尾帧（首尾帧模式，仅 speed 画质）")
             s.add_argument("--video-submit", action="store_true", help="明确提交云端视频生成任务；不加此参数只生成提示词和清单")
             s.add_argument("--video-model", help="选择 models.json 中 video[].key；不指定时使用 active=true 的模型")
             s.add_argument("--shots", help="只处理指定镜头 ID，逗号分隔，例如 E01-01-C01；ID 可从 video-manifest.json 查看")
@@ -183,7 +185,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         "images_gen": args.images_gen,
         "images_only": [n.strip() for n in args.images_only.split(",") if n.strip()] if args.images_only else None,
         "video_protocol": args.video_protocol, "video_submit": args.video_submit,
-        "video_model": args.video_model,
+        "video_model": args.video_model, "frames_dir": args.frames_dir, "video_flf": args.video_flf,
         "video_shots": [n.strip() for n in args.shots.split(",") if n.strip()] if args.shots else None,
         "audio_submit": args.audio_submit,
         "refs_names": [n.strip() for n in args.refs_names.split(",")] if args.refs_names else None,
