@@ -28,6 +28,8 @@ def _render(value: Any, context: dict) -> Any:
 
 COGVIDEOX_PROMPT_LIMIT = 512
 COGVIDEOX_SIZES = ("1280x720", "720x1280", "1024x1024", "1920x1080", "1080x1920", "2048x1080", "3840x2160")
+COGVIDEOX_REFERENCE_RATIOS = ("16:9", "9:16", "1:1")
+COGVIDEOX_MOVEMENTS = ("auto", "small", "medium", "large")
 
 
 def fit_cogvideox_prompt(prompt: str, limit: int = COGVIDEOX_PROMPT_LIMIT) -> str:
@@ -105,6 +107,31 @@ def _reference_media(provider: dict, item: dict) -> list[dict]:
     return result
 
 
+def _reference_asset_path(asset: dict) -> Path:
+    value = Path(str(asset.get("path") or ""))
+    candidates = [value]
+    if not value.is_absolute() and not str(value).startswith("output/"):
+        candidates.insert(0, Path("output") / value)
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError(f"CogVideoX-3 参考图不存在：{asset.get('path')}")
+
+
+def _cog_reference_images(item: dict) -> list[str]:
+    assets = item.get("reference_assets") or []
+    if not assets:
+        raise ValueError("CogVideoX-3 参考生视频没有从 character/art 找到参考图")
+    if len(assets) > 3:
+        assets = assets[:3]
+    images = []
+    for asset in assets:
+        images.append(encode_image(_reference_asset_path(asset), "data_uri"))
+    if not 1 <= len(images) <= 3:
+        raise ValueError("CogVideoX-3 image_url 必须包含 1-3 张参考图")
+    return images
+
+
 def _wan_r2v_prompt(item: dict) -> str:
     labels = []
     for index, entry in enumerate(item.get("reference_media") or [], 1):
@@ -130,29 +157,30 @@ def build_request(provider: dict, item: dict, manifest: dict) -> dict:
         raise ValueError(f"适配器 {adapter!r} 暂未支持图生视频；目前只有 cogvideox_zhipu 支持")
 
     if adapter == "cogvideox_zhipu":
-        duration = 5 if float(item["duration_seconds"]) <= 5 else 10
-        ratio = context["aspect_ratio"]
-        size = provider.get("size") or ("1920x1080" if ratio == "16:9" else "1080x1920" if ratio == "9:16" else "1024x1024")
+        if str(context["model"]).strip() != "vidu2-reference":
+            raise ValueError("CogVideoX-3 参考生视频必须使用 model=vidu2-reference")
+        prompt = fit_cogvideox_prompt(context["prompt"])
+        if not prompt and not item.get("reference_assets"):
+            raise ValueError("CogVideoX-3 参考生视频必须提供 prompt 或 image_url")
+        ratio = str(provider.get("aspect_ratio") or context["aspect_ratio"] or "16:9")
+        if ratio not in COGVIDEOX_REFERENCE_RATIOS:
+            ratio = "16:9"
+        size = str(provider.get("size") or "1280x720")
         if size not in COGVIDEOX_SIZES:
             raise ValueError(f"CogVideoX-3 size 必须是 {', '.join(COGVIDEOX_SIZES)} 之一，当前为 {size!r}")
-        quality = provider.get("quality", "quality")
-        if isinstance(quality, bool):
-            quality = "quality" if quality else "speed"
-        if quality not in ("quality", "speed"):
-            raise ValueError("CogVideoX-3 quality 必须为 'quality' 或 'speed'")
+        movement = str(provider.get("movement_amplitude") or "auto")
+        if movement not in COGVIDEOX_MOVEMENTS:
+            raise ValueError(f"CogVideoX-3 movement_amplitude 必须是 {', '.join(COGVIDEOX_MOVEMENTS)} 之一")
         body = {
-            "model": context["model"], "prompt": fit_cogvideox_prompt(context["prompt"]),
-            "duration": duration, "size": size, "quality": quality,
-            "with_audio": bool(provider.get("with_audio", True)), "fps": int(provider.get("fps", 30)),
+            "model": "vidu2-reference",
+            "prompt": prompt,
+            "image_url": _cog_reference_images(item),
+            "duration": 4,
+            "aspect_ratio": ratio,
+            "size": size,
+            "movement_amplitude": movement,
+            "with_audio": bool(provider.get("with_audio", True)),
         }
-        if images:
-            if len(images) > 2:
-                raise ValueError("CogVideoX-3 最多传 2 张图（首帧、尾帧）")
-            body["image_url"] = images[0] if len(images) == 1 else images
-            if len(images) == 2:
-                body["quality"] = "speed"
-            if not provider.get("size"):
-                body.pop("size")
         return body
 
     if adapter == "aliyun_wan":
