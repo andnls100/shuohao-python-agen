@@ -1,9 +1,11 @@
 """Optional cloud video generation stage. Preview is the default; --video-submit is required for API calls."""
 from __future__ import annotations
+
 import json, os, re, time, urllib.error, urllib.parse, urllib.request
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
+
 from ..validator import Result
 from ..config import models_file_path
 from .base import Context, read_json, write_json
@@ -52,7 +54,6 @@ def _prompt(segment: dict, protocol: str) -> str:
 
 
 def _shot_prompt(segment: dict, cut: dict, shot_index: int, visual_style: str) -> str:
-    """为 Seedance 单独构造一个镜头的提示词，而不是把整段 cuts 一次提交。"""
     parts = []
     if segment.get("blocking"):
         parts.append("【人物关系与构图逻辑】\n" + str(segment["blocking"]))
@@ -76,7 +77,6 @@ def _shot_prompt(segment: dict, cut: dict, shot_index: int, visual_style: str) -
 
 
 def _motion_prompt(cut: dict, shot_id: str) -> str:
-    """图生视频只写"怎么动"：外观由首帧图决定，不重复描述；视频提示词不含角色名（分镜 shot 字段已是通用身份）。"""
     parts = []
     for label, key in (("运镜", "camera"), ("画面", "shot"), ("音效", "sfx")):
         value = str(cut.get(key) or "").strip()
@@ -89,7 +89,6 @@ def _motion_prompt(cut: dict, shot_id: str) -> str:
 
 
 def _frame_file(base: Path, sid: str, index: int) -> Path:
-    """分镜图可能是 png / jpg（出图接口返回什么就存什么）：优先用已存在的，都没有时按 png 记。"""
     for suffix in (".png", ".jpg", ".jpeg"):
         candidate = base / sid / f"f{index}{suffix}"
         if candidate.is_file():
@@ -102,6 +101,24 @@ def _rel(path: Path, base: Path) -> str:
         return str(path.resolve().relative_to(base.resolve()))
     except ValueError:
         return str(path.resolve())
+
+
+def _reference_assets(ctx: Context, ep: int, segment: dict, cuts: list, limit: int = 5) -> list[dict]:
+    """Reuse the frames stage's character/scene/prop reference resolution."""
+    from .frames import _asset_index, _scene_ids, _references
+
+    assets, scene_ids = _asset_index(ctx), _scene_ids(ctx)
+    merged, seen = [], set()
+    for cut in cuts:
+        refs, _missing = _references(ctx, ep, segment, cut, assets, scene_ids, limit=99)
+        for ref in refs:
+            if ref["path"] in seen:
+                continue
+            seen.add(ref["path"])
+            merged.append(dict(ref))
+    for no, ref in enumerate(merged[:limit], 1):
+        ref["no"] = no
+    return merged[:limit]
 
 
 def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str, shots: Optional[list] = None,
@@ -118,8 +135,9 @@ def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str
             continue
         for idx, segment in enumerate(episode.get("segments", []), 1):
             sid = str(segment.get("id") or f"E{ep:02d}-{idx:02d}")
+            cuts = segment.get("cuts") or []
+            segment_refs = _reference_assets(ctx, ep, segment, cuts, limit=5) if cuts else []
             if protocol == "i2v":
-                cuts = segment.get("cuts") or []
                 if not cuts:
                     raise ValueError(f"分段 {sid} 没有 cuts，无法按分镜图生视频")
                 base = Path(frames_dir) if frames_dir else ctx.out / "frames"
@@ -133,18 +151,19 @@ def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str
                         raise ValueError(f"镜头 {shot_id} 的 seconds 必须大于 0")
                     first = _frame_file(base, sid, cut_idx)
                     last = _frame_file(base, sid, cut_idx + 1) if flf and cut_idx < len(cuts) else None
+                    refs = _reference_assets(ctx, ep, segment, [cut], limit=5)
                     items.append({
                         "id": shot_id, "ep": ep, "sceneIndex": segment.get("sceneIndex"),
                         "segmentId": sid, "shotIndex": cut_idx, "duration_seconds": duration,
                         "mode": "flf" if last else "i2v",
                         "first_frame": _rel(first, ctx.out), "last_frame": _rel(last, ctx.out) if last else None,
+                        "reference_assets": refs,
                         "prompt": _motion_prompt(cut, shot_id),
                         "state": "planned", "task_id": None, "video_url": None,
                         "video_path": None, "error": None,
                     })
-            elif protocol == "seedance" and segment.get("cuts"):
-                # Seedance 模式下每个 cut 独立生成一个视频镜头，方便单镜头重试和跳过已完成项。
-                for cut_idx, cut in enumerate(segment.get("cuts", []), 1):
+            elif protocol == "seedance" and cuts:
+                for cut_idx, cut in enumerate(cuts, 1):
                     shot_id = f"{sid}-C{cut_idx:02d}"
                     try:
                         duration = round(float(cut.get("seconds", 0) or 0), 2)
@@ -152,10 +171,11 @@ def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str
                         duration = 0
                     if duration <= 0:
                         raise ValueError(f"镜头 {shot_id} 的 seconds 必须大于 0")
+                    refs = _reference_assets(ctx, ep, segment, [cut], limit=5)
                     items.append({
                         "id": shot_id, "ep": ep, "sceneIndex": segment.get("sceneIndex"),
-                        "segmentId": sid, "shotIndex": cut_idx,
-                        "duration_seconds": duration,
+                        "segmentId": sid, "shotIndex": cut_idx, "duration_seconds": duration,
+                        "reference_assets": refs,
                         "prompt": _shot_prompt(segment, cut, cut_idx, visual_style),
                         "state": "planned", "task_id": None, "video_url": None,
                         "video_path": None, "error": None
@@ -164,7 +184,7 @@ def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str
                 base_prompt = _prompt(segment, protocol)
                 items.append({
                     "id": sid, "ep": ep, "sceneIndex": segment.get("sceneIndex"),
-                    "duration_seconds": _duration(segment),
+                    "duration_seconds": _duration(segment), "reference_assets": segment_refs,
                     "prompt": base_prompt + "\n\n" + style_hint,
                     "state": "planned", "task_id": None, "video_url": None,
                     "video_path": None, "error": None
@@ -180,8 +200,8 @@ def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str
     return {"version": 2, "source": ctx.title, "protocol": protocol, "visual_style": visual_style,
             "aspect_ratio": board.get("aspectRatio", "16:9"), "items": items}
 
+
 def _config(model_key: Optional[str] = None) -> list:
-    """Read video provider configs; explicit model selection disables cross-model failover."""
     path = models_file_path()
     if not path.is_file():
         raise ValueError(f"找不到模型配置文件：{path}；请先复制 models.example.json 为 models.json")
@@ -250,6 +270,8 @@ def _config(model_key: Optional[str] = None) -> list:
     if not providers:
         raise ValueError("models.json 的 video 配置没有启用的模型；请设置 enabled=true")
     return providers
+
+
 def _request(url: str, cfg: dict, body: Optional[dict] = None) -> dict:
     from .video_adapters import request_headers
     data = None if body is None else json.dumps(body, ensure_ascii=False).encode()
@@ -269,6 +291,8 @@ def _request(url: str, cfg: dict, body: Optional[dict] = None) -> dict:
     if not isinstance(result, dict):
         raise RuntimeError("视频 API JSON 顶层必须是对象")
     return result
+
+
 def _find(obj, keys: tuple):
     if isinstance(obj, dict):
         for key in keys:
@@ -333,7 +357,6 @@ def _submit(item: dict, manifest: dict, providers: list, root: Path, path: Path)
     if item.get("state") == "succeeded" and item.get("video_url"):
         return
     try:
-        # 已有 task_id 时必须沿用原平台查询，避免重复创建付费任务。
         if item.get("task_id"):
             cfg = next((p for p in providers if p["name"] == item.get("provider")), None)
             if cfg is None:
@@ -359,7 +382,24 @@ def _submit(item: dict, manifest: dict, providers: list, root: Path, path: Path)
                 from .video_adapters import build_request, encode_image
                 try:
                     images = [encode_image(_resolve(root.parent, f), candidate.get("image_encoding", "data_uri")) for f in frames]
-                    body = build_request(candidate, {**item, "images": images}, manifest)
+                    reference_media = []
+                    is_wan_r2v = candidate.get("adapter") == "aliyun_wan" and "r2v" in candidate.get("VIDEO_API_MODEL", "").lower()
+                    if is_wan_r2v:
+                        assets = item.get("reference_assets") or []
+                        if not assets:
+                            raise ValueError(f"Wan R2V 镜头 {item['id']} 没有从 character/art 找到参考图")
+                        for asset in assets:
+                            ref_path = _resolve(root.parent, asset["path"])
+                            if not ref_path.is_file():
+                                raise FileNotFoundError(f"Wan R2V 参考图不存在：{asset['path']}")
+                            kind = asset.get("kind")
+                            label = ("角色「" if kind == "character" else "场景「" if kind == "scene" else
+                                     "道具「" if kind == "prop" else "参考图「") + str(asset.get("name") or "") + "」"
+                            reference_media.append({
+                                "type": "reference_image", "url": encode_image(ref_path, "data_uri"), "label": label,
+                            })
+                    request_item = {**item, "images": images, "reference_media": reference_media}
+                    body = build_request(candidate, request_item, manifest)
                     response = _request(candidate["VIDEO_API_SUBMIT_URL"], candidate, body)
                     url = _find(response, tuple(candidate.get("video_url_keys") or ["video_url", "videoUrl", "output_url", "download_url"]))
                     task_id = _find(response, tuple(candidate.get("task_id_keys") or ["task_id", "taskId", "job_id", "jobId", "id"]))
@@ -370,7 +410,6 @@ def _submit(item: dict, manifest: dict, providers: list, root: Path, path: Path)
                         result, cfg = response, candidate
                         break
                     if task_id:
-                        # 已创建任务后不切换平台，避免重复生成和重复计费。
                         item["state"] = "polling"
                         write_json(path, manifest)
                         result, cfg = _poll(task_id, candidate), candidate
@@ -430,7 +469,6 @@ def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: 
         selected_eps = set(eps or [])
         selected_ids = {item["id"] for item in manifest["items"]}
         if shots:
-            # 只处理指定镜头时，把清单中未选中的已有镜头保留下来。
             extras = [dict(item) for item in previous.values() if str(item.get("id")) not in selected_ids]
         else:
             extras = [dict(item) for item in previous.values()
@@ -440,7 +478,7 @@ def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: 
     for item in manifest["items"]:
         old = previous.get(item["id"])
         if old and old.get("prompt") == item["prompt"] and all(
-                old.get(k) == item.get(k) for k in ("mode", "first_frame", "last_frame")):
+                old.get(k) == item.get(k) for k in ("mode", "first_frame", "last_frame", "reference_assets")):
             for key in ("state", "task_id", "provider", "video_url", "video_path", "error", "download_error"):
                 if key in old:
                     item[key] = old[key]
