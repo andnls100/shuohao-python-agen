@@ -342,7 +342,15 @@ def _poll(task_id: str, provider: dict) -> dict:
 
 
 def _request_get(url: str, provider: dict) -> dict:
-    req = urllib.request.Request(url, headers=_headers(provider), method="GET")
+    # Wan 的任务状态查询接口只需要 Bearer API Key；异步请求头仅用于提交任务。
+    if str(provider.get("adapter") or "").strip().lower() == "aliyun_wan":
+        headers = {"Accept": "application/json"}
+        key = provider.get("VIDEO_API_KEY")
+        if key:
+            headers["Authorization"] = "Bearer " + key
+    else:
+        headers = _headers(provider)
+    req = urllib.request.Request(url, headers=headers, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=provider.get("timeout", 120)) as response:
             raw = response.read().decode("utf-8", "replace")
@@ -364,14 +372,16 @@ def _download(url: str, target: Path, provider: dict) -> None:
     if urlparse(url).scheme not in ("http", "https"):
         raise RuntimeError("视频 URL 必须为 HTTP(S)")
     target.parent.mkdir(parents=True, exist_ok=True)
+    # Wan 返回的视频 URL 可直接 GET 下载；不要把 API Key 转发给视频文件地址。
     headers = {"Accept": "video/mp4,video/*,application/octet-stream"}
-    key = provider.get("VIDEO_API_KEY")
-    if key:
-        headers["Authorization"] = "Bearer " + key
-    custom = provider.get("headers") or {}
-    if isinstance(custom, dict):
-        for name, value in custom.items():
-            headers[str(name)] = str(value)
+    if str(provider.get("adapter") or "").strip().lower() != "aliyun_wan":
+        key = provider.get("VIDEO_API_KEY")
+        if key:
+            headers["Authorization"] = "Bearer " + key
+        custom = provider.get("headers") or {}
+        if isinstance(custom, dict):
+            for name, value in custom.items():
+                headers[str(name)] = str(value)
     req = urllib.request.Request(url, headers=headers, method="GET")
     temp = target.with_suffix(target.suffix + ".part")
     try:
