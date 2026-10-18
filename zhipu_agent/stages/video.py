@@ -446,6 +446,15 @@ def _submit(item: dict, manifest: dict, providers: list, root: Path, path: Path)
                             })
                     request_item = {**item, "images": images, "reference_media": reference_media}
                     body = build_request(candidate, request_item, manifest)
+                    # Print the final, skill-optimized prompt exactly as sent to the video API.
+                    submitted_prompt = body.get("input", {}).get("prompt") if isinstance(body.get("input"), dict) else body.get("prompt")
+                    if submitted_prompt:
+                        print(
+                            f"\n===== 视频提示词（{item['id']} | {candidate['name']} | 技能优化后，实际提交内容）=====\n"
+                            f"{submitted_prompt}\n"
+                            f"===== 提示词结束：{item['id']} =====\n",
+                            flush=True,
+                        )
                     response = _request(candidate["VIDEO_API_SUBMIT_URL"], candidate, body)
                     url = _find(response, tuple(candidate.get("video_url_keys") or ["video_url", "videoUrl", "output_url", "download_url"]))
                     task_id = _find(response, tuple(candidate.get("task_id_keys") or ["task_id", "taskId", "job_id", "jobId", "id"]))
