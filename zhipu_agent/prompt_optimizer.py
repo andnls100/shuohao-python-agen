@@ -88,12 +88,6 @@ def optimize_episode(
         if key != "episodes"
     }
     result_doc["episodes"] = [copy.deepcopy(selected)]
-    result_doc["promptOptimization"] = {
-        "sourceFile": str(source_path),
-        "episode": episode,
-        "method": "novel-storyboard skill prompt optimization",
-        "videoGenerated": False,
-    }
     # 先写原始提示词副本，单段成功后即保存；失败时源文件不受影响，结果文件可续查。
     write_json(target, result_doc)
 
