@@ -2,71 +2,19 @@
   "strategy": "failover",
   "cooldown": 120,
   "text": [
-    {
-      "name": "智谱-flash",
-      "base_url": "https://open.bigmodel.cn/api/paas/v4/",
-      "api_keys": ["Key1", "Key2"],
-      "model": "glm-5.3-flash"
-    },
-    {
-      "name": "聚合平台-备用",
-      "base_url": "https://你的聚合平台地址/v1",
-      "api_key_env": "AGGREGATOR_API_KEY",
-      "model": "平台上的模型名",
-      "max_tokens": 8192,
-      "stream": true
-    }
+    {"name": "智谱-flash", "base_url": "https://open.bigmodel.cn/api/paas/v4/", "api_keys": ["Key1", "Key2"], "model": "glm-5.3-flash"},
+    {"name": "聚合平台-备用", "base_url": "https://你的聚合平台地址/v1", "api_key_env": "AGGREGATOR_API_KEY", "model": "平台上的模型名", "max_tokens": 8192, "stream": true}
   ],
   "vision": [
-    {
-      "name": "智谱-视觉",
-      "base_url": "https://open.bigmodel.cn/api/paas/v4/",
-      "api_key": "把这里换成平台一的 Key",
-      "model": "glm-5.3-flashx"
-    }
+    {"name": "智谱-视觉", "base_url": "https://open.bigmodel.cn/api/paas/v4/", "api_key": "把这里换成平台一的 Key", "model": "glm-5.3-flashx"}
   ],
   "image": [
-    {
-      "name": "图片平台主用",
-      "base_url": "https://你的图片平台/v1",
-      "api_key": "替换成图片平台 Key",
-      "model": "平台支持的生图模型名",
-      "endpoint": "/images/generations",
-      "size": "1536x1024",
-      "quality": "high",
-      "timeout": 180
-    },
-    {
-      "name": "图片平台备用",
-      "base_url": "https://你的备用图片平台/v1",
-      "api_key": "替换成备用图片平台 Key",
-      "model": "备用平台支持的生图模型名",
-      "endpoint": "/images/generations",
-      "size": "1536x1024",
-      "quality": "high",
-      "timeout": 180
-    }
+    {"name": "图片平台主用", "base_url": "https://你的图片平台/v1", "api_key": "替换成图片平台 Key", "model": "平台支持的生图模型名", "endpoint": "/images/generations", "size": "1536x1024", "quality": "high", "timeout": 180},
+    {"name": "图片平台备用", "base_url": "https://你的备用图片平台/v1", "api_key": "替换成备用图片平台 Key", "model": "备用平台支持的生图模型名", "endpoint": "/images/generations", "size": "1536x1024", "quality": "high", "timeout": 180}
   ],
-  "image_style": {
-    "look": "写实",
-    "character_mode": "portrait",
-    "negative": "omit"
-  },
+  "image_style": {"look": "写实", "character_mode": "portrait", "negative": "omit"},
   "audio": [
-    {
-      "name": "百炼-CosyVoice",
-      "provider": "cosyvoice_tts",
-      "speech_url": "https://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer",
-      "voice_design_url": "https://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/customization",
-      "api_key_env": "DASHSCOPE_API_KEY",
-      "model": "cosyvoice-v3.5-flash",
-      "response_format": "mp3",
-      "sample_rate": 24000,
-      "voice_language_hints": ["zh"],
-      "language_hints": ["zh"],
-      "voice_preview_text": "你好，我是这个故事中的角色，很高兴认识你。",
-      "timeout": 120
-    }
+    {"name": "百炼-CosyVoice", "provider": "cosyvoice_tts", "speech_url": "https://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer", "voice_design_url": "https://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/customization", "api_key_env": "DASHSCOPE_API_KEY", "model": "cosyvoice-v3.5-flash", "response_format": "mp3", "sample_rate": 24000, "voice_language_hints": ["zh"], "language_hints": ["zh"], "voice_preview_text": "你好，我是这个故事中的角色，很高兴认识你。", "timeout": 120}
   ],
   "video": [
     {
@@ -92,7 +40,6 @@
       "key": "wan_r2v",
       "name": "阿里云百炼-Wan2.7-R2V",
       "adapter": "aliyun_wan",
-      "mode": "r2v",
       "enabled": true,
       "active": false,
       "submit_url": "https://{workspace_id}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis",
@@ -103,22 +50,17 @@
       "resolution": "720P",
       "ratio": "16:9",
       "prompt_extend": false,
-      "reference_media": [
-        {
-          "type": "reference_image",
-          "url": "https://example.com/reference-character.jpg",
-          "reference_voice": "https://example.com/reference-character.mp3"
-        },
-        {
-          "type": "reference_video",
-          "url": "https://example.com/reference-video.mp4",
-          "reference_voice": "https://example.com/reference-video-voice.mp3"
-        }
-      ],
+      "request_template": {
+        "reference_media": [
+          {"type": "reference_image", "url": "https://example.com/reference-character.jpg", "reference_voice": "https://example.com/reference-character.mp3"},
+          {"type": "reference_video", "url": "https://example.com/reference-video.mp4", "reference_voice": "https://example.com/reference-video-voice.mp3"},
+          {"type": "reference_image", "url": "https://example.com/object.png"}
+        ]
+      },
       "timeout": 120,
       "poll_interval": 15,
       "max_wait": 1800,
-      "note": "Wan R2V 参考生视频：reference_media 必须填写公网可访问的 HTTP(S) 媒体 URL；可混合 reference_image/reference_video，并可按条目附 reference_voice。将示例 URL 替换成真实媒体后，使用 --video-model wan_r2v。"
+      "note": "Wan R2V：将 request_template.reference_media 中的示例 URL 替换成真实公网 HTTP(S) URL；可混合 reference_image/reference_video，并可附 reference_voice。选择 --video-model wan_r2v。"
     },
     {
       "key": "seedance_cheapdev",
@@ -134,12 +76,7 @@
       "timeout": 120,
       "poll_interval": 5,
       "max_wait": 1800,
-      "request_template": {
-        "model": "{{model}}",
-        "prompt": "{{prompt}}",
-        "duration": "{{duration_seconds}}",
-        "aspect_ratio": "{{aspect_ratio}}"
-      },
+      "request_template": {"model": "{{model}}", "prompt": "{{prompt}}", "duration": "{{duration_seconds}}", "aspect_ratio": "{{aspect_ratio}}"},
       "note": "暂未启用。"
     },
     {
