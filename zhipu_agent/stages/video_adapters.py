@@ -1,8 +1,4 @@
-"""Provider-specific request construction for the video stage.
-
-The stage owns manifests, retries, polling, and downloads. This module translates
-the normalized shot fields into provider-specific request bodies and headers.
-"""
+"""Provider-specific request construction for the video stage."""
 from __future__ import annotations
 
 import base64
@@ -15,7 +11,6 @@ from urllib.parse import urlparse
 
 
 def _render(value: Any, context: dict) -> Any:
-    """Recursively interpolate {{field}} placeholders; exact placeholders preserve type."""
     if isinstance(value, dict):
         return {key: _render(item, context) for key, item in value.items()}
     if isinstance(value, list):
@@ -36,7 +31,6 @@ COGVIDEOX_SIZES = ("1280x720", "720x1280", "1024x1024", "1920x1080", "1080x1920"
 
 
 def fit_cogvideox_prompt(prompt: str, limit: int = COGVIDEOX_PROMPT_LIMIT) -> str:
-    """CogVideoX-3 的 prompt 最多 512 字符：去掉图片对齐指令行，压缩空白，再按句子边界截断。"""
     lines = [ln.strip() for ln in str(prompt).splitlines() if ln.strip()]
     if lines and re.match(r"^(How the reference pictures align|参考图与目标视频的对齐|目标视频在)", lines[0]):
         lines = lines[1:]
@@ -50,14 +44,13 @@ def fit_cogvideox_prompt(prompt: str, limit: int = COGVIDEOX_PROMPT_LIMIT) -> st
 
 
 IMAGE_LIMIT_BYTES = 5 * 1024 * 1024
-IMAGE_EXTS = (".png", ".jpg", ".jpeg")
+IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 
 
 def encode_image(path: Path, encoding: str = "data_uri") -> str:
-    """把本地分镜图编码成 CogVideoX-3 能接收的 Base64（png/jpeg/jpg，单张 ≤5MB；超限时转 JPEG 压缩）。"""
     path = Path(path)
     if path.suffix.lower() not in IMAGE_EXTS:
-        raise ValueError(f"分镜图格式必须是 png/jpg/jpeg：{path.name}")
+        raise ValueError(f"分镜图格式必须是 png/jpg/jpeg/webp：{path.name}")
     raw = path.read_bytes()
     mime = mimetypes.guess_type(path.name)[0] or "image/png"
     if len(raw) > IMAGE_LIMIT_BYTES:
@@ -80,7 +73,6 @@ def encode_image(path: Path, encoding: str = "data_uri") -> str:
 
 
 def _reference_media(provider: dict, item: dict) -> list[dict]:
-    """Validate Wan R2V media. Reference media must be publicly reachable HTTP(S) URLs."""
     media = item.get("reference_media")
     if media is None:
         media = provider.get("reference_media")
@@ -99,20 +91,31 @@ def _reference_media(provider: dict, item: dict) -> list[dict]:
         url = str(entry.get("url") or "").strip()
         if media_type not in allowed_types:
             raise ValueError(f"reference_media[{index}].type 必须是 reference_image 或 reference_video")
-        if urlparse(url).scheme not in ("http", "https"):
-            raise ValueError(f"reference_media[{index}].url 必须是 HTTP(S) URL；不能直接提交本地文件路径")
+        if not (urlparse(url).scheme in ("http", "https") or url.startswith("data:image/")):
+            raise ValueError(f"reference_media[{index}].url 必须是 HTTP(S) URL 或 data:image Base64")
         normalized = {"type": media_type, "url": url}
         if entry.get("reference_voice"):
             voice = str(entry["reference_voice"]).strip()
-            if urlparse(voice).scheme not in ("http", "https"):
+            if urlparse(voice).scheme not in ("http", "https") and not voice.startswith("data:audio/"):
                 raise ValueError(f"reference_media[{index}].reference_voice 必须是 HTTP(S) URL")
             normalized["reference_voice"] = voice
         result.append(normalized)
+    if len(result) > 5:
+        raise ValueError("Wan R2V 参考图/视频最多 5 个；当前 character/art 引用超过 5 个")
     return result
 
 
+def _wan_r2v_prompt(item: dict) -> str:
+    labels = []
+    for index, entry in enumerate(item.get("reference_media") or [], 1):
+        label = entry.get("label")
+        if label:
+            labels.append(f"图{index}是{label}")
+    prompt = str(item["prompt"]).strip()
+    return ("；".join(labels) + "。\n\n" + prompt) if labels else prompt
+
+
 def build_request(provider: dict, item: dict, manifest: dict) -> dict:
-    """Build the request body for the selected provider adapter."""
     adapter = str(provider.get("adapter") or "generic").lower()
     context = {
         "model": provider["VIDEO_API_MODEL"],
@@ -153,23 +156,35 @@ def build_request(provider: dict, item: dict, manifest: dict) -> dict:
         return body
 
     if adapter == "aliyun_wan":
-        duration = max(2, min(30, int(round(float(item["duration_seconds"])))) )
-        ratio = context["aspect_ratio"]
-        if ratio not in ("16:9", "9:16", "4:3", "1:1", "3:4", "adaptive"):
-            ratio = "adaptive"
-        input_body = {"prompt": context["prompt"]}
         model = context["model"].lower()
-        template = provider.get("request_template")
         mode = str(provider.get("mode") or "").lower()
         if not mode and "r2v" in model:
             mode = "r2v"
         if mode == "r2v":
             media = _reference_media(provider, item)
             if not media:
-                raise ValueError("Wan R2V 已启用，但没有配置 reference_media")
-            input_body["media"] = media
+                raise ValueError("Wan R2V 已启用，但没有从 character/art 引用中找到参考图")
+            duration = max(2, min(15, int(round(float(item["duration_seconds"])))) )
+            ratio = context["aspect_ratio"]
+            if ratio not in ("16:9", "9:16", "4:3", "1:1", "3:4", "adaptive"):
+                ratio = "16:9"
+            return {
+                "model": context["model"],
+                "input": {"prompt": _wan_r2v_prompt(item), "media": media},
+                "parameters": {
+                    "resolution": context["resolution"] if context["resolution"] in ("720P", "1080P") else "720P",
+                    "ratio": provider.get("ratio") or ratio,
+                    "duration": duration,
+                    "prompt_extend": bool(provider.get("prompt_extend", True)),
+                },
+            }
+
+        duration = max(2, min(30, int(round(float(item["duration_seconds"])))) )
+        ratio = context["aspect_ratio"]
+        if ratio not in ("16:9", "9:16", "4:3", "1:1", "3:4", "adaptive"):
+            ratio = "adaptive"
         return {
-            "model": context["model"], "input": input_body,
+            "model": context["model"], "input": {"prompt": context["prompt"]},
             "parameters": {
                 "resolution": context["resolution"], "ratio": provider.get("ratio") or ratio,
                 "duration": duration, "prompt_extend": bool(provider.get("prompt_extend", True)),
