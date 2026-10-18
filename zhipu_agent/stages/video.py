@@ -512,6 +512,20 @@ def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: 
     root.mkdir(parents=True, exist_ok=True)
     path = artifact(ctx)
     manifest = _collect(ctx, eps, protocol, visual_style, shots, frames_dir, flf)
+    # Print the exact resolved reference-image paths before any video API submission.
+    ctx.log("视频参考图路径检查（提交视频 API 前）：")
+    for item in manifest["items"]:
+        refs = item.get("reference_assets") or []
+        if not refs:
+            ctx.log(f"  {item['id']}: 未匹配到参考图")
+            continue
+        for asset in refs:
+            ref_path = _resolve(ctx.out, str(asset.get("path") or ""))
+            status = "存在" if ref_path.is_file() else "不存在"
+            ctx.log(
+                f"  {item['id']}: [{asset.get('kind', 'unknown')}] "
+                f"{asset.get('name', '')} -> {ref_path.resolve()} [{status}]"
+            )
     previous = {}
     if path.is_file() and not ctx.force:
         try:

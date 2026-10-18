@@ -94,6 +94,12 @@ def optimize_prompt_with_skill(adapter: str, prompt: str) -> str:
             kind="text",
             temperature=0,
         ).strip()
+        print(
+            f"\n===== 视频技能包优化器返回内容（{adapter}，{len(optimized)} 字）=====\n"
+            f"{optimized}\n"
+            "===== 优化器返回内容结束 =====\n",
+            flush=True,
+        )
     except Exception:
         # 优化器失败时不阻断视频生成，仍执行确定性模型约束。
         optimized = text
