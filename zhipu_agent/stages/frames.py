@@ -14,14 +14,12 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import os
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ..config import models_file_path
 from ..validator import Result
 from .base import Context, read_json, safe_name, write_json
 from .images import _download_image, _extension, _find_image_payload
@@ -40,58 +38,36 @@ def artifact(ctx: Context) -> Path:
 # ---------------------------------------------------------------- 配置
 
 def _providers() -> List[dict]:
-    """models.json 的 frame 号池：支持参考图的出图接口。字段见 models.example.json。"""
-    path = models_file_path()
-    if not path.is_file():
-        raise ValueError(f"找不到模型配置文件：{path}；请复制 models.example.json 为 models.json")
-    try:
-        data = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError) as exc:
-        raise ValueError(f"无法读取 {path}：{exc}") from exc
-    entries = data.get("frame", [])
-    if not isinstance(entries, list) or not entries:
-        raise ValueError(f"{path} 中没有 frame 号池。请添加支持参考图的出图接口，格式见 models.example.json 的 frame。")
+    """分镜图和角色图、场景图共用 models.json 的 image 号池（同一个接口），不另设配置。
+
+    image 条目里可选追加这些字段（都不必填）：
+      sizes             按画幅选尺寸，如 {"16:9": "1536x1024", "9:16": "1024x1536"}
+      reference_field   参考图放在请求体的哪个字段，默认 "image"
+      reference_style   list（字符串数组，默认）| single（只传第 1 张）| objects（[{"image_url": ...}]）
+      image_encoding    data_uri（默认）| base64
+      max_references    最多传几张参考图，默认 4
+      request_template  请求体结构特殊时整体指定，可用 {{model}} {{prompt}} {{size}} {{quality}} {{images}} {{image}}
+      headers           额外请求头
+    """
+    from .images import _image_providers
     providers = []
-    for index, entry in enumerate(entries, 1):
-        if not isinstance(entry, dict):
-            raise ValueError(f"models.json 的 frame[{index}] 必须是对象")
-        if entry.get("enabled", True) is False:
-            continue
-        name = str(entry.get("name") or f"frame-{index}").strip()
-        base_url = str(entry.get("base_url") or "").strip().rstrip("/")
-        endpoint = str(entry.get("endpoint") or "/images/generations").strip()
-        model = str(entry.get("model") or "").strip()
-        api_key = str(entry.get("api_key") or "").strip()
-        key_env = str(entry.get("api_key_env") or "").strip()
-        if not api_key and key_env:
-            api_key = os.environ.get(key_env, "").strip()
-        url = endpoint if endpoint.startswith(("http://", "https://")) else base_url + "/" + endpoint.lstrip("/")
-        missing = [f for f, v in (("base_url（或完整 endpoint URL）", base_url or endpoint.startswith(("http://", "https://"))),
-                                  ("model", model), ("api_key 或 api_key_env", api_key)) if not v]
-        if missing:
-            raise ValueError(f"models.json 的 frame[{index}]（{name}）缺少：{'、'.join(missing)}")
-        if urllib.parse.urlparse(url).scheme not in ("http", "https"):
-            raise ValueError(f"models.json 的 frame[{index}]（{name}）endpoint 必须是 HTTP(S) URL")
+    for base in _image_providers():
+        entry = base.get("raw") or {}
         style = str(entry.get("reference_style") or "list")
         if style not in ("list", "single", "objects"):
-            raise ValueError(f"models.json 的 frame[{index}]（{name}）reference_style 只能是 list / single / objects")
+            raise ValueError(f"models.json 的 image（{base['name']}）reference_style 只能是 list / single / objects")
         encoding = str(entry.get("image_encoding") or "data_uri")
         if encoding not in ("data_uri", "base64"):
-            raise ValueError(f"models.json 的 frame[{index}]（{name}）image_encoding 只能是 data_uri / base64")
+            raise ValueError(f"models.json 的 image（{base['name']}）image_encoding 只能是 data_uri / base64")
         providers.append({
-            "name": name, "url": url, "api_key": api_key, "model": model,
-            "size": str(entry.get("size") or "1536x1024"),
+            **{k: base[k] for k in ("name", "url", "api_key", "model", "size", "quality", "timeout")},
             "sizes": entry.get("sizes") if isinstance(entry.get("sizes"), dict) else {},
-            "quality": entry.get("quality"),
-            "timeout": max(10, int(entry.get("timeout", 180))),
             "reference_field": str(entry.get("reference_field") or "image"),
             "reference_style": style, "image_encoding": encoding,
             "max_references": max(0, int(entry.get("max_references", 4))),
             "request_template": entry.get("request_template"),
             "headers": entry.get("headers") if isinstance(entry.get("headers"), dict) else {},
         })
-    if not providers:
-        raise ValueError("models.json 的 frame 号池没有启用的接口；请设置 enabled=true")
     return providers
 
 
@@ -349,7 +325,7 @@ def run(ctx: Context, eps: Optional[list] = None, generate: bool = False,
 
     if not generate:
         ctx.log(f"已整理 {len(items)} 个分镜图任务（本次选中 {len(selected)} 个）；没有调用出图 API。")
-        ctx.log(f"确认 models.json 的 frame 号池后，加 --frames-gen 开始出图：{path}")
+        ctx.log(f"确认 models.json 的 image 号池（和角色图、场景图共用）后，加 --frames-gen 开始出图：{path}")
         return path
 
     by_id = {m["id"]: m for m in manifest["items"]}

@@ -82,6 +82,7 @@ def _image_providers() -> List[dict]:
             "size": str(entry.get("size") or "1536x1024"),
             "quality": str(entry.get("quality") or "high"),
             "timeout": max(10, int(entry.get("timeout", 180))),
+            "raw": entry,  # 分镜图阶段读取其中可选的参考图字段
         })
     return providers
 

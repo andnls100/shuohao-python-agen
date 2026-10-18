@@ -159,28 +159,5 @@
         "canceled"
       ]
     }
-  ],
-  "frame": [
-    {
-      "name": "分镜图-支持参考图的出图接口",
-      "enabled": false,
-      "base_url": "https://你的出图平台/v1",
-      "endpoint": "/images/generations",
-      "api_key_env": "FRAME_API_KEY",
-      "model": "支持参考图的出图模型名",
-      "size": "1536x1024",
-      "sizes": {
-        "16:9": "1536x1024",
-        "9:16": "1024x1536"
-      },
-      "quality": null,
-      "timeout": 180,
-      "max_references": 4,
-      "reference_field": "image",
-      "reference_style": "list",
-      "image_encoding": "data_uri",
-      "request_template": null,
-      "note": "把 enabled 改为 true 并按平台文档填写。参考图字段不同的平台：改 reference_field / reference_style(list|single|objects)，或写 request_template（可用 {{model}} {{prompt}} {{size}} {{quality}} {{images}} {{image}}）。"
-    }
   ]
 }

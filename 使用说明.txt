@@ -246,32 +246,21 @@ f<切序> 就是该段第几个分镜；视频阶段首帧直接读这里。
 某个角色/场景/道具还没有参考图时，清单里会写明缺哪张，不会假装引用了；
 先运行 images 阶段补出这些图，再出分镜图，一致性才有保证。
 
-四、配置（models.json 新增 frame 号池，示例见 models.example.json）
+四、配置：不需要新增
 
-  "frame": [{
-    "name": "...", "enabled": true,
-    "base_url": "https://平台/v1", "endpoint": "/images/generations",
-    "api_key_env": "FRAME_API_KEY", "model": "支持参考图的出图模型",
-    "size": "1536x1024", "sizes": {"16:9": "1536x1024", "9:16": "1024x1536"},
-    "max_references": 4,
-    "reference_field": "image", "reference_style": "list",   // list | single | objects
-    "image_encoding": "data_uri",                             // 或 base64
-    "request_template": null                                   // 平台格式特殊时用，见下
-  }]
+分镜图和角色图、场景图共用 models.json 的 image 号池（同一个接口），不另设配置。
+请求体和角色图、场景图一致（model / prompt / size / n / quality），只多一个参考图字段：
+  "image": [参考图1, 参考图2, ...]     // Base64 data URI，默认字段名 image
+平台的参考图字段写法不同时，在 image 条目里按需追加这些可选字段（都不必填）：
+  "sizes": {"16:9": "1536x1024", "9:16": "1024x1536"}   // 竖屏剧按画幅选尺寸，没有就用 size
+  "reference_field": "image"            // 参考图放在哪个字段
+  "reference_style": "list"             // list | single（只传第 1 张）| objects（[{"image_url": ...}]）
+  "image_encoding": "data_uri"          // 或 base64
+  "max_references": 4                   // 最多传几张
+  "request_template": {...}             // 请求体整体特殊时才用，可用 {{model}} {{prompt}} {{size}} {{quality}} {{images}} {{image}}
 
-reference_style：list = 字符串数组；single = 只传第 1 张；objects = [{"image_url": "..."}]。
-平台请求体结构完全不同时，写 request_template，可用占位符：
-{{model}} {{prompt}} {{size}} {{quality}} {{images}}（全部参考图数组）{{image}}（第 1 张）。
-尺寸按分镜的 aspectRatio 从 sizes 里选，没有就用 size。
+五、需要你确认的事项
 
-五、需要你确认的事项（我没有把握，所以做成可配置，没有写死）
-
-1. 你实际用的出图平台和型号，以及它"带参考图出图"的请求格式。
-   我没有任何一家平台的真实接口可以验证，所以现在是通用写法：
-   POST 到你配置的地址，body 里放 model / prompt / size / n，参考图放在 reference_field 字段。
-   请把平台官方文档里的"参考图出图"示例请求贴给我，
-   我据此在 models.example.json 里补一份可直接用的预设；格式不一致时用 request_template 也能先跑。
-2. 先小额试跑：先用单个分镜命令出 1 张，看请求体（日志会打印，参考图只显示文件名）
-   和出图效果，再批量。报错把完整错误发我。
-3. 响应格式：我只认 data[0].b64_json 或 data[0].url / image_url 两种返回。
-   平台返回其他结构（比如异步任务号再轮询）时需要告诉我，我再加。
+1. 先小额试跑：用单个分镜命令出 1 张，看日志打印的请求体（参考图只显示文件名）和出图效果。
+   如果接口报参考图字段错误，把完整错误发我，通常只要在 image 条目里加 reference_field / reference_style。
+2. 响应格式沿用角色图、场景图的解析（data[0].b64_json 或 url），不需要改。
