@@ -1,8 +1,8 @@
 """出图提示词优化：设定集的 image.prompt / image.sheet 在写进 JSON 之前，先交给远程文本模型按
 FLUX 最佳实践（skills/flux-image-best-practices）重写一遍。
 
-只改写法不改事实；输出要过本地检查（英文、无人名、版面/尺度/白底等关键短语还在），
-不过就带着原因重试一次，仍不过就保留原提示词——优化是锦上添花，不能把质量门拖垮。
+角色如果没有 image.sheet，则在优化阶段补齐多视角角色设定图：16:9 横构图、左侧面部基准半身像、右上正/侧/背全身三视图、右下细节条。
+只改写法不改事实；输出要过本地检查（英文、无人名、版面/尺度/白底等关键短语还在），不过就带着原因重试一次，仍不过就保留原提示词。
 关闭：环境变量 AGENT_FLUX_OPTIMIZE=0。
 """
 from __future__ import annotations
@@ -12,24 +12,30 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List
 
 from .llm import Conversation, extract_json
 from .skill_loader import SkillError, build_system
 
 SKILL = "flux-image-best-practices"
-# 优化方式 → (技能, 任务指令, 附带的上游规则)。wan 用 video-wan-r2v 技能里新增的 optimize-pass.md
 MODES = {
     "flux": (SKILL, "optimize-pass.md", ("core-principles.md", "t2i-prompting.md", "negative-prompt-alternatives.md")),
     "wan": ("video-wan-r2v", "optimize-pass.md", ()),
 }
 FIELDS = ("prompt", "sheet")
 CJK = re.compile(r"[㐀-鿿　-〿＀-￯]")
-# 原提示词里出现了这些结构短语，优化后必须还在（版面 / 白底 / 比例）
 STRUCTURE_PHRASES = ("16:9", "white background", "front", "side", "back")
+SHEET_REQUIRED = (
+    "16:9",
+    "white background",
+    "LEFT ZONE",
+    "RIGHT-TOP ZONE",
+    "RIGHT-BOTTOM ZONE",
+    "front",
+    "side",
+    "back",
+)
 STYLE_WORDS = re.compile(r"\b(photorealistic|anime|3d render|cgi|cel[- ]shad\w*|manga)\b", re.I)
-
-# 注入 FLUX 规则里最相关的三篇，不整包塞（整包太长，且含 I2I / JSON / 字体等用不上的内容）
 RULE_FILES = ("core-principles.md", "t2i-prompting.md", "negative-prompt-alternatives.md")
 RULE_CHARS = 6000
 
@@ -52,7 +58,7 @@ def _system(ctx, mode: str = "flux") -> str:
     return build_system(sk, [pass_name], schema=False, extra=extra)
 
 
-def _problems(original: Dict[str, str], new: Dict[str, str], forbid: Iterable[str], must_keep: Iterable[str]) -> List[str]:
+def _problems(original: Dict[str, str], new: Dict[str, str], forbid: Iterable[str], must_keep: Iterable[str], *, character_sheet: bool = False) -> List[str]:
     out: List[str] = []
     for field, old in original.items():
         text = new.get(field)
@@ -75,16 +81,31 @@ def _problems(original: Dict[str, str], new: Dict[str, str], forbid: Iterable[st
             out.append(f"{field} 写进了画风词，画风由出图阶段统一加")
         if len(text) < len(old) * 0.35:
             out.append(f"{field} 比原文短太多（{len(text)} < {len(old)}×0.35），像是丢了内容")
+    if character_sheet:
+        sheet = new.get("sheet", "") if isinstance(new, dict) else ""
+        low = sheet.lower()
+        for phrase in SHEET_REQUIRED:
+            if phrase.lower() not in low:
+                out.append(f"sheet 缺少多视角设定图硬要求「{phrase}」")
     return out
 
 
 def optimize_image(ctx, image: Dict[str, Any], *, kind: str, label: str,
                    forbid: Iterable[str] = (), must_keep: Iterable[str] = (),
                    mode: str = "flux", always: bool = False) -> Dict[str, Any]:
-    """返回 image 字典的副本，prompt / sheet 已优化（失败则原样返回）。其他字段（negativePrompt、tags）不动。"""
+    """返回 image 字典的副本，prompt / sheet 已优化（失败则原样返回）。其他字段不动。
+
+    character 若缺少 image.sheet，会把现有 image.prompt 作为事实来源，要求文本模型额外生成多视角
+    角色设定图提示词；这样即使上游角色卡只有半身主视角，实际 sheet 出图也仍然采用多视角布局。
+    """
     if not (always or enabled()) or not isinstance(image, dict):
         return image
-    original = {f: image[f] for f in FIELDS if isinstance(image.get(f), str) and image[f].strip()}
+    original: Dict[str, str] = {
+        f: image[f] for f in FIELDS if isinstance(image.get(f), str) and image[f].strip()
+    }
+    character_sheet = kind == "character"
+    if character_sheet and "prompt" in original and "sheet" not in original:
+        original["sheet"] = original["prompt"]
     if not original:
         return image
     forbid = [n for n in forbid if n]
@@ -106,7 +127,13 @@ def optimize_image(ctx, image: Dict[str, Any], *, kind: str, label: str,
         ctx.log(f"⚠ FLUX 优化跳过（{exc}）")
         return image
     kind_hint = {
-        "character": "这是角色提示词（主体是人物）。",
+        "character": (
+            "这是角色提示词（主体是人物）。角色必须产出可直接用于角色一致性参考的多视角设定图："
+            "ONE 16:9 landscape canvas; LEFT ZONE about 34% of the canvas width with one bust portrait as the face anchor; "
+            "RIGHT-TOP ZONE with three FULL-BODY views (front, side, back); RIGHT-BOTTOM ZONE with 4–5 detail studies; "
+            "thin hairline rules; PROPORTIONS ARE CRITICAL; the detail studies give way, not the figures. "
+            "不要只输出单人半身肖像。"
+        ),
         "scene": "这是场景提示词（无人空景）。",
         "prop": "这是叙事道具提示词（白底、无手、带尺度短语）。",
     }.get(kind, "")
@@ -122,7 +149,7 @@ def optimize_image(ctx, image: Dict[str, Any], *, kind: str, label: str,
                 problems = [f"输出不是合法 JSON：{exc}"]
             else:
                 new = {f: data.get(f) for f in original} if isinstance(data, dict) else {}
-                problems = _problems(original, new, forbid, must_keep)
+                problems = _problems(original, new, forbid, must_keep, character_sheet=character_sheet)
                 if not problems:
                     result.update({f: new[f].strip() for f in original})
                     cache.write_text(json.dumps({f: result[f] for f in original}, ensure_ascii=False, indent=1),
