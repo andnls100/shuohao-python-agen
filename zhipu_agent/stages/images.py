@@ -183,7 +183,7 @@ def _extension(data: bytes) -> str:
 # 常常是插画 / CG 感。这里把 character-refs 技能的画风预设（skills/character-refs/scripts/looks.mjs，
 # 默认写实照片）读进来拼到角色提示词后面，和 character-refs 用的是同一份，不另存一套。
 
-_IMAGE_STYLE_DEFAULTS = {"character_mode": "portrait", "negative": "omit", "look": ""}
+_IMAGE_STYLE_DEFAULTS = {"character_mode": "sheet", "negative": "omit", "look": ""}
 _DESIGN_SHEET_LEAD = re.compile(r"^\s*(Single )?(Character|Model)( design| model)? sheet( of)?\s*[:,\-]?\s*", re.I)
 
 # 设定集提示词里夹着两个渲染引擎术语。写实照片画风下，它们会把图往 CG 渲染带；换成摄影里的说法，意思不变。
@@ -233,7 +233,7 @@ def _image_style_config() -> dict:
             raise ValueError("models.json 的 image_style 必须是对象")
         config.update({k: str(v) for k, v in extra.items() if k in config})
     if config["character_mode"] not in ("portrait", "sheet"):
-        raise ValueError("image_style.character_mode 只能是 portrait（单人半身像，默认）或 sheet（多视图设定图）")
+        raise ValueError("image_style.character_mode 只能是 sheet（多视图设定图，默认）或 portrait（单人半身像）")
     if config["negative"] not in ("omit", "append"):
         raise ValueError("image_style.negative 只能是 omit（不发负面词，默认）或 append（拼成 Avoid 句子）")
     return config
@@ -242,10 +242,10 @@ def _image_style_config() -> dict:
 def _character_prompt(record: dict, style: dict, look: dict) -> tuple[str, str]:
     """角色出图提示词 = 人物描述 + 画风层。
 
-    portrait（默认）：用 image.prompt（单人四分之三半身像），去掉 "character sheet" 这类设定图措辞，
+    portrait：用 image.prompt（单人四分之三半身像），去掉 "character sheet" 这类设定图措辞，
       再接画风的相机 / 皮肤质感段和固定的单人中性背景。没有拼画风自带的 clean 段：它写着
       "empty hands, no props"，会和设定里"手里拿着箱子 / 佩剑"打架。
-    sheet：沿用 image.sheet（16:9 三区多视图设定图），只在后面补画风段。脸在图里很小，写实质感会差，
+    sheet（默认）：沿用 image.sheet（16:9 三区多视图设定图），只在后面补画风段。脸在图里很小，写实质感会差，
       设定图要的是版面，不是照片感。
     negative：omit（默认）不发负面词。这类接口大多只有正向提示词，把"塑料皮肤、娃娃眼"写进去，
       模型反而可能画出来；想要的质感已经用正向写法放在画风段里。append 才拼成 Avoid 句子。

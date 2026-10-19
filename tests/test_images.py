@@ -247,7 +247,7 @@ class OnlyFilterTest(unittest.TestCase):
         # 生图阶段应自动刷新两个报告，并从 manifest 引用实际输出路径。
         character_report = (self.out / "characters" / "report.html").read_text(encoding="utf-8")
         art_report = (self.out / "art" / "art-report.html").read_text(encoding="utf-8")
-        self.assertIn("../images/characters/沈知微-C001-portrait.png", character_report)
+        self.assertIn("../images/characters/沈知微-C001-sheet.png", character_report)
         self.assertIn("尚未出图", character_report)  # 未生成的角色仍显示占位
         self.assertIn("尚未出图", art_report)  # 未生成的场景/道具仍显示占位
 

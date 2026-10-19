@@ -29,7 +29,7 @@
       "max_wait": 900
     }
   ],
-  "image_style": {"look": "写实", "character_mode": "portrait", "negative": "omit"},
+  "image_style": {"look": "写实", "character_mode": "sheet", "negative": "omit"},
   "audio": [
     {"name": "百炼-CosyVoice", "provider": "cosyvoice_tts", "speech_url": "https://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer", "voice_design_url": "https://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/customization", "api_key_env": "DASHSCOPE_API_KEY", "model": "cosyvoice-v3.5-flash", "response_format": "mp3", "sample_rate": 24000, "voice_language_hints": ["zh"], "language_hints": ["zh"], "voice_preview_text": "你好，我是这个故事中的角色，很高兴认识你。", "timeout": 120}
   ],

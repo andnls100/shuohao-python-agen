@@ -264,3 +264,9 @@ f<切序> 就是该段第几个分镜；视频阶段首帧直接读这里。
 1. 先小额试跑：用单个分镜命令出 1 张，看日志打印的请求体（参考图只显示文件名）和出图效果。
    如果接口报参考图字段错误，把完整错误发我，通常只要在 image 条目里加 reference_field / reference_style。
 2. 响应格式沿用角色图、场景图的解析（data[0].b64_json 或 url），不需要改。
+
+
+==== 角色多视图设定图 + FLUX 提示词优化 ====
+1. 角色出图默认回到多角度设定图（image.sheet：半身像 + 正/侧/背三视图 + 细节条）。想要单人半身像，在 models.json 里写 "image_style": {"character_mode": "portrait"}。
+2. characters / art 阶段写 JSON 之前，会调文本模型按 skills/flux-image-best-practices 优化 image.prompt / image.sheet（角色、场景、道具）。失败自动保留原提示词；缓存 output/work/flux/；AGENT_FLUX_OPTIMIZE=0 关闭。
+3. 已生成过的 cast.json / art.json 不会自动改写：用 --force 重跑 characters / art 阶段才会走新流程。

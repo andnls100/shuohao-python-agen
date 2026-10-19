@@ -12,12 +12,14 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
+from ..image_prompt_optimizer import optimize_image
 from ..skill_loader import build_system
 from ..validator import Result
 from ..visual_style import visual_style_instruction
 from .base import Context, Item, compact, read_json, run_items, write_json
 
 SKILL = "novel-art"
+PROP_SCALES = {"手持级": "handheld scale", "桌面级": "tabletop scale", "家具级": "furniture scale"}  # 同 novel-art 校验脚本
 DROP = ("image", "usage")  # 参考资料里去掉的长字段
 
 
@@ -119,6 +121,14 @@ def run(ctx: Context, visual_style: str = "manju") -> Path:
         )
         items.append(Item("props", prop_system, prompt, tokens=["道具", "props"], cache=work / f"props-{visual_style}.json"))
 
+    def optimized(item: Any, kind: str) -> Any:
+        # 写进 JSON 之前，让远程模型按 FLUX 最佳实践重写 image.prompt / image.sheet（失败则保留原文）
+        if isinstance(item, dict) and isinstance(item.get("image"), dict):
+            keep = [PROP_SCALES.get(item.get("scale"), ""), "white background"] if kind == "prop" else []
+            item["image"] = optimize_image(ctx, item["image"], kind=kind, label=str(item.get("name") or item.get("id")),
+                                           forbid=cast_names, must_keep=keep)
+        return item
+
     def apply(key: str, data: Any) -> None:
         kind = kinds[key]
         if kind == "props":
@@ -126,7 +136,7 @@ def run(ctx: Context, visual_style: str = "manju") -> Path:
                 data = data.get("props") or [data]
             if not isinstance(data, list) or not data:
                 raise ValueError("道具应当是非空的 JSON 数组")
-            doc["props"] = data
+            doc["props"] = [optimized(p, "prop") for p in data]
         else:
             if not isinstance(data, dict):
                 raise ValueError("应当是一个 JSON 对象")
@@ -136,6 +146,7 @@ def run(ctx: Context, visual_style: str = "manju") -> Path:
                 if old["id"] == ident:
                     new = dict(data)
                     new["id"], new["name"] = old["id"], old["name"]
+                    optimized(new, "scene" if kind == "scene" else "prop")
                     if "primary" in old:
                         new["primary"] = old["primary"]
                     if old.get("usage"):

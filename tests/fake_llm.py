@@ -61,6 +61,7 @@ class FakeModel:
             "novel-characters/profile-pass.md": self._card,
             "novel-art/scene-pass.md": self._scene,
             "novel-art/prop-pass.md": self._prop,
+            "flux-image-best-practices/optimize-pass.md": self._flux,
             "novel-script/script-pass.md": self._script_ep,
             "novel-staging/read-pass.md": self._location,
             "novel-staging/staging-pass.md": self._staging_scenes,
@@ -133,6 +134,14 @@ class FakeModel:
         if self.break_cast_name == name and not is_fix:
             card["image"]["prompt"] = f"{name} standing in the fog"  # 出图提示词里写了人名 → 应被拦
         return card
+
+    # ---------------------------------------------------------- flux 提示词优化
+    FLUX_TAIL = " Soft window light from the left."
+
+    def _flux(self, user, is_fix, passname):
+        body = user.split("## 原提示词\n", 1)[1].split("\n\n## ", 1)[0]
+        self._count(passname, "flux")
+        return {k: v + self.FLUX_TAIL for k, v in json.loads(body).items()}
 
     # ---------------------------------------------------------- art
     def _scene(self, user, is_fix, passname):

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..llm import Conversation, ask_text
+from ..image_prompt_optimizer import optimize_image
 from ..skill_loader import build_system
 from ..validator import NodeError, Result
 from ..visual_style import visual_style_instruction
@@ -206,6 +207,9 @@ def run(ctx: Context, max_chars: int = 30, visual_style: str = "manju") -> Path:
                 card["importance"] = wanted
         elif card.get("importance") not in IMPORTANCE:
             card["importance"] = "minor"
+        # 写进 JSON 之前，让远程模型按 FLUX 最佳实践重写 image.prompt / image.sheet（失败则保留原文）
+        names_ban = [key, *[a for a in card.get("aliases", []) if isinstance(a, str)]]
+        card["image"] = optimize_image(ctx, card.get("image"), kind="character", label=key, forbid=names_ban)
         write_json(card_files[key], card)
 
     def validate() -> Result:

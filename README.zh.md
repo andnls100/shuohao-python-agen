@@ -307,7 +307,7 @@ python run_agent.py run --stages images --images-gen --images-only 徐今朝,C03
 | 字段 | 取值 | 说明 |
 | --- | --- | --- |
 | `look` | `写实`（默认）、`动漫`，或预设表里的其他 id / 名称 | 画风 |
-| `character_mode` | `portrait`（默认）、`sheet` | `portrait`：用 `image.prompt` 出单人四分之三半身像，脸占画面大，写实质感最好。`sheet`：用 `image.sheet`，一张 16:9 图里排半身像、三视图和细节小图，适合当版面参考，但脸很小，写实感会差 |
+| `character_mode` | `sheet`（默认）、`portrait` | `sheet`：用 `image.sheet`，一张 16:9 图里排半身像、正/侧/背三视图和细节小图（多角度设定图）。`portrait`：用 `image.prompt` 出单人四分之三半身像，脸占画面大，写实质感更好，但没有多角度 |
 | `negative` | `omit`（默认）、`append` | `omit`：不发送负面词。大多数生图接口只有正向提示词，把"塑料皮肤、娃娃眼"写进去，模型反而可能画出来；想要的质感已经用正向写法放在画风段里。`append`：拼成 `Avoid the following visual elements: …` 一句，附上画风自带的负面词 |
 
 写实画风下，还会把设定集提示词里的两个渲染引擎术语换成摄影里的说法（`ambient occlusion` 换成 `soft contact shadow`，`subsurface scattering` 换成 `translucency`），避免把画面往 CG 渲染带。改了这些设置后提示词会变，已经成功出过图的角色会按新提示词重新出；`portrait` 的文件名是 `<角色>-<编号>-portrait`，`sheet` 的是 `-sheet`，旧图不会被覆盖。场景和道具不受这个设置影响。
@@ -479,3 +479,10 @@ for f in skills/*/scripts/selftest.mjs; do node "$f"; done
 
 [Apache 2.0](LICENSE)
 
+
+
+### 出图提示词的 FLUX 优化
+
+`characters` 与 `art` 阶段在把角色 / 场景 / 道具的 `image.prompt`、`image.sheet` 写进 JSON 之前，会再调一次文本模型，按 `skills/flux-image-best-practices`（取自 [black-forest-labs/skills](https://github.com/black-forest-labs/skills)，MIT）重写：只用正向描述、主体靠前、写清光照、材质具体。`negativePrompt` 与 `tags` 不动。
+
+重写结果要过本地检查（全英文、无角色名、16:9 / 白底 / 正侧背 / 尺度短语等结构短语还在、不写画风），不过就带着原因重试一次，仍不过就保留原提示词。结果缓存在 `output/work/flux/`，续跑不重复花额度。关闭：`AGENT_FLUX_OPTIMIZE=0`。已有的 JSON 想重新优化：`--force` 重跑对应阶段。
