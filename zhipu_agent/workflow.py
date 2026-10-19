@@ -13,17 +13,17 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .config import Settings
 from .skill_loader import load_pack
-from .stages import art, audio, characters, continuity, frames, images, outline, refs, script, staging, storyboard, video
+from .stages import art, audio, characters, continuity, frames, images, optimize, outline, refs, script, staging, storyboard, video
 from .stages.base import (
     Context, guess_title, read_text_auto, safe_name,
 )
 from .validator import check_node
 
-STAGES = ["outline", "characters", "art", "images", "script", "audio", "staging", "storyboard", "frames", "refs", "continuity", "video"]
+STAGES = ["outline", "characters", "art", "optimize", "images", "script", "audio", "staging", "storyboard", "frames", "refs", "continuity", "video"]
 # 生图、角色参考图和视频调用都可能产生额外费用，默认流水线不自动触发。
-DEFAULT_STAGES = [name for name in STAGES if name not in ("images", "frames", "refs", "video")]
+DEFAULT_STAGES = [name for name in STAGES if name not in ("optimize", "images", "frames", "refs", "video")]
 MODULES = {
-    "outline": outline, "characters": characters, "art": art, "images": images, "script": script, "audio": audio,
+    "outline": outline, "characters": characters, "art": art, "optimize": optimize, "images": images, "script": script, "audio": audio,
     "staging": staging, "storyboard": storyboard, "frames": frames, "refs": refs, "continuity": continuity, "video": video,
 }
 # 这些阶段内部按集续跑，指定了 --eps 时不能整体跳过
@@ -122,7 +122,7 @@ def run_stage(ctx: Context, name: str, opts: Dict[str, Any]) -> Optional[Path]:
                 f"请把 {need} 加进 --stages，或先单独运行它。"
             )
 
-    if name not in ("refs", "continuity", "frames") and not ctx.force and module.artifact(ctx).is_file() \
+    if name not in ("refs", "continuity", "frames", "optimize") and not ctx.force and module.artifact(ctx).is_file() \
             and not (eps and name in PARTIAL_OK):
         result = module.check(ctx)
         if result.ok:
@@ -149,6 +149,9 @@ def run_stage(ctx: Context, name: str, opts: Dict[str, Any]) -> Optional[Path]:
                           fight_enhancement=opts.get("fight_enhancement", "auto"))
     if name == "frames":
         return module.run(ctx, eps=eps, generate=opts.get("frames_gen", False), only=opts.get("frames_only"))
+    if name == "optimize":
+        return module.run(ctx, mode=opts.get("optimize_mode", "flux"), kinds=opts.get("optimize_kinds"),
+                          only=opts.get("optimize_only"))
     if name == "images":
         return module.run(ctx, generate=opts.get("images_gen", False), only=opts.get("images_only"))
     if name == "refs":

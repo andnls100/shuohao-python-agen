@@ -96,5 +96,42 @@ class OptimizeImage(unittest.TestCase):
         self.assertEqual(len(self.calls), 1)
 
 
+class OptimizeStage(unittest.TestCase):
+    def test_batch_command_writes_separate_flux_and_wan_files(self):
+        import shutil
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from fake_llm import FakeModel
+        from test_offline_pipeline import _context, _outline_params
+        from zhipu_agent import workflow
+        from zhipu_agent.stages.base import read_json
+        os.environ["AGENT_FLUX_OPTIMIZE"] = "0"   # 流水线里先不优化，下面单独跑批量命令
+        out = Path(tempfile.mkdtemp(prefix="opt-test-"))
+        fake = FakeModel()
+        llm.set_backend(fake)
+        try:
+            ctx = _context(out)
+            workflow.run_pipeline(ctx, ["outline", "characters", "art"], {"params": _outline_params()})
+            before = ctx.artifact("characters").read_text(encoding="utf-8")
+            res = workflow.run_pipeline(ctx, ["optimize"], {"optimize_mode": "both", "optimize_kinds": ["characters", "scenes", "props"]})
+            self.assertEqual(ctx.artifact("characters").read_text(encoding="utf-8"), before)  # 原文件不动
+            cast = read_json(ctx.artifact("characters"))["characters"]
+            for mode in ("flux", "wan"):
+                data = read_json(out / "prompts" / f"{ctx.title}-characters-{mode}.json")
+                self.assertEqual(data["mode"], mode)
+                self.assertEqual(len(data["items"]), len(cast))
+                for item in data["items"]:
+                    self.assertTrue(item["optimized"])
+                    self.assertTrue(item["prompt"].endswith(FakeModel.FLUX_TAIL))
+                    self.assertNotIn(FakeModel.FLUX_TAIL, item["original_prompt"])
+                self.assertTrue((out / "prompts" / f"{ctx.title}-scenes-{mode}.json").is_file())
+                self.assertTrue((out / "prompts" / f"{ctx.title}-props-{mode}.json").is_file())
+            only = workflow.run_pipeline(ctx, ["optimize"], {"optimize_mode": "wan", "optimize_only": [cast[0]["name"]]})
+            self.assertEqual(len(read_json(out / "prompts" / f"{ctx.title}-characters-wan.json")["items"]), 1)
+        finally:
+            llm.set_backend(None)
+            os.environ.pop("AGENT_FLUX_OPTIMIZE", None)
+            shutil.rmtree(out, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -52,6 +52,9 @@ def _build_parser() -> argparse.ArgumentParser:
             s.add_argument("--refs-names", help="refs 阶段只处理这些角色，逗号分隔；默认主角和重要配角")
             s.add_argument("--refs-look", help="refs 阶段的画风；不指定时跟随 --visual-style")
             s.add_argument("--refs-gen", action="store_true", help="refs 阶段真的出图（需先配置 character-refs 的出图模型）")
+            s.add_argument("--optimize-mode", default="flux", choices=["flux", "wan", "both"], help="optimize 阶段：按哪种写法批量优化已保存的出图提示词（调用 models.json 的 text 模型），结果写到 output/prompts/ 下带 flux / wan 的单独文件，不改 cast.json")
+            s.add_argument("--optimize-kinds", default="characters", help="optimize 阶段处理哪些：characters,scenes,props（逗号分隔，默认 characters）")
+            s.add_argument("--optimize-only", help="optimize 阶段只处理这些角色 / 场景 / 道具（名字或编号，逗号分隔）；默认全部")
             s.add_argument("--images-gen", action="store_true", help="从已保存的 cast.json / art.json 提示词批量出角色、场景和道具图；需配置 models.json 的 image 号池")
             s.add_argument("--images-only", help="只出这几张图：写任务名、角色名、场景名或编号，逗号分隔，如 徐今朝 或 C03,S01；配合 --images-gen")
             s.add_argument("--frames-gen", action="store_true", help="frames 阶段真的出分镜图（和角色图、场景图共用 models.json 的 image 号池）；不加只整理任务和参考图引用")
@@ -190,6 +193,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         "fight_enhancement": args.fight_enhancement,
         "visual_style": args.visual_style,
         "max_chars": args.max_chars, "refs_look": args.refs_look or ("写实" if args.visual_style == "live-action" else "动漫"), "refs_gen": args.refs_gen,
+        "optimize_mode": args.optimize_mode,
+        "optimize_kinds": [k.strip() for k in args.optimize_kinds.split(",") if k.strip()],
+        "optimize_only": [n.strip() for n in args.optimize_only.split(",") if n.strip()] if args.optimize_only else None,
         "images_gen": args.images_gen,
         "images_only": [n.strip() for n in args.images_only.split(",") if n.strip()] if args.images_only else None,
         "video_protocol": args.video_protocol, "video_submit": args.video_submit,
@@ -203,7 +209,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         from .stages.base import parse_eps
         opts["eps"] = parse_eps(args.eps)
 
-    ctx = _ctx_from(args, settings, skip_source=all(stage in ("images", "frames", "continuity") for stage in stages))
+    ctx = _ctx_from(args, settings, skip_source=all(stage in ("optimize", "images", "frames", "continuity") for stage in stages))
     results = workflow.run_pipeline(ctx, stages, opts)
     ctx.log("全部完成：")
     for name, path in results.items():

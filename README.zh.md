@@ -486,3 +486,13 @@ for f in skills/*/scripts/selftest.mjs; do node "$f"; done
 `characters` 与 `art` 阶段在把角色 / 场景 / 道具的 `image.prompt`、`image.sheet` 写进 JSON 之前，会再调一次文本模型，按 `skills/flux-image-best-practices`（取自 [black-forest-labs/skills](https://github.com/black-forest-labs/skills)，MIT）重写：只用正向描述、主体靠前、写清光照、材质具体。`negativePrompt` 与 `tags` 不动。
 
 重写结果要过本地检查（全英文、无角色名、16:9 / 白底 / 正侧背 / 尺度短语等结构短语还在、不写画风），不过就带着原因重试一次，仍不过就保留原提示词。结果缓存在 `output/work/flux/`，续跑不重复花额度。关闭：`AGENT_FLUX_OPTIMIZE=0`。已有的 JSON 想重新优化：`--force` 重跑对应阶段。
+
+### 批量优化已保存的提示词（optimize 阶段）
+
+```bash
+python run_agent.py run --stages optimize --optimize-mode flux      # 或 wan / both
+python run_agent.py run --stages optimize --optimize-mode both --optimize-kinds characters,scenes,props
+python run_agent.py run --stages optimize --optimize-mode wan --optimize-only 徐今朝,C03
+```
+
+读已有的 `cast.json`（`--optimize-kinds` 加上 scenes / props 还会读 `art.json`），把每条记录的 `image.prompt` / `image.sheet` 交给 models.json 的 text 模型重写。`flux` 用 `skills/flux-image-best-practices`，`wan` 用 `skills/video-wan-r2v/references/optimize-pass.md`。**不改 cast.json / art.json**，结果写到单独的文件：`output/prompts/<书名>-characters-flux.json`、`-characters-wan.json`（场景 `-scenes-`、道具 `-props-`），每条带优化后的 `prompt` / `sheet` 和 `original_*` 对照。不加 `--stages all` 时不会自动运行；不改的条目（模型输出没过检查）`optimized` 为 false。

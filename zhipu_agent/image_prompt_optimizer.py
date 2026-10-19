@@ -18,6 +18,11 @@ from .llm import Conversation, extract_json
 from .skill_loader import SkillError, build_system
 
 SKILL = "flux-image-best-practices"
+# 优化方式 → (技能, 任务指令, 附带的上游规则)。wan 用 video-wan-r2v 技能里新增的 optimize-pass.md
+MODES = {
+    "flux": (SKILL, "optimize-pass.md", ("core-principles.md", "t2i-prompting.md", "negative-prompt-alternatives.md")),
+    "wan": ("video-wan-r2v", "optimize-pass.md", ()),
+}
 FIELDS = ("prompt", "sheet")
 CJK = re.compile(r"[㐀-鿿　-〿＀-￯]")
 # 原提示词里出现了这些结构短语，优化后必须还在（版面 / 白底 / 比例）
@@ -33,17 +38,18 @@ def enabled() -> bool:
     return os.environ.get("AGENT_FLUX_OPTIMIZE", "1").strip().lower() not in ("0", "false", "no", "off", "")
 
 
-def _system(ctx) -> str:
-    sk = ctx.skill(SKILL)
+def _system(ctx, mode: str = "flux") -> str:
+    skill, pass_name, rule_files = MODES[mode]
+    sk = ctx.skill(skill)
     rules = []
-    for name in RULE_FILES:
+    for name in rule_files:
         path = sk.root / "rules" / name
         if path.is_file():
             text = path.read_text(encoding="utf-8")
             text = re.sub(r"\A---.*?\n---\n", "", text, flags=re.S)
             rules.append(f"## FLUX 规则：{name}\n{text[:RULE_CHARS]}")
-    return build_system(sk, ["optimize-pass.md"], schema=False,
-                        extra="# FLUX 最佳实践（上游规则节选）\n\n" + "\n\n".join(rules))
+    extra = ("# FLUX 最佳实践（上游规则节选）\n\n" + "\n\n".join(rules)) if rules else ""
+    return build_system(sk, [pass_name], schema=False, extra=extra)
 
 
 def _problems(original: Dict[str, str], new: Dict[str, str], forbid: Iterable[str], must_keep: Iterable[str]) -> List[str]:
@@ -73,18 +79,19 @@ def _problems(original: Dict[str, str], new: Dict[str, str], forbid: Iterable[st
 
 
 def optimize_image(ctx, image: Dict[str, Any], *, kind: str, label: str,
-                   forbid: Iterable[str] = (), must_keep: Iterable[str] = ()) -> Dict[str, Any]:
+                   forbid: Iterable[str] = (), must_keep: Iterable[str] = (),
+                   mode: str = "flux", always: bool = False) -> Dict[str, Any]:
     """返回 image 字典的副本，prompt / sheet 已优化（失败则原样返回）。其他字段（negativePrompt、tags）不动。"""
-    if not enabled() or not isinstance(image, dict):
+    if not (always or enabled()) or not isinstance(image, dict):
         return image
     original = {f: image[f] for f in FIELDS if isinstance(image.get(f), str) and image[f].strip()}
     if not original:
         return image
     forbid = [n for n in forbid if n]
     must_keep = [m for m in must_keep if m]
-    digest = hashlib.sha1(json.dumps([kind, original, forbid, must_keep], ensure_ascii=False, sort_keys=True)
+    digest = hashlib.sha1(json.dumps([mode, kind, original, forbid, must_keep], ensure_ascii=False, sort_keys=True)
                           .encode("utf-8")).hexdigest()[:16]
-    cache: Path = ctx.work("flux") / f"{digest}.json"
+    cache: Path = ctx.work("flux" if mode == "flux" else mode) / f"{digest}.json"
     result = dict(image)
     if cache.is_file() and not ctx.force:
         try:
@@ -94,7 +101,7 @@ def optimize_image(ctx, image: Dict[str, Any], *, kind: str, label: str,
             pass
 
     try:
-        conv = Conversation(_system(ctx), ctx.settings)
+        conv = Conversation(_system(ctx, mode), ctx.settings)
     except SkillError as exc:
         ctx.log(f"⚠ FLUX 优化跳过（{exc}）")
         return image
@@ -120,10 +127,10 @@ def optimize_image(ctx, image: Dict[str, Any], *, kind: str, label: str,
                     result.update({f: new[f].strip() for f in original})
                     cache.write_text(json.dumps({f: result[f] for f in original}, ensure_ascii=False, indent=1),
                                      encoding="utf-8")
-                    ctx.log(f"[flux] {label}：提示词已优化")
+                    ctx.log(f"[{mode}] {label}：提示词已优化")
                     return result
             ask = "上一次输出没通过检查，逐条修改后重新只输出 JSON：\n- " + "\n- ".join(problems)
-        ctx.log(f"⚠ [flux] {label}：优化结果没过检查，保留原提示词（{'；'.join(problems)[:160]}）")
+        ctx.log(f"⚠ [{mode}] {label}：优化结果没过检查，保留原提示词（{'；'.join(problems)[:160]}）")
     except Exception as exc:  # noqa: BLE001 - 优化失败不拖垮流水线
-        ctx.log(f"⚠ [flux] {label}：优化调用失败，保留原提示词（{str(exc)[:160]}）")
+        ctx.log(f"⚠ [{mode}] {label}：优化调用失败，保留原提示词（{str(exc)[:160]}）")
     return image

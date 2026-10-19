@@ -62,6 +62,7 @@ class FakeModel:
             "novel-art/scene-pass.md": self._scene,
             "novel-art/prop-pass.md": self._prop,
             "flux-image-best-practices/optimize-pass.md": self._flux,
+            "video-wan-r2v/optimize-pass.md": self._flux,
             "novel-script/script-pass.md": self._script_ep,
             "novel-staging/read-pass.md": self._location,
             "novel-staging/staging-pass.md": self._staging_scenes,
