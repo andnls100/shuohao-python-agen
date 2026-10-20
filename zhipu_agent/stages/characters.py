@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -19,11 +20,12 @@ from ..image_prompt_optimizer import optimize_image
 from ..skill_loader import build_system
 from ..validator import NodeError, Result
 from ..visual_style import visual_style_instruction
-from .base import Context, Item, compact, no_validate, read_json, run_items, safe_name, write_json
+from .base import Context, Item, compact, no_validate, parallel_map, read_json, run_items, safe_name, write_json
 
 SKILL = "novel-characters"
 BUILTIN_LANGS = ("zh", "en", "ja")
 IMPORTANCE = ("protagonist", "major", "supporting", "minor")
+CARD_BATCH = 10  # 每次请求合并几个角色；环境变量 AGENT_CARD_BATCH 可改
 
 REVIEW_SYSTEM = """你在复核角色归并候选。脚本按名字精确收敛后，剩下一批"可能是同一个人"的候选。
 判断规则：名字有包含关系只是强信号，不是判决——同姓的父子、兄弟、同事不能合并；
@@ -157,52 +159,61 @@ def run(ctx: Context, max_chars: int = 30, visual_style: str = "manju") -> Path:
             encoding="utf-8",
         )
 
-    # ---------- 第二趟：出卡（整批合并优化）
+    # ---------- 第二趟：出卡（每 CARD_BATCH 个角色合并成一次请求；一批不合格只重来这一批）
     card_system = build_system(sk, ["profile-pass.md"])
     card_files: Dict[str, Path] = {
         target["name"]: work / f"card-{safe_name(target['name'])}.json"
         for target in cast_targets
     }
-    batch_parts: List[str] = []
+    # 名单之外的旧 card-*.json（已被合并 / 删掉的角色、旧版本的缓存）会被 assemble 一并读进去，先清掉
+    keep_files = set(card_files.values())
+    for stale in work.glob("card-*.json"):
+        if stale not in keep_files:
+            stale.unlink()
     lang_name = {"zh": "中文", "en": "English", "ja": "日本語"}[ctx.lang]
-    for index, target in enumerate(cast_targets, 1):
-        name = target["name"]
-        observed = _match_records(target, records) if seed else [r for r in records if r["name"] == name]
-        obs_text = (json.dumps(observed, ensure_ascii=False, indent=1) if observed
-                    else "（原文扫描里没有匹配到这个角色的记录，只能依据大纲；外观没有依据的地方明确标缺失，不要编造）")
-        seed_text = json.dumps(compact(target, 300), ensure_ascii=False, indent=1) if seed else "（无大纲，按原文拆分）"
-        batch_parts.append(
-            f"### 角色 {index}：{name}\n"
-            f"## 大纲里的定位（已拍板，不要推翻分档）\n{seed_text}\n\n"
-            f"## 原文观察记录与可引用的逐字片段\n{obs_text}\n"
+    size = max(1, int(os.environ.get("AGENT_CARD_BATCH", CARD_BATCH)))
+    batches = [cast_targets[i:i + size] for i in range(0, len(cast_targets), size)]
+    items: List[Item] = []
+    batch_names: Dict[str, List[str]] = {}
+    for number, group in enumerate(batches, 1):
+        parts: List[str] = []
+        group_names = [t["name"] for t in group]
+        for index, target in enumerate(group, 1):
+            name = target["name"]
+            observed = _match_records(target, records) if seed else [r for r in records if r["name"] == name]
+            obs_text = (json.dumps(observed, ensure_ascii=False, indent=1) if observed
+                        else "（原文扫描里没有匹配到这个角色的记录，只能依据大纲；外观没有依据的地方明确标缺失，不要编造）")
+            seed_text = json.dumps(compact(target, 300), ensure_ascii=False, indent=1) if seed else "（无大纲，按原文拆分）"
+            parts.append(
+                f"### 角色 {index}：{name}\n"
+                f"#### 大纲里的定位（已拍板，不要推翻分档）\n{seed_text}\n\n"
+                f"#### 原文观察记录与可引用的逐字片段\n{obs_text}\n"
+            )
+        others = [n for n in names if n not in group_names]
+        prompt = (
+            "## 任务\n"
+            f"一次性为下面这 {len(group)} 个角色产出完整角色卡，并在同一次生成中整体优化人物之间的差异性。\n"
+            "不要逐个角色单独套模板；先在这批角色之间建立区分，再分别完成每张卡。\n"
+            f"报告语言 lang = {ctx.lang}（{lang_name}）：人类可读字段用这个语言；出图和 TTS 提示词永远英文。\n\n"
+            f"## 视觉风格（image.prompt 必须遵守）\n{style_hint}\n\n"
+            f"## 本批角色名单\n{'、'.join(group_names)}\n\n"
+            f"## 其他批次的角色名（长相声线也要和他们区分开）\n{'、'.join(others) or '（无）'}\n\n"
+            "## 角色资料\n"
+            + "\n".join(parts)
+            + "\n## 输出\n"
+            "只输出 JSON 对象，结构为 {\"characters\":[...]}，数组中的每一项都是一张完整角色卡，且 name 必须与本批角色名单一一对应。\n"
+            "persona.evidence 里的引文必须逐字取自对应角色的可引用片段；image.prompt、image.promptLocal、image.sheet 等出图提示词不得出现任何角色名、别名、作者名或作品名。"
         )
+        key = f"characters-batch-{number}"
+        batch_names[key] = group_names
+        items.append(Item(
+            key, card_system, prompt,
+            tokens=[f"[{n}]" for n in group_names] + [f"card-{safe_name(n)}" for n in group_names] + group_names,
+            cache=work / f"cache-{key}-{visual_style}.json",
+        ))
 
-    batch_prompt = (
-        "## 任务\n"
-        f"一次性为下面全部 {len(cast_targets)} 个角色产出完整角色卡，并在同一次生成中整体优化人物之间的差异性。\n"
-        "不要逐个角色单独套模板；先在整批角色之间建立区分，再分别完成每张卡。\n"
-        f"报告语言 lang = {ctx.lang}（{lang_name}）：人类可读字段用这个语言；出图和 TTS 提示词永远英文。\n\n"
-        f"## 视觉风格（image.prompt 必须遵守）\n{style_hint}\n\n"
-        "## 同批角色名单\n"
-        f"{'、'.join(names) or '（无）'}\n\n"
-        "## 角色资料\n"
-        + "\n".join(batch_parts)
-        + "\n## 输出\n"
-        "只输出 JSON 对象，结构为 {\"characters\":[...]}，数组中的每一项都是一张完整角色卡，且 name 必须与上面的角色名单一一对应。\n"
-        "persona.evidence 里的引文必须逐字取自对应角色的可引用片段；image.prompt、image.promptLocal、image.sheet 等出图提示词不得出现任何角色名、别名、作者名或作品名。"
-    )
-
-    # 批量缓存：不再为每个角色保存一份模型原始输出。
-    batch_cache = work / f"cache-characters-batch-{visual_style}.json"
-    items = [Item(
-        "characters-batch",
-        card_system,
-        batch_prompt,
-        tokens=[f"[{name}]" for name in names] + [f"card-{safe_name(name)}" for name in names] + names,
-        cache=batch_cache,
-    )]
-
-    def _normalize_batch(data: Any) -> Dict[str, Any]:
+    def _normalize_batch(key: str, data: Any) -> List[Dict[str, Any]]:
+        expected_names = batch_names[key]
         if isinstance(data, dict) and isinstance(data.get("characters"), list):
             chars = data["characters"]
         elif isinstance(data, list):
@@ -211,18 +222,17 @@ def run(ctx: Context, max_chars: int = 30, visual_style: str = "manju") -> Path:
             chars = [data["character"]]
         else:
             raise ValueError("批量角色卡应当是 {\"characters\": [...]}")
-        if len(chars) != len(cast_targets):
-            raise ValueError(f"批量角色卡数量不正确：收到 {len(chars)} 张，应为 {len(cast_targets)} 张")
-        expected = set(names)
+        if len(chars) != len(expected_names):
+            raise ValueError(f"批量角色卡数量不正确：收到 {len(chars)} 张，应为 {len(expected_names)} 张")
         actual = [c.get("name") for c in chars if isinstance(c, dict)]
-        if len(actual) != len(chars) or set(actual) != expected or len(set(actual)) != len(actual):
-            raise ValueError("批量角色卡的 name 必须与目标角色一一对应且不能重复")
-        return {"characters": chars}
+        if len(actual) != len(chars) or set(actual) != set(expected_names) or len(set(actual)) != len(actual):
+            raise ValueError("批量角色卡的 name 必须与本批角色名单一一对应且不能重复")
+        return chars
 
     def apply_batch(key: str, data: Any) -> None:
-        normalized = _normalize_batch(data)
-        by_name = {card["name"]: card for card in normalized["characters"]}
-        for name in names:
+        by_name = {card["name"]: card for card in _normalize_batch(key, data)}
+        cards: Dict[str, Dict[str, Any]] = {}
+        for name in batch_names[key]:
             card = dict(by_name[name])
             seed_char = seed_by_name.get(name, {})
             card["name"] = name
@@ -234,10 +244,18 @@ def run(ctx: Context, max_chars: int = 30, visual_style: str = "manju") -> Path:
                     card["importance"] = wanted
             elif card.get("importance") not in IMPORTANCE:
                 card["importance"] = "minor"
-            # 角色卡生成已经合并为一次请求；这里保留独立的 FLUX 优化阶段。
-            names_ban = [name, *[a for a in card.get("aliases", []) if isinstance(a, str)]]
-            card["image"] = optimize_image(ctx, card.get("image"), kind="character", label=name, forbid=names_ban)
-            write_json(card_files[name], card)
+            cards[name] = card
+
+        def optimize(name: str) -> Any:
+            ban = [name, *[a for a in cards[name].get("aliases", []) if isinstance(a, str)]]
+            return optimize_image(ctx, cards[name].get("image"), kind="character", label=name, forbid=ban)
+
+        # 同批角色的 FLUX 优化并发跑（optimize_image 自己兜底，失败保留原提示词）
+        results = parallel_map(optimize, list(cards), ctx.settings.concurrency)
+        for name, image in zip(cards, results):
+            if not isinstance(image, Exception):
+                cards[name]["image"] = image
+            write_json(card_files[name], cards[name])
 
     def validate() -> Result:
         assembled = ctx.run(sk, ["assemble", work, "--source", ctx.title, "--lang", ctx.lang, "--out", cast_path])

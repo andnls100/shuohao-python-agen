@@ -51,6 +51,8 @@ def run_all(out: Path, fake: FakeModel):
 
 
 def test_pipeline_offline():
+    import os
+    os.environ["AGENT_CARD_BATCH"] = "2"
     out = Path(tempfile.mkdtemp(prefix="agent-test-"))
     try:
         fake = FakeModel(break_script_ep=2, break_cast_name="沈知微")
@@ -74,7 +76,9 @@ def test_pipeline_offline():
         assert all(v == 1 for k, v in script_calls.items() if k != "2"), f"其他集不应重跑：{script_calls}"
         card_calls = {k[1]: v for k, v in fake.calls.items() if k[0] == "novel-characters/profile-pass.md"}
         assert card_calls["沈知微"] == 2, f"沈知微的卡应回炉一次，实际 {card_calls}"
-        assert all(v == 1 for k, v in card_calls.items() if k != "沈知微"), f"其他角色不应重跑：{card_calls}"
+        # 角色卡按批生成（本测试每批 2 个）：不合格的那一批整批回炉，其他批不重跑
+        assert any(v == 1 for k, v in card_calls.items() if k != "沈知微"), f"其他批的角色不应重跑：{card_calls}"
+        assert sum(1 for v in card_calls.values() if v == 2) <= 2, f"回炉只应发生在沈知微所在的那一批：{card_calls}"
 
         # 3) 报告和导出
         assert (out / "outline" / "outline-report.html").is_file()

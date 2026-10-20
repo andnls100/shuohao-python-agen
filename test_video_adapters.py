@@ -192,7 +192,7 @@ class ImageToVideoTest(unittest.TestCase):
             build_request({"adapter": "aliyun_wan", "VIDEO_API_MODEL": "m"},
                           {"prompt": "p", "duration_seconds": 5, "images": ["x"]}, {})
         with tempfile.TemporaryDirectory() as tmp:
-            bad = Path(tmp) / "a.webp"
+            bad = Path(tmp) / "a.gif"
             bad.write_bytes(b"x")
             with self.assertRaises(ValueError):
                 encode_image(bad)

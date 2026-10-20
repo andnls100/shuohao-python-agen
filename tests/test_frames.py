@@ -89,7 +89,7 @@ class FramesTest(unittest.TestCase):
         server = HTTPServer(("127.0.0.1", 0), _Handler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         provider = [{"name": "p", "url": f"http://127.0.0.1:{server.server_port}/gen", "api_key": "k", "model": "m",
-                     "size": "1536x1024", "sizes": {"9:16": "1024x1536"}, "quality": None, "timeout": 10,
+                     "adapter": "openai", "size": "1536x1024", "sizes": {"9:16": "1024x1536"}, "quality": None, "timeout": 10,
                      "reference_field": "image", "reference_style": "list", "image_encoding": "data_uri",
                      "max_references": 4, "request_template": None, "headers": {}}]
         try:

@@ -274,3 +274,7 @@ f<切序> 就是该段第几个分镜；视频阶段首帧直接读这里。
 ==== 批量优化提示词命令 ====
 python run_agent.py run --stages optimize --optimize-mode flux|wan|both [--optimize-kinds characters,scenes,props] [--optimize-only 名字或编号,...]
 结果：output/prompts/<书名>-<characters|scenes|props>-<flux|wan>.json，不改 cast.json / art.json。wan 的写法依据公开的 Wan 提示词公式，不是上游仓库原文。
+
+==== 角色卡分批生成 ====
+characters 阶段每 10 个角色合并成一次请求（环境变量 AGENT_CARD_BATCH 可改，设 1 即逐个角色）；一批不合格只重来这一批。同批的 FLUX 提示词优化并发执行；出卡前会清掉名单之外的旧 card-*.json。
+视频：cogvideox_zhipu 适配器按 model 分流：model=vidu2-reference 走参考生视频；其他（如 cogvideox-3）走文生 / 图生 / 首尾帧。

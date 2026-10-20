@@ -113,7 +113,12 @@ class FakeModel:
         ]}
 
     def _card(self, user, is_fix, passname):
-        name = re.search(r"为角色「(.+?)」产出", user).group(1)
+        if "一次性为下面这" in user:  # 批量出卡：按 "### 角色 N：名字" 逐个造卡
+            names = re.findall(r"^### 角色 \d+：(.+)$", user, re.M)
+            return {"characters": [self._one_card(n, is_fix, passname) for n in names]}
+        return self._one_card(re.search(r"为角色「(.+?)」产出", user).group(1), is_fix, passname)
+
+    def _one_card(self, name, is_fix, passname):
         self._count(passname, name)
         by_name = {c["name"]: c for c in self.cast["characters"]}
         if name in by_name:

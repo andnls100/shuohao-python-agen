@@ -28,6 +28,7 @@ def _render(value: Any, context: dict) -> Any:
 
 COGVIDEOX_PROMPT_LIMIT = 512
 COGVIDEOX_SIZES = ("1280x720",)
+COGVIDEOX_ALL_SIZES = ("1280x720", "720x1280", "1024x1024", "1920x1080", "1080x1920", "2048x1080", "3840x2160")  # CogVideoX-3
 COGVIDEOX_REFERENCE_RATIOS = ("16:9", "9:16", "1:1")
 COGVIDEOX_MOVEMENTS = ("auto", "small", "medium", "large")
 
@@ -170,13 +171,40 @@ def build_request(provider: dict, item: dict, manifest: dict) -> dict:
     }
 
     images = list(item.get("images") or [])
-    is_wan_r2v = adapter == "aliyun_wan" and "wan_r2v" in str(context["model"]).lower()
-    #if images and adapter != "cogvideox_zhipu" and not is_wan_r2v:
-        #raise ValueError(f"适配器 {adapter!r} 暂未支持图生视频；目前只有 cogvideox_zhipu 支持")
+    # 判定要和下面 aliyun_wan 分支一致：provider.mode == r2v，或模型名里带 r2v（如 wan2.7-r2v）
+    is_wan_r2v = adapter == "aliyun_wan" and (
+        str(provider.get("mode") or "").lower() == "r2v" or "r2v" in str(context["model"]).lower())
+    if images and adapter != "cogvideox_zhipu" and not is_wan_r2v:
+        raise ValueError(f"适配器 {adapter!r} 暂未支持图生视频；目前只有 cogvideox_zhipu 和 Wan R2V 支持")
 
-    if adapter == "cogvideox_zhipu":
-        if str(context["model"]).strip() != "vidu2-reference":
-            raise ValueError("CogVideoX-3 参考生视频必须使用 model=vidu2-reference")
+    if adapter == "cogvideox_zhipu" and str(context["model"]).strip() != "vidu2-reference":
+        # CogVideoX-3（文生 / 图生 / 首尾帧）：按分镜时长取 5 或 10 秒
+        duration = 5 if float(item["duration_seconds"]) <= 5 else 10
+        ratio = context["aspect_ratio"]
+        size = provider.get("size") or ("1920x1080" if ratio == "16:9" else "1080x1920" if ratio == "9:16" else "1024x1024")
+        if size not in COGVIDEOX_ALL_SIZES:
+            raise ValueError(f"CogVideoX-3 size 必须是 {', '.join(COGVIDEOX_ALL_SIZES)} 之一，当前为 {size!r}")
+        quality = provider.get("quality", "quality")
+        if isinstance(quality, bool):
+            quality = "quality" if quality else "speed"
+        if quality not in ("quality", "speed"):
+            raise ValueError("CogVideoX-3 quality 必须为 'quality' 或 'speed'")
+        body = {
+            "model": context["model"], "prompt": fit_cogvideox_prompt(context["prompt"]),
+            "duration": duration, "size": size, "quality": quality,
+            "with_audio": bool(provider.get("with_audio", True)), "fps": int(provider.get("fps", 30)),
+        }
+        if images:
+            if len(images) > 2:
+                raise ValueError("CogVideoX-3 最多传 2 张图（首帧、尾帧）")
+            body["image_url"] = images[0] if len(images) == 1 else images
+            if len(images) == 2:
+                body["quality"] = "speed"
+            if not provider.get("size"):
+                body.pop("size")
+        return body
+
+    if adapter == "cogvideox_zhipu":  # model=vidu2-reference：参考生视频（1–3 张参考图）
         prompt = fit_cogvideox_prompt(context["prompt"])
         if not prompt and not item.get("reference_assets"):
             raise ValueError("CogVideoX-3 参考生视频必须提供 prompt 或 image_url")

@@ -15,8 +15,9 @@ from zhipu_agent.image_prompt_optimizer import optimize_image  # noqa: E402
 from zhipu_agent.config import load_settings  # noqa: E402
 from zhipu_agent.stages.base import Context  # noqa: E402
 
-SHEET = ("Single character model sheet on ONE 16:9 landscape canvas, bust on the left, front, side and back "
-         "full-body views on the right, plain white background, thin dividing lines.")
+SHEET = ("Single character model sheet on ONE 16:9 landscape canvas. LEFT ZONE about 34% of the width: bust portrait. "
+         "RIGHT-TOP ZONE: three full-body views, front, side and back. RIGHT-BOTTOM ZONE: detail studies. "
+         "Plain white background, thin hairline rules.")
 IMAGE = {"prompt": "A lean ferryman in a patched indigo jacket, weathered face, standing on a wet dock at dawn.",
          "sheet": SHEET, "negativePrompt": "extra fingers", "tags": ["ferryman"]}
 
@@ -58,6 +59,19 @@ class OptimizeImage(unittest.TestCase):
         self.assertEqual(out["negativePrompt"], "extra fingers")
         self.assertEqual(out["tags"], ["ferryman"])
         self.assertEqual(IMAGE["prompt"], "A lean ferryman in a patched indigo jacket, weathered face, standing on a wet dock at dawn.")
+
+    def test_character_without_sheet_gets_a_multi_view_sheet(self):
+        image = {"prompt": IMAGE["prompt"], "negativePrompt": "x"}
+        new = {"prompt": image["prompt"] + " Soft side light.", "sheet": SHEET + " Even studio light."}
+        self.backend([json.dumps(new)])
+        out = optimize_image(make_ctx(self.tmp), image, kind="character", label="x")
+        self.assertEqual(out["sheet"], new["sheet"])
+
+    def test_character_sheet_missing_zone_is_rejected(self):
+        bad = {"prompt": IMAGE["prompt"] + " Soft side light.", "sheet": SHEET.replace("RIGHT-TOP ZONE", "top right") + " Even light."}
+        self.backend([json.dumps(bad)])
+        out = optimize_image(make_ctx(self.tmp), IMAGE, kind="character", label="x")
+        self.assertEqual(out, IMAGE)
 
     def test_bad_output_is_retried_then_falls_back(self):
         bad = json.dumps({"prompt": "老周 standing", "sheet": "short"})
