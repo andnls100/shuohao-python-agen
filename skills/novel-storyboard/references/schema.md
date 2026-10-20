@@ -35,6 +35,19 @@
 | `music` | string | **Seedance 用的配乐**（中文），写配器与速度。没有就省略这个字段。程序套上 `（）` |
 | `note` | string | 备注，可选 |
 
+## 连续性字段（建议所有新分镜必填）
+
+segment 可带 `continuityMode`：`continuous` 表示承接前段状态，`hard_cut` 表示剧情要求重置。cut 可带：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `continuity.mode` | enum | `inherit`（承接上一切/上一段末帧）或 `cut`（有意硬切） |
+| `continuity.stateBefore` | string | 当前镜开始时角色位置、朝向、姿势、服装、道具、伤势与关键物件位置 |
+| `continuity.stateAfter` | string | 当前镜结束时的可见状态，下一连续镜必须继承 |
+| `continuity.referenceFrame` | string | 上一帧文件标识；同段通常为上一切帧，跨段连续时为前段末帧；硬切可为空 |
+
+这组字段不替代 `frame`/设定图：它是显式的状态转移合同，避免模型每切重新发明人物站位、手持物和动作结果。当前镜 `frame` 管静态构图，`shot` 管动作过程与运镜。旧 storyboard 缺少这些字段仍可读取；新生成应提供。
+
 ## cut（分镜）
 
 | 字段 | 类型 | 说明 |
