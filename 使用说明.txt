@@ -284,3 +284,10 @@ frames 阶段的参考图顺序：角色设定图 → 场景设定图 → 道具
 上一镜参考帧只在 cut.continuity.mode == "inherit" 时加入：同段取上一切；段首取前一段末切（该段 continuityMode 为 hard_cut 时不取）；continuity.referenceFrame 写了已知分镜编号则以它为准。旧分镜没有 continuity 字段时不引用。
 名额不够时先舍弃道具、场景，保留角色和上一镜参考帧。上一镜必须先有图：整段 / 整集按顺序出图会自动用刚出的图；单独出某一镜而上一镜还没图时，本张不用并在清单的 missing_references 里提示。
 提示词里说明：上一镜参考帧只用来继承人物身份、服装、姿态、道具持握和空间关系，本镜机位仍以 frame 为准。
+
+==== 分镜图提示词：英文改写 / 固定结尾 / 镜头信息 ====
+frames 阶段出图那一刻（--frames-gen）：
+1. 把中文 frame + 镜头信息（景别 size、焦距景深 lens、机位 cameraPosition、构图 composition、视线 eyeline、焦点 focus、cut.continuity.stateBefore 位置状态、段内 blocking 走位）交给 models.json 的 text 模型，改写成一条英文提示词；参考图说明也用英文（"Image 1 is the character sheet of 「名字」 …"）。有参考图的角色保留原名（指向对应参考图），没有参考图的角色用外貌描述代替名字。
+2. 改写结果缓存在 output/work/frames-en/，清单里 frame_en 记录英文版，prompt_sent 记录实际发出的提示词。
+3. 改写失败 / 没配 text 模型 / 结果混有中文：自动退回中文 frame，并把镜头信息追加成中文一行（"镜头信息：景别：…"）。AGENT_FRAME_EN=0 可关闭改写。
+4. 无论哪种，提示词末尾都统一追加固定句：No text, no watermark, no borders — a single clean full-bleed frame.

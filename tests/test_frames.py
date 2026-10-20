@@ -59,7 +59,11 @@ def make_ctx(tmp: str, with_assets=True):
             {"kind": "prop", "name": "信", "asset_id": "P001", "output_path": "images/props/p.png"}]}
         (out / "images" / "image-manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
     paths = {"storyboard": out / "storyboard" / "T-storyboard.json", "script": out / "script" / "T-script.json"}
-    return SimpleNamespace(out=out, title="T", force=False, artifact=lambda n: paths[n], log=lambda m: None)
+    def work(name):
+        (out / "work" / name).mkdir(parents=True, exist_ok=True)
+        return out / "work" / name
+    return SimpleNamespace(out=out, title="T", force=False, artifact=lambda n: paths[n], log=lambda m: None,
+                           work=work, settings=None)
 
 
 class FramesTest(unittest.TestCase):
@@ -202,6 +206,78 @@ class FramesTest(unittest.TestCase):
         finally:
             server.shutdown()
             server.server_close()
+
+    def _generate_one(self, ctx, only, fake_text, board_patch=None):
+        server = HTTPServer(("127.0.0.1", 0), _Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        provider = [{"name": "p", "url": f"http://127.0.0.1:{server.server_port}/gen", "api_key": "k", "model": "m",
+                     "adapter": "openai", "size": "1536x1024", "sizes": {}, "quality": None, "timeout": 10,
+                     "reference_field": "image", "reference_style": "list", "image_encoding": "data_uri",
+                     "max_references": 4, "request_template": None, "headers": {}}]
+        try:
+            _Handler.bodies.clear()
+            with mock.patch.object(frames, "_providers", return_value=provider), \
+                 mock.patch.object(frames, "ask_text", side_effect=fake_text) as ask:
+                frames.run(ctx, generate=True, only=only)
+            return list(_Handler.bodies), ask
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def _add_shot_fields(self, ctx):
+        path = ctx.out / "storyboard" / "T-storyboard.json"
+        board = json.loads(path.read_text(encoding="utf-8"))
+        seg = board["episodes"][0]["segments"][0]
+        seg["blocking"] = "徐今朝在画面左，门在右"
+        seg["cuts"][0].update({"size": "中景", "lens": "50mm 标准，中浅景深", "cameraPosition": "徐今朝 + 平视正面",
+                               "composition": "三分法", "eyeline": "看向门外", "focus": "锁定徐今朝上半身",
+                               "continuity": {"mode": "cut", "stateBefore": "徐今朝刚站到门口"}})
+        path.write_text(json.dumps(board, ensure_ascii=False), encoding="utf-8")
+
+    def test_english_prompt_with_english_header_and_fixed_ending(self):
+        english = "Medium shot of 徐今朝 standing in a doorway, soft overcast light, 50mm lens, rule of thirds."
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = make_ctx(tmp)
+            self._add_shot_fields(ctx)
+            bodies, ask = self._generate_one(ctx, ["E01-01-C01"], lambda *a, **k: english)
+            sent = bodies[0]["prompt"]
+            self.assertTrue(sent.startswith("Reference images: Image 1 is the character sheet of 「徐今朝」"))
+            self.assertIn("Image 2 is the scene sheet of", sent)
+            self.assertIn(english, sent)
+            self.assertTrue(sent.rstrip().endswith(frames.FIXED_END))
+            system, user = ask.call_args[0][0], ask.call_args[0][1]
+            self.assertIn("50mm 标准", user)                       # 景别 / 焦距 / 机位 / 构图都交给了改写
+            self.assertIn("徐今朝刚站到门口", user)                  # 此刻位置状态
+            self.assertIn("徐今朝在画面左", user)                    # 段内走位
+            items = json.loads(frames.artifact(ctx).read_text(encoding="utf-8"))["items"]
+            self.assertEqual(items[0]["frame_en"], english)
+            cached = list((ctx.out / "work" / "frames-en").glob("E01-01-C01-*.txt"))   # 改写结果有缓存，续跑不重复花额度
+            self.assertEqual(len(cached), 1)
+            self.assertEqual(cached[0].read_text(encoding="utf-8"), english)
+
+    def test_english_failure_falls_back_to_chinese_with_camera_info_and_fixed_ending(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = make_ctx(tmp)
+            self._add_shot_fields(ctx)
+            bodies, _ = self._generate_one(ctx, ["E01-01-C01"], RuntimeError("没有配置文本模型"))
+            sent = bodies[0]["prompt"]
+            self.assertTrue(sent.startswith("参考图说明：图1是角色「徐今朝」"))
+            self.assertIn("镜头信息：景别：中景；焦距景深：50mm 标准，中浅景深；机位：徐今朝 + 平视正面", sent)
+            self.assertIn("此刻人物状态：徐今朝刚站到门口", sent)
+            self.assertTrue(sent.rstrip().endswith(frames.FIXED_END))
+
+    def test_english_result_with_chinese_leftovers_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = make_ctx(tmp)
+            bodies, _ = self._generate_one(ctx, ["E01-01-C01"], lambda *a, **k: "A man 站在 door 前")
+            self.assertTrue(bodies[0]["prompt"].startswith("参考图说明："))
+
+    def test_english_conversion_can_be_switched_off(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict("os.environ", {"AGENT_FRAME_EN": "0"}):
+            ctx = make_ctx(tmp)
+            bodies, ask = self._generate_one(ctx, ["E01-01-C01"], lambda *a, **k: "never used")
+            ask.assert_not_called()
+            self.assertTrue(bodies[0]["prompt"].rstrip().endswith(frames.FIXED_END))
 
     def test_unknown_only_and_request_shapes(self):
         with tempfile.TemporaryDirectory() as tmp:

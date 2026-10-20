@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -21,11 +22,31 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..llm import ask_text
 from ..validator import Result
 from .base import Context, read_json, safe_name, write_json
 from .images import _download_image, _extension, _find_image_payload
 from .video_adapters import _render
 
+# 分镜图提示词末尾固定一句（novel-storyboard/references/frame.md）：不写这句，模型会照着设定图的分隔线画边框
+FIXED_END = "No text, no watermark, no borders — a single clean full-bleed frame."
+KIND_ROLE_EN = {
+    "character": "character sheet (match face, hair and clothing)",
+    "scene": "scene sheet (match spatial layout, materials and light)",
+    "prop": "prop sheet (match shape and details)",
+    "previous": "previous frame (inherit only identity, clothing, pose, prop-holding and spatial relations; "
+                "composition and camera follow this shot's description, do not copy the previous camera)",
+}
+SHOT_FIELDS = (("size", "景别"), ("lens", "焦距景深"), ("cameraPosition", "机位"), ("composition", "构图"),
+               ("eyeline", "视线落点"), ("focus", "焦点"))
+FRAME_EN_SYSTEM = """你是分镜图提示词工程师。把输入里的中文分镜信息改写成一条给图像模型的英文提示词。
+要求：
+1. 只输出这一条英文提示词，一段话，60–120 词，不要解释、不要引号、不要换行。
+2. 语序：主体与此刻的位置状态 → 动作的瞬间 → 景别、焦距、机位 → 构图、视线、焦点 → 环境与光线。
+3. 只写正向描述（写要什么，不写"不要什么"）；自然语言连贯成句，不堆关键词。
+4. 「有参考图的角色」保持输入里的名字原样（它指向对应的参考图）；「没有参考图的角色」不写名字，用输入里能看到的外貌 / 身份描述代替。
+5. 不增删信息：不改人物数量、位置、动作、道具；不编造输入里没有的物件；不写画风词（画风由参考图决定）。
+6. 不要写 "No text / no watermark" 这类结尾句，程序会统一追加。"""
 PRINT_FRAME_REQUEST = True          # 打印出图请求（参考图只显示数量和文件名，不打印 Base64）
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
 KIND_LABEL = {"character": "角色", "scene": "场景", "prop": "道具", "previous": "上一镜参考帧"}
@@ -262,6 +283,79 @@ def _references(ctx: Context, ep: int, segment: dict, cut: dict, assets: dict, s
     return refs, missing
 
 
+def _shot_info(segment: dict, cut: dict) -> dict:
+    """出图提示词用得上的镜头信息：景别、焦距景深、机位、构图、视线、焦点、起始位置状态、段内人物走位。"""
+    info = {key: str(cut[key]).strip() for key, _ in SHOT_FIELDS if str(cut.get(key) or "").strip()}
+    state = str((cut.get("continuity") or {}).get("stateBefore") or "").strip()
+    if state:
+        info["stateBefore"] = state
+    blocking = str(segment.get("blocking") or "").strip()
+    if blocking:
+        info["blocking"] = blocking
+    return info
+
+
+def _camera_text_cn(info: dict) -> str:
+    parts = [f"{label}：{info[key]}" for key, label in SHOT_FIELDS if info.get(key)]
+    if info.get("stateBefore"):
+        parts.append(f"此刻人物状态：{info['stateBefore']}")
+    return "镜头信息：" + "；".join(parts) + "。" if parts else ""
+
+
+def _reference_header_en(refs: List[dict]) -> str:
+    if not refs:
+        return ""
+    parts = []
+    for r in refs:
+        what, _, rule = KIND_ROLE_EN[r["kind"]].partition(" (")
+        parts.append(f"Image {r['no']} is the {what} of 「{r['name']}」" + (f" ({rule}" if rule else ""))
+    return ("Reference images: " + "; ".join(parts) + ". Keep people and layout consistent with the references; "
+            "add no extra people.\n\n")
+
+
+def _english_frame(ctx: Context, item: dict, refs: List[dict]) -> Optional[str]:
+    """用 models.json 的 text 模型把中文 frame + 镜头信息改写成英文出图提示词；失败（或关闭）返回 None，调用方退回中文。
+    结果按输入内容缓存在 output/work/frames-en/，续跑不重复花额度。关闭：AGENT_FRAME_EN=0。"""
+    if os.environ.get("AGENT_FRAME_EN", "1").strip().lower() in ("0", "false", "no", "off"):
+        return None
+    info = item.get("shot_info") or {}
+    named = [r["name"] for r in refs if r["kind"] == "character"]
+    payload = {"frame": item["frame"], "shot": {k: v for k, v in info.items() if k != "blocking"},
+               "segment_blocking": info.get("blocking", ""),
+               "characters_with_reference_image": named,
+               "characters_without_reference_image": [n for n in item.get("characters", []) if n not in named]}
+    user = json.dumps(payload, ensure_ascii=False, indent=1)
+    digest = hashlib.sha256((FRAME_EN_SYSTEM + user).encode("utf-8")).hexdigest()[:16]
+    cache = ctx.work("frames-en") / f"{safe_name(item['id'])}-{digest}.txt"
+    if cache.is_file() and not ctx.force:
+        text = cache.read_text(encoding="utf-8").strip()
+        if text:
+            return text
+    try:
+        text = " ".join(ask_text(FRAME_EN_SYSTEM, user, ctx.settings).split())
+    except Exception as exc:  # noqa: BLE001 - 没配 text 模型 / 调用失败：退回中文，不拖垮出图
+        ctx.log(f"⚠ {item['id']}: 英文提示词转换失败，改用中文原文（{str(exc)[:120]}）")
+        return None
+    leftover = text
+    for name in named:  # 有参考图的角色名按约定保留原样
+        leftover = leftover.replace(name, "")
+    if not text or any("\u4e00" <= ch <= "\u9fff" for ch in leftover):
+        ctx.log(f"⚠ {item['id']}: 英文提示词里混有中文，改用中文原文")
+        return None
+    cache.write_text(text, encoding="utf-8")
+    return text
+
+
+def _final_prompt(ctx: Context, item: dict, refs: List[dict], chinese_prompt: str) -> tuple[str, Optional[str]]:
+    """最终发给出图模型的提示词。返回 (提示词, 英文版或 None)。
+    有英文版：英文参考图说明 + 英文提示词 + 固定结尾句；否则：中文说明 + 中文 frame + 镜头信息 + 固定结尾句。"""
+    english = _english_frame(ctx, item, refs)
+    if english:
+        return f"{_reference_header_en(refs)}{english}\n\n{FIXED_END}", english
+    extra = _camera_text_cn(item.get("shot_info") or {})
+    return "\n\n".join(x for x in (chinese_prompt, extra, FIXED_END) if x), None
+
+
 def _reference_header(refs: List[dict]) -> str:
     if not refs:
         return ""
@@ -400,6 +494,8 @@ def run(ctx: Context, eps: Optional[list] = None, generate: bool = False,
         segment, cut = task.pop("_segment"), task.pop("_cut")
         prev = task.pop("_prev", None)
         task.pop("_first_in_segment", None)
+        task["shot_info"] = _shot_info(segment, cut)
+        task["characters"] = [str(n) for n in (cut.get("characters") or [])]
         refs, missing = _references(ctx, task["ep"], segment, cut, assets, scene_ids, limit, prev)
         prompt = _reference_header(refs) + task["frame"]
         digest = hashlib.sha256((prompt + json.dumps([r["path"] for r in refs])).encode("utf-8")).hexdigest()
@@ -444,6 +540,8 @@ def run(ctx: Context, eps: Optional[list] = None, generate: bool = False,
         write_json(path, manifest)
         failures: List[str] = []
         refs_now, prompt_now = _resolve_previous(ctx, item, entry)
+        prompt_now, frame_en = _final_prompt(ctx, item, refs_now, prompt_now)
+        entry["prompt_sent"], entry["frame_en"] = prompt_now, frame_en
         for provider in providers:
             try:
                 files = [ctx.out / r["path"] for r in refs_now[:provider["max_references"]]]
