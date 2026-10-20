@@ -23,6 +23,10 @@
 
 提示词开头明说每张参考图的用途（which is the environment / whose face to match / which prop to match），别让模型猜。
 
+## 连续镜头的上一帧参考
+
+若分镜的 `continuity.mode=inherit`，下游出图应把 `continuity.referenceFrame` 指向的上一帧作为额外参考图，并在提示词中说明它只用于继承人物身份、服装、姿态、道具持握和空间关系；当前镜头的 `frame` 仍决定本帧构图，不要盲目复制上一帧的机位。反打、特写或明确硬切时按当前构图设计，不应强制沿用上一帧。跨段连续动作同样适用：上一段最后一帧可以作为下一段首帧的姿态/位置锚点。
+
 ## 提示词末尾固定一句
 
 `No text, no watermark, no borders — a single clean full-bleed frame.`
