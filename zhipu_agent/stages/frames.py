@@ -440,16 +440,39 @@ def run(ctx: Context, eps: Optional[list] = None, generate: bool = False,
                 files = [ctx.out / r["path"] for r in refs_now[:provider["max_references"]]]
                 size = _size_for(provider, ratio)
                 if provider["adapter"] == "modelscope":
-                    data = _modelscope_generate(provider, prompt_now, refs_now, files, size)
+                    # ModelScope 的 payload 在 _modelscope_generate 内部组装；此处先打印可读参数。
                     body = None
+                    if PRINT_FRAME_REQUEST:
+                        cfg = provider.get("raw") or {}
+                        ctx.log(f"分镜图 {item['id']} | 平台={provider['name']} | 模型={provider['model']} | "
+                                f"适配器=modelscope | 尺寸={size}")
+                        ctx.log("完整生图提示词（含参考图说明）：" + prompt_now)
+                        ctx.log("请求参数：" + json.dumps({
+                            "prompt": prompt_now,
+                            "negative_prompt": str(cfg.get("negative_prompt") or ""),
+                            "image_size": size,
+                            "num_images": 1,
+                            "reference_images": [
+                                {"kind": r.get("kind"), "name": r.get("name"), "path": str(f),
+                                 "encoding": "data_uri", "content": f"<图片数据，{f.stat().st_size} 字节>"}
+                                for r, f in zip(refs_now[:provider["max_references"]], files)
+                            ],
+                            "ref_weight": float(cfg.get("ref_weight", 0.68)),
+                        }, ensure_ascii=False, indent=2))
+                    data = _modelscope_generate(provider, prompt_now, refs_now, files, size)
                 else:
                     images = [_encode(f, provider["image_encoding"]) for f in files]
                     body = build_request(provider, prompt_now, size, images)
-                if PRINT_FRAME_REQUEST:
-                    ctx.log(f"分镜图 {item['id']} | 平台={provider['name']} | 模型={provider['model']} | 尺寸={size} | "
-                            f"参考图={[Path(r['path']).name for r in refs_now[:provider['max_references']]]}")
-                    if body is not None:
-                        ctx.log("请求体：" + json.dumps(_redacted(body), ensure_ascii=False))
+                    if PRINT_FRAME_REQUEST:
+                        ctx.log(f"分镜图 {item['id']} | 平台={provider['name']} | 模型={provider['model']} | "
+                                f"适配器={provider['adapter']} | 尺寸={size}")
+                        ctx.log("完整生图提示词（含参考图说明）：" + prompt_now)
+                        ctx.log("参考图：" + json.dumps([
+                            {"编号": r.get("no"), "类型": KIND_LABEL.get(r.get("kind"), r.get("kind")),
+                             "名称": r.get("name"), "路径": r.get("path")}
+                            for r in refs_now[:provider["max_references"]]
+                        ], ensure_ascii=False))
+                        ctx.log("请求参数：" + json.dumps(_redacted(body), ensure_ascii=False, indent=2))
                 if provider["adapter"] != "modelscope":
                     result = _post(provider, body)
                     b64, url = _find_image_payload(result)
