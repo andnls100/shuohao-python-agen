@@ -47,7 +47,7 @@ def _providers() -> List[dict]:
       reference_field   参考图放在请求体的哪个字段，默认 "image"
       reference_style   list（字符串数组，默认）| single（只传第 1 张）| objects（[{"image_url": ...}]）
       image_encoding    data_uri（默认）| base64
-      max_references    最多传几张参考图，默认 4
+      max_references    最多传几张参考图，默认 10
       request_template  请求体结构特殊时整体指定，可用 {{model}} {{prompt}} {{size}} {{quality}} {{images}} {{image}}
       headers           额外请求头
     """
@@ -66,7 +66,7 @@ def _providers() -> List[dict]:
             "sizes": entry.get("sizes") if isinstance(entry.get("sizes"), dict) else {},
             "reference_field": str(entry.get("reference_field") or "image"),
             "reference_style": style, "image_encoding": encoding,
-            "max_references": max(0, int(entry.get("max_references", 4))),
+            "max_references": max(0, int(entry.get("max_references", 10))),
             "request_template": entry.get("request_template"),
             "headers": entry.get("headers") if isinstance(entry.get("headers"), dict) else {},
             "adapter": str(entry.get("adapter") or "openai_image").strip().lower(),
