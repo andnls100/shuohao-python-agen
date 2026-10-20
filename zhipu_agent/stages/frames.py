@@ -114,8 +114,17 @@ def _post(provider: dict, body: dict) -> dict:
     try:
         with urllib.request.urlopen(req, timeout=provider["timeout"]) as response:
             raw = response.read()
+            if PRINT_FRAME_REQUEST:
+                try:
+                    response_text = raw.decode("utf-8", "replace")
+                except Exception:
+                    response_text = repr(raw[:1000])
+                print(f"[分镜图 API 返回] HTTP {response.status} | 平台={provider.get('name')} | 模型={provider.get('model')}\\n{response_text}", flush=True)
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"HTTP {exc.code}: {exc.read().decode('utf-8', 'replace')[:700]}") from exc
+        error_body = exc.read().decode("utf-8", "replace")
+        if PRINT_FRAME_REQUEST:
+            print(f"[分镜图 API 错误返回] HTTP {exc.code} | 平台={provider.get('name')} | 模型={provider.get('model')}\\n{error_body[:5000]}", flush=True)
+        raise RuntimeError(f"HTTP {exc.code}: {error_body[:700]}") from exc
     except (urllib.error.URLError, TimeoutError) as exc:
         raise RuntimeError(f"网络请求失败：{exc}") from exc
     try:
