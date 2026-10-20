@@ -278,3 +278,9 @@ python run_agent.py run --stages optimize --optimize-mode flux|wan|both [--optim
 ==== 角色卡分批生成 ====
 characters 阶段每 10 个角色合并成一次请求（环境变量 AGENT_CARD_BATCH 可改，设 1 即逐个角色）；一批不合格只重来这一批。同批的 FLUX 提示词优化并发执行；出卡前会清掉名单之外的旧 card-*.json。
 视频：cogvideox_zhipu 适配器按 model 分流：model=vidu2-reference 走参考生视频；其他（如 cogvideox-3）走文生 / 图生 / 首尾帧。
+
+==== 分镜图：上一镜参考帧 ====
+frames 阶段的参考图顺序：角色设定图 → 场景设定图 → 道具设定图 → 上一镜参考帧，提示词里写"图N是…"。
+上一镜参考帧只在 cut.continuity.mode == "inherit" 时加入：同段取上一切；段首取前一段末切（该段 continuityMode 为 hard_cut 时不取）；continuity.referenceFrame 写了已知分镜编号则以它为准。旧分镜没有 continuity 字段时不引用。
+名额不够时先舍弃道具、场景，保留角色和上一镜参考帧。上一镜必须先有图：整段 / 整集按顺序出图会自动用刚出的图；单独出某一镜而上一镜还没图时，本张不用并在清单的 missing_references 里提示。
+提示词里说明：上一镜参考帧只用来继承人物身份、服装、姿态、道具持握和空间关系，本镜机位仍以 frame 为准。

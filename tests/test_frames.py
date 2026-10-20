@@ -114,6 +114,95 @@ class FramesTest(unittest.TestCase):
             server.shutdown()
             server.server_close()
 
+    def _inherit_board(self, ctx, *, second_mode="inherit", segment_mode=None):
+        path = ctx.out / "storyboard" / "T-storyboard.json"
+        board = json.loads(path.read_text(encoding="utf-8"))
+        cuts = board["episodes"][0]["segments"][0]["cuts"]
+        cuts[1]["continuity"] = {"mode": second_mode, "referenceFrame": "E01-01-C01"}
+        nxt = board["episodes"][0]["segments"][1]
+        nxt["cuts"][0]["continuity"] = {"mode": "inherit"}
+        if segment_mode:
+            nxt["continuityMode"] = segment_mode
+        path.write_text(json.dumps(board, ensure_ascii=False), encoding="utf-8")
+
+    def test_inherit_cut_gets_previous_frame_as_last_reference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = make_ctx(tmp)
+            self._inherit_board(ctx)
+            items = {i["id"]: i for i in json.loads(frames.run(ctx).read_text(encoding="utf-8"))["items"]}
+        self.assertNotIn("previous", [r["kind"] for r in items["E01-01-C01"]["references"]])      # 首镜没有上一镜
+        refs = items["E01-01-C02"]["references"]
+        self.assertEqual([r["kind"] for r in refs], ["character", "scene", "previous"])
+        self.assertEqual(refs[-1]["name"], "E01-01-C01")
+        self.assertIn("图3是上一镜参考帧「E01-01-C01」", items["E01-01-C02"]["prompt"])
+        self.assertIn("不要照搬上一镜的机位", items["E01-01-C02"]["prompt"])
+        # 跨段连续：下一段首切引用上一段末切
+        cross = items["E01-02-C01"]["references"]
+        self.assertEqual(cross[-1]["kind"], "previous")
+        self.assertEqual(cross[-1]["name"], "E01-01-C02")
+
+    def test_cut_and_hard_cut_and_legacy_storyboards_get_no_previous_frame(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = make_ctx(tmp)
+            self._inherit_board(ctx, second_mode="cut", segment_mode="hard_cut")
+            items = {i["id"]: i for i in json.loads(frames.run(ctx).read_text(encoding="utf-8"))["items"]}
+        for item in items.values():
+            self.assertNotIn("previous", [r["kind"] for r in item["references"]])
+
+    def test_previous_frame_keeps_its_slot_when_over_the_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = make_ctx(tmp)
+            self._inherit_board(ctx)
+            tasks, _ = frames._collect(ctx)
+            task = next(t for t in tasks if t["id"] == "E01-01-C02")
+            prev = next(t for t in tasks if t["id"] == "E01-01-C01")
+            refs, missing = frames._references(ctx, 1, task["_segment"], task["_cut"], frames._asset_index(ctx),
+                                               frames._scene_ids(ctx), 2, prev)
+        self.assertEqual([r["kind"] for r in refs], ["character", "previous"])   # 场景让位，上一镜保留
+        self.assertTrue(any("超过接口上限" in m for m in missing))
+
+    def test_generation_in_order_sends_the_just_generated_previous_frame(self):
+        server = HTTPServer(("127.0.0.1", 0), _Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        provider = [{"name": "p", "url": f"http://127.0.0.1:{server.server_port}/gen", "api_key": "k", "model": "m",
+                     "adapter": "openai", "size": "1536x1024", "sizes": {}, "quality": None, "timeout": 10,
+                     "reference_field": "image", "reference_style": "list", "image_encoding": "data_uri",
+                     "max_references": 4, "request_template": None, "headers": {}}]
+        try:
+            with tempfile.TemporaryDirectory() as tmp, mock.patch.object(frames, "_providers", return_value=provider):
+                ctx = make_ctx(tmp)
+                self._inherit_board(ctx)
+                _Handler.bodies.clear()
+                frames.run(ctx, generate=True, only=["E01-01"])               # 整段，C01 先出，C02 再出
+                self.assertEqual(len(_Handler.bodies), 2)
+                self.assertEqual(len(_Handler.bodies[1]["image"]), 3)         # 角色 + 场景 + 上一镜
+                self.assertIn("上一镜参考帧", _Handler.bodies[1]["prompt"])
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_missing_previous_frame_is_dropped_and_renumbered(self):
+        server = HTTPServer(("127.0.0.1", 0), _Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        provider = [{"name": "p", "url": f"http://127.0.0.1:{server.server_port}/gen", "api_key": "k", "model": "m",
+                     "adapter": "openai", "size": "1536x1024", "sizes": {}, "quality": None, "timeout": 10,
+                     "reference_field": "image", "reference_style": "list", "image_encoding": "data_uri",
+                     "max_references": 4, "request_template": None, "headers": {}}]
+        try:
+            with tempfile.TemporaryDirectory() as tmp, mock.patch.object(frames, "_providers", return_value=provider):
+                ctx = make_ctx(tmp)
+                self._inherit_board(ctx)
+                _Handler.bodies.clear()
+                frames.run(ctx, generate=True, only=["E01-01-C02"])           # 单独出 C02，上一镜还没有
+                self.assertEqual(len(_Handler.bodies[0]["image"]), 2)
+                self.assertNotIn("上一镜参考帧", _Handler.bodies[0]["prompt"])
+                items = json.loads(frames.artifact(ctx).read_text(encoding="utf-8"))["items"]
+                c02 = next(i for i in items if i["id"] == "E01-01-C02")
+                self.assertTrue(any("上一镜参考帧" in m for m in c02["missing_references"]))
+        finally:
+            server.shutdown()
+            server.server_close()
+
     def test_unknown_only_and_request_shapes(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(ValueError):

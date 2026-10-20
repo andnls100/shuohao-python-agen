@@ -28,8 +28,9 @@ from .video_adapters import _render
 
 PRINT_FRAME_REQUEST = True          # 打印出图请求（参考图只显示数量和文件名，不打印 Base64）
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
-KIND_LABEL = {"character": "角色", "scene": "场景", "prop": "道具"}
-KIND_ROLE = {"character": "的外观（脸型、发型、服装）", "scene": "的空间布局与光线", "prop": "的外形"}
+KIND_LABEL = {"character": "角色", "scene": "场景", "prop": "道具", "previous": "上一镜参考帧"}
+KIND_ROLE = {"character": "的外观（脸型、发型、服装）", "scene": "的空间布局与光线", "prop": "的外形",
+             "previous": "，只用来继承人物身份、服装、姿态、道具持握和空间关系；本镜构图、机位以下面的描述为准，不要照搬上一镜的机位"}
 
 
 def artifact(ctx: Context) -> Path:
@@ -214,8 +215,9 @@ def _scene_ids(ctx: Context) -> Dict[tuple, str]:
 
 
 def _references(ctx: Context, ep: int, segment: dict, cut: dict, assets: dict, scene_ids: dict,
-                limit: int = 99) -> tuple[List[dict], List[str]]:
-    """返回 (参考图列表, 缺失说明)。顺序：角色 → 场景 → 道具，编号从 1 起，对应提示词里的"图 N"。"""
+                limit: int = 99, prev: Optional[dict] = None) -> tuple[List[dict], List[str]]:
+    """返回 (参考图列表, 缺失说明)。顺序：角色 → 场景 → 道具 → 上一镜参考帧（连续镜头时），
+    编号从 1 起，对应提示词里的"图 N"。名额不够时先舍弃道具、场景，上一镜参考帧保留，角色优先。"""
     refs: List[dict] = []
     missing: List[str] = []
 
@@ -237,9 +239,15 @@ def _references(ctx: Context, ep: int, segment: dict, cut: dict, assets: dict, s
         missing.append("找不到分镜所属场景（缺剧本 sceneId），未引用场景图")
     for name in cut.get("props") or []:
         add("prop", str(name), str(name))
-    if len(refs) > limit:
-        missing.append(f"参考图 {len(refs)} 张超过接口上限 {limit}，只传前 {limit} 张（角色优先）")
-        refs = refs[:limit]
+    room = limit - 1 if prev else limit
+    if len(refs) > room:
+        missing.append(f"参考图 {len(refs) + (1 if prev else 0)} 张超过接口上限 {limit}，只传前 {room} 张设定图"
+                       + ("和上一镜参考帧" if prev else "") + "（角色优先）")
+        refs = refs[:max(room, 0)]
+    if prev:  # 路径出图时才定：上一镜可能就是本次先生成的，所以这里只记它的 output_base
+        found = _existing(ctx, prev["output_base"])
+        refs.append({"kind": "previous", "name": prev["id"], "base": prev["output_base"],
+                     "path": str(found.relative_to(ctx.out)).replace("\\", "/") if found else prev["output_base"] + ".png"})
     for n, ref in enumerate(refs, 1):
         ref["no"] = n
     return refs, missing
@@ -275,16 +283,61 @@ def _collect(ctx: Context) -> tuple[List[dict], str]:
                     "id": shot_id, "ep": ep, "segmentId": sid, "shotIndex": cut_idx,
                     "frame_no": f"f{cut_idx}", "frame": frame, "_segment": segment, "_cut": cut,
                     "output_base": f"frames/{safe_name(sid)}/f{cut_idx}",
+                    "_first_in_segment": cut_idx == 1,
                 })
+    for index, task in enumerate(tasks):
+        task["_prev"] = _previous_task(tasks, index)
     if not tasks:
         raise ValueError("分镜文件里没有可出图的分镜")
     return tasks, ratio
+
+
+def _previous_task(tasks: List[dict], index: int) -> Optional[dict]:
+    """连续镜头的"上一镜"：cut.continuity.mode == inherit 才有。
+    同段取上一切；段首取前一段的末切（段 continuityMode 为 hard_cut 或前面没有镜头时不取）。
+    continuity.referenceFrame 若写的是某个已知分镜编号，以它为准。旧分镜没有 continuity 字段时一律不引用。"""
+    task = tasks[index]
+    continuity = (task["_cut"].get("continuity") or {})
+    if continuity.get("mode") != "inherit":
+        return None
+    named = str(continuity.get("referenceFrame") or "").strip()
+    for other in tasks[:index]:
+        if named and named in (other["id"], other["output_base"], f"{other['output_base']}.png"):
+            return other
+    if index == 0:
+        return None
+    if task["_first_in_segment"] and task["_segment"].get("continuityMode") == "hard_cut":
+        return None
+    return tasks[index - 1]
 
 
 def _matches(item: dict, wanted: List[str]) -> bool:
     """--frames-only：分镜编号（E01-01-C01）、段号（E01-01，整段所有分镜）或集号写法 E01。"""
     sid = item["segmentId"]
     return any(w in (item["id"], sid) or w.upper() == f"E{item['ep']:02d}" for w in wanted)
+
+
+def _resolve_previous(ctx: Context, item: dict, entry: dict) -> tuple[List[dict], str]:
+    """出图那一刻再确认上一镜参考帧：文件已经有（可能就是本次刚出的）才用；没有就去掉并重排图号。"""
+    refs = [dict(r) for r in item["references"]]
+    changed = False
+    for ref in list(refs):
+        if ref["kind"] != "previous":
+            continue
+        found = _existing(ctx, ref["base"])
+        if found:
+            ref["path"] = str(found.relative_to(ctx.out)).replace("\\", "/")
+        else:
+            refs.remove(ref)
+            changed = True
+            note = f"上一镜参考帧「{ref['name']}」还没有生成，本张没有使用（按顺序先出上一镜再出本镜）"
+            entry["missing_references"] = [*entry.get("missing_references", []), note]
+            ctx.log(f"⚠ {item['id']}: {note}")
+    if not changed:
+        return refs, item["prompt"]
+    for n, ref in enumerate(refs, 1):
+        ref["no"] = n
+    return refs, _reference_header(refs) + item["frame"]
 
 
 def _existing(ctx: Context, base: str) -> Optional[Path]:
@@ -336,7 +389,9 @@ def run(ctx: Context, eps: Optional[list] = None, generate: bool = False,
     items: List[dict] = []
     for task in tasks:
         segment, cut = task.pop("_segment"), task.pop("_cut")
-        refs, missing = _references(ctx, task["ep"], segment, cut, assets, scene_ids, limit)
+        prev = task.pop("_prev", None)
+        task.pop("_first_in_segment", None)
+        refs, missing = _references(ctx, task["ep"], segment, cut, assets, scene_ids, limit, prev)
         prompt = _reference_header(refs) + task["frame"]
         digest = hashlib.sha256((prompt + json.dumps([r["path"] for r in refs])).encode("utf-8")).hexdigest()
         old = previous.get(task["id"], {})
@@ -379,19 +434,20 @@ def run(ctx: Context, eps: Optional[list] = None, generate: bool = False,
         entry["state"], entry["error"] = "generating", None
         write_json(path, manifest)
         failures: List[str] = []
+        refs_now, prompt_now = _resolve_previous(ctx, item, entry)
         for provider in providers:
             try:
-                files = [ctx.out / r["path"] for r in item["references"][:provider["max_references"]]]
+                files = [ctx.out / r["path"] for r in refs_now[:provider["max_references"]]]
                 size = _size_for(provider, ratio)
                 if provider["adapter"] == "modelscope":
-                    data = _modelscope_generate(provider, item["prompt"], item["references"], files, size)
+                    data = _modelscope_generate(provider, prompt_now, refs_now, files, size)
                     body = None
                 else:
                     images = [_encode(f, provider["image_encoding"]) for f in files]
-                    body = build_request(provider, item["prompt"], size, images)
+                    body = build_request(provider, prompt_now, size, images)
                 if PRINT_FRAME_REQUEST:
                     ctx.log(f"分镜图 {item['id']} | 平台={provider['name']} | 模型={provider['model']} | 尺寸={size} | "
-                            f"参考图={[Path(r['path']).name for r in item['references'][:provider['max_references']]]}")
+                            f"参考图={[Path(r['path']).name for r in refs_now[:provider['max_references']]]}")
                     if body is not None:
                         ctx.log("请求体：" + json.dumps(_redacted(body), ensure_ascii=False))
                 if provider["adapter"] != "modelscope":
