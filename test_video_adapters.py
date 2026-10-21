@@ -24,6 +24,30 @@ class VideoAdapterTests(unittest.TestCase):
         self.assertEqual(body["parameters"]["resolution"], "480P")
         self.assertEqual(request_headers(provider)["X-DashScope-Async"], "enable")
 
+    def test_wan3_prime_reference_media_request(self):
+        provider = {
+            "adapter": "aliyun_wan",
+            "VIDEO_API_MODEL": "wan3.0-video-prime",
+            "VIDEO_API_KEY": "test-key",
+            "resolution": "720P",
+            "ratio": "9:16",
+            "prompt_extend": True,
+        }
+        item = {
+            "prompt": "cinematic shot",
+            "duration_seconds": 4.5,
+            "reference_media": [
+                {"type": "reference_image", "url": "data:image/png;base64,abc", "label": "角色「主角」"}
+            ],
+        }
+        body = build_request(provider, item, self.manifest)
+        self.assertEqual(body["model"], "wan3.0-video-prime")
+        self.assertEqual(body["input"]["media"][0]["type"], "reference_image")
+        self.assertEqual(body["input"]["media"][0]["url"], "data:image/png;base64,abc")
+        self.assertIn("图1是角色「主角」", body["input"]["prompt"])
+        self.assertEqual(body["parameters"]["duration"], 4)
+        self.assertEqual(body["parameters"]["ratio"], "9:16")
+
     def test_template_preserves_numeric_types(self):
         provider = {
             "adapter": "generic",

@@ -58,7 +58,7 @@ python run_agent.py run --stages video --eps 1 --video-protocol i2v --video-flf 
 python run_agent.py run --stages video --eps 1 --video-protocol i2v --video-submit --shots E01-01-C01
 ```
 
-分镜图目录可用 `--frames-dir` 指定；分镜图缺失时该镜头记为失败，不会调用 API。图片编码方式可在模型配置里用 `image_encoding` 切换（`data_uri` 默认，或 `base64` 纯字符串）。目前只有 `cogvideox_zhipu` 适配器支持图生视频，其他适配器收到图片会报错。
+分镜图目录可用 `--frames-dir` 指定；分镜图缺失时该镜头记为失败，不会调用 API。图片编码方式可在模型配置里用 `image_encoding` 切换（`data_uri` 默认，或 `base64` 纯字符串）。`aliyun_wan` 的 Wan 3.0 Video Prime 支持通过 `input.media` 传入参考图；连续镜头只传上一镜最后一帧作为 `first_frame`，避免与 `reference_image` 混用（官方接口不允许两类素材混合）。其他不支持图片输入的适配器收到图片会报错。
 
 ## 已知限制
 

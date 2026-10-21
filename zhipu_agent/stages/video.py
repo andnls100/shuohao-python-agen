@@ -276,14 +276,40 @@ def _reference_media(item: dict, root: Path, previous_last: Optional[Path]) -> l
     return media
 
 
+def _wan3_media(item: dict, root: Path, previous_last: Optional[Path]) -> list[dict]:
+    # Wan 3.0 does not allow first_frame/last_frame mixed with reference_image.
+    # Preserve strict continuity by sending only the previous shot's last frame on continuous shots.
+    if previous_last:
+        return [{"type": "first_frame", "url": _encode(previous_last), "label": "上一镜视频最后一帧（本镜首关键帧）"}]
+    media = []
+    for asset in item.get("reference_assets") or []:
+        path = _resolve(root, str(asset.get("path") or ""))
+        if not path.is_file():
+            continue
+        kind = asset.get("kind")
+        label = ("场景「" if kind == "scene" else "角色「" if kind == "character" else "道具「" if kind == "prop" else "参考图「") + str(asset.get("name") or "") + "」"
+        media.append({"type": "reference_image", "url": _encode(path), "label": label})
+    if len(media) > 10:
+        raise ValueError(f"镜头 {item['id']} 需要 {len(media)} 张参考图，超过 Wan 3.0 的 10 张上限")
+    return media
+
+
 def _build_body(provider: dict, item: dict, manifest: dict, root: Path, previous_last: Optional[Path]) -> dict:
     from .video_adapters import build_request
     request_item = dict(item); adapter = provider.get("adapter")
-    is_wan_r2v = adapter == "aliyun_wan" and (str(provider.get("mode") or "").lower() == "r2v" or "r2v" in str(provider.get("VIDEO_API_MODEL") or "").lower())
+    model = str(provider.get("VIDEO_API_MODEL") or "").lower()
+    is_wan_r2v = adapter == "aliyun_wan" and (str(provider.get("mode") or "").lower() == "r2v" or "r2v" in model)
+    is_wan3 = adapter == "aliyun_wan" and "wan3.0-video" in model
     if is_wan_r2v:
         media = _reference_media(item, root, previous_last)
         if not media: raise ValueError(f"镜头 {item['id']} 没有可用参考图；固定场景需要场景图，连续镜头需要上一镜最后一帧")
         request_item["reference_media"] = media
+    elif is_wan3:
+        media = _wan3_media(item, root, previous_last)
+        if media:
+            request_item["reference_media"] = media
+        elif item.get("input_mode") == "previous_last_frame":
+            raise FileNotFoundError(f"镜头 {item['id']} 缺少上一镜最后一帧：{item.get('previous_shot_id')}")
     else:
         images = []
         if previous_last: images.append(_encode(previous_last, provider.get("image_encoding", "data_uri")))
