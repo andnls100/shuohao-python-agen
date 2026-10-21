@@ -29,6 +29,8 @@ export const DEFAULT_PARAMS = {
   maxCutSeconds: 8,       // 单个分镜上限——5 秒左右对齐视频模型的 5/10 秒档位
   maxOnScreen: 3,        // 单个分镜同框人数上限，超了必须带拆解说明
   tolerance: 1.0,        // 每集总时长对剧本目标的容差 ±100%
+  h3Gates: true,         // false = 只用 Seedance 逐镜头协议，不检查 h3Prompt 结构/运镜词/台词块/语言
+  nameAllow: [],         // 视频提示词里允许出现的称呼（如 '九尾狐妖'），不当作角色名拦截
 };
 
 export function paramsOf(doc) {
@@ -552,7 +554,11 @@ export function gateReport(board, ctx = {}) {
     '男子', '女子', '男人', '女人', '中年男子', '年轻男子', '老者', '老人',
     '少年', '少女', '孩子', '孩童', '婴儿', '妇人', '侍卫', '修士',
     '黑衣人', '白衣人', '众人', '一名男子', '一名女子',
+    // 亲属／辈分称呼：是身份描述，不是专有名
+    '娘亲', '母亲', '爹爹', '父亲', '姐姐', '哥哥', '妹妹', '弟弟', '师兄', '师姐', '师弟', '师妹', '师父', '师尊',
+    ...(Array.isArray(params.nameAllow) ? params.nameAllow.map(String) : []),
   ]);
+  const h3On = params.h3Gates !== false;
   const addName = (value) => {
     const name = String(value ?? '').trim();
     if (name && !genericAliases.has(name)) banned.push(name);
@@ -609,7 +615,7 @@ export function gateReport(board, ctx = {}) {
       } else if (!CJK.test(rest)) {
         bad.h3e.push(`${sid} 设定中文提示词（promptLang=${promptLang}），正文却写成了英文`);
       }
-      for (const name of banned) {
+      for (const name of h3On ? banned : []) {
         if (rest.includes(name)) bad.names.push(`${sid} 的 h3Prompt 在台词之外出现角色名「${name}」`);
       }
 
@@ -645,7 +651,9 @@ export function gateReport(board, ctx = {}) {
         } else {
           const slice = slices[ci];
           const term = promptLang === 'en' ? String(cut.camera).toLowerCase() : CAMERA_MOVES[cut.camera];
-          if (slice == null) {
+          if (!h3On) {
+            // 只用 Seedance 逐镜头协议：运镜枚举仍要合法，但不查 h3Prompt 的 [Shot k] 段落
+          } else if (slice == null) {
             bad.camera.push(`${cid} 在 h3Prompt 里找不到对应的 [Shot ${ci + 1}] 段落`);
           } else if (!(promptLang === 'en' ? slice.toLowerCase() : slice).includes(term)) {
             bad.camera.push(`${cid} 的 [Shot ${ci + 1}] 段落缺运镜词「${term}」`);
@@ -791,9 +799,9 @@ export function gateReport(board, ctx = {}) {
   add('segment-id', '段号 E01-01 格式、按顺序连号', bad.id.length === 0, bad.id.join('；'));
   add('size-phrase', '景别中文词写进分镜图提示词', bad.size.length === 0, bad.size.join('；'));
   add('camera-phrase', '运镜用 H3 官方词表，且出现在自己的 [Shot k] 段落里', bad.camera.length === 0, bad.camera.join('；'));
-  add('h3-structure', 'H3 首行对齐指令由分镜结构推导逐字对账，切点时刻逐个对', eps.length > 0 && bad.h3s.length === 0, bad.h3s.join('；'));
-  add('h3-dialogue', '认领节拍的台词逐字进 H3 提示词的 <d> 块', bad.h3d.length === 0, script ? bad.h3d.join('；') : SKIP_SCRIPT);
-  add('h3-lang', `H3 提示词语言与设定一致（promptLang=${promptLang}，正文${promptLang === 'en' ? '全英文' : '中文'}、骨架 token 官方英文格式）`, bad.h3e.length === 0, bad.h3e.join('；'));
+  add('h3-structure', 'H3 首行对齐指令由分镜结构推导逐字对账，切点时刻逐个对', !h3On || (eps.length > 0 && bad.h3s.length === 0), bad.h3s.join('；'));
+  add('h3-dialogue', '认领节拍的台词逐字进 H3 提示词的 <d> 块', !h3On || bad.h3d.length === 0, script ? bad.h3d.join('；') : SKIP_SCRIPT);
+  add('h3-lang', `H3 提示词语言与设定一致（promptLang=${promptLang}，正文${promptLang === 'en' ? '全英文' : '中文'}、骨架 token 官方英文格式）`, !h3On || bad.h3e.length === 0, bad.h3e.join('；'));
   add('frame-prompt', '分镜图提示词中文且非空', bad.frame.length === 0, bad.frame.join('；'));
   add('prompt-no-names', '视频提示词不含角色名（H3 正文与 Seedance 镜头正文；分镜图提示词直呼其名放行）', bad.names.length === 0, banned.length ? bad.names.join('；') : SKIP_NAMES);
   add('composition', '构图量化字段齐全（每段 blocking；每镜焦距／机位／构图／视线落点／焦点／稳定性）', eps.length > 0 && bad.comp.length === 0, bad.comp.join('；'));

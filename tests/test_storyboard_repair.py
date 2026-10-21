@@ -213,6 +213,20 @@ class StoryboardRepairTest(unittest.TestCase):
         self.assertEqual(doc["episodes"][0]["segments"][0]["soundscape"], "风声")
         self.assertEqual(doc["episodes"][0]["segments"][0]["music"], "低音弦乐")
 
+    def test_params_override_h3_gates(self):
+        import os
+        from zhipu_agent.stages import storyboard
+        old = os.environ.pop("AGENT_STORYBOARD_PARAMS", None)
+        try:
+            self.assertEqual(storyboard._params_override(True), {})
+            self.assertEqual(storyboard._params_override(False), {"h3Gates": False})
+            os.environ["AGENT_STORYBOARD_PARAMS"] = '{"maxOnScreen": 5}'
+            self.assertEqual(storyboard._params_override(False), {"maxOnScreen": 5, "h3Gates": False})
+        finally:
+            os.environ.pop("AGENT_STORYBOARD_PARAMS", None)
+            if old is not None:
+                os.environ["AGENT_STORYBOARD_PARAMS"] = old
+
 
 if __name__ == "__main__":
     unittest.main()
