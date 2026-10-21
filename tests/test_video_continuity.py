@@ -35,7 +35,7 @@ class VideoContinuityTest(unittest.TestCase):
         ]}]}
         ctx = self._ctx(board)
         with mock.patch.object(video, "_reference_assets", return_value=[]):
-            items = video._collect(ctx, None, "h3", "live-action")["items"]
+            items = video._collect(ctx, None, "seedance", "live-action")["items"]
         self.assertEqual(items[0]["input_mode"], "scene_or_assets")
         self.assertEqual(items[1]["input_mode"], "previous_last_frame")
         self.assertEqual(items[1]["previous_shot_id"], "E01-01-C01")
@@ -51,7 +51,7 @@ class VideoContinuityTest(unittest.TestCase):
         ]}]}
         ctx = self._ctx(board)
         with mock.patch.object(video, "_reference_assets", return_value=[]):
-            item = video._collect(ctx, None, "h3", "live-action")["items"][1]
+            item = video._collect(ctx, None, "seedance", "live-action")["items"][1]
         self.assertEqual(item["input_mode"], "previous_last_frame")
 
 
