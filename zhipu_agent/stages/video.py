@@ -91,7 +91,44 @@ def _is_continuous(previous: Optional[dict], current: dict) -> tuple[bool, str]:
     return True, "explicit_inherit"
 
 
-def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str, shots: Optional[list] = None, visual_style_prompt: str = "") -> dict:
+def _merge_clips(items: list, protocol: str, max_seconds: float) -> list:
+    """Merge consecutive shots into one video call: same segment, each later shot continuous with the one before it
+    (explicit inherit), total duration <= max_seconds. max_seconds <= 0 disables merging."""
+    if not max_seconds or max_seconds <= 0 or not items: return items
+    groups = []
+    for item in items:
+        group = groups[-1] if groups else None
+        if (group and item["input_mode"] == "previous_last_frame" and item.get("previous_shot_id") == group[-1]["id"]
+                and group[-1]["segmentId"] == item["segmentId"]
+                and sum(x["duration_seconds"] for x in group) + item["duration_seconds"] <= max_seconds + 1e-9):
+            group.append(item)
+        else:
+            groups.append([item])
+    clip_of = {}; merged = []
+    for group in groups:
+        first = group[0]
+        if len(group) == 1:
+            clip = dict(first); clip["shot_ids"] = [first["id"]]
+        else:
+            refs, seen = [], set()
+            for x in group:
+                for ref in x.get("reference_assets") or []:
+                    if ref.get("path") not in seen: seen.add(ref.get("path")); refs.append(dict(ref))
+            refs = [dict(r, no=i) for i, r in enumerate(refs[:5], 1)]
+            ids = [x["id"] for x in group]
+            clip = dict(first); clip.update(id=f"{first['id']}-{ids[-1].rsplit('-', 1)[-1]}", shot_ids=ids,
+                shot_indexes=[x["shotIndex"] for x in group], duration_seconds=round(sum(x["duration_seconds"] for x in group), 2),
+                reference_assets=refs, scene_fixed=any(x.get("scene_fixed") for x in group))
+            if protocol == "seedance":
+                clip["prompt"] = f"本次视频由连续 {len(group)} 个镜头组成，按顺序在同一条视频内完成，镜头之间自然衔接，不要重复首帧画面：\n\n" + "\n\n".join(x["prompt"] for x in group)
+        for sid in clip["shot_ids"]: clip_of[sid] = clip["id"]
+        merged.append(clip)
+    for clip in merged:
+        if clip.get("previous_shot_id"): clip["previous_shot_id"] = clip_of.get(clip["previous_shot_id"], clip["previous_shot_id"])
+    return merged
+
+
+def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str, shots: Optional[list] = None, visual_style_prompt: str = "", merge_seconds: float = 0) -> dict:
     source = ctx.artifact("storyboard")
     if not source.is_file(): raise FileNotFoundError(f"找不到分镜文件：{source}；请先运行 storyboard 阶段")
     board = read_json(source); wanted = set(eps or []); items = []; previous = None
@@ -124,6 +161,7 @@ def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str
         requested = {str(v).strip() for v in shots if str(v).strip()}; unknown = requested - {i["id"] for i in items}
         if unknown: raise ValueError("找不到指定镜头 ID：" + "、".join(sorted(unknown)))
     if not items: raise ValueError("所选集没有可生成的视频镜头")
+    items = _merge_clips(items, protocol, merge_seconds)
     return {"version": 3, "source": ctx.title, "protocol": protocol, "visual_style": visual_style,
             "visual_style_prompt": str(visual_style_prompt or "").strip(),
             "visual_style_instruction": visual_style_instruction(visual_style, visual_style_prompt),
@@ -362,9 +400,9 @@ def check(ctx: Context) -> Result:
 
 def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: bool = False, visual_style: str = "manju",
         visual_style_prompt: str = "", shots: Optional[list] = None, video_model: Optional[str] = None, frames_dir: Optional[Path] = None, flf: bool = False,
-        segments: Optional[list] = None) -> Path:
+        segments: Optional[list] = None, merge_seconds: float = 10) -> Path:
     if protocol == "i2v": raise ValueError("旧的 --video-protocol i2v 已取消：视频阶段现在直接按连续镜头规则生成")
-    root = ctx.out / "video"; root.mkdir(parents=True, exist_ok=True); path = artifact(ctx); manifest = _collect(ctx, eps, protocol, visual_style, shots, visual_style_prompt)
+    root = ctx.out / "video"; root.mkdir(parents=True, exist_ok=True); path = artifact(ctx); manifest = _collect(ctx, eps, protocol, visual_style, shots, visual_style_prompt, merge_seconds)
     previous = {}
     if path.is_file() and not ctx.force:
         try: previous = {str(x.get("id")): x for x in read_json(path).get("items", [])}
@@ -381,6 +419,7 @@ def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: 
     ctx.log(f"视频阶段：已生成 {len(manifest['items'])} 个镜头清单：{path}")
     if not submit: return path
     providers = _config(video_model); requested = {str(v).strip() for v in shots or [] if str(v).strip()}
+    if requested: requested |= {x["id"] for x in manifest["items"] if requested & set(x.get("shot_ids") or [])}
     seg_ids = {str(v).strip() for v in segments or [] if str(v).strip()}
     if seg_ids:
         known = {str(x.get("segmentId")) for x in manifest["items"]}

@@ -56,6 +56,8 @@ Generate selected cuts sequentially:
 python run_agent.py run --stages video --eps 1 --shots E01-01-C01,E01-01-C02 --video-submit
 ```
 
+Consecutive continuous cuts inside one segment are merged into a single video call (total <= 10 s by default; merged IDs look like `E01-01-C01-C02`). Tune with `--video-merge-seconds N` (0 = one call per cut).
+
 Generate whole segments (all cuts, in order):
 
 ```bash
