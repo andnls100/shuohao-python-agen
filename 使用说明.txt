@@ -1,293 +1,216 @@
-小说
- │
- ▼
-novel-outline       大纲
- │
- ├──► novel-characters   角色设定
- │
- ├──► novel-art          场景/道具设定
- │
- └──► novel-script       剧本
-          │
-          ▼
-     novel-staging       场面调度
-          │
-          ▼
-     novel-storyboard    分镜
-          
-另外：
-character-refs          角色参考图
-
-
-7 个 Skill 分别干什么
-Skill	作用	主要产物
-novel-outline	小说 → 短剧大纲	outline.json
-novel-characters	大纲/小说 → 人物设定	cast.json
-novel-art	场景、道具 → 美术设定	art.json
-novel-script	大纲 → 正式短剧剧本	script.json
-novel-staging	剧本 → 每场戏开场时人物站位	staging.json
-novel-storyboard	剧本 → 分镜、镜头、关键帧	storyboard.json
-character-refs	人物设定 → 真正生成角色参考图	角色参考图片
-
+shuohao-python-agen 视频生成最新使用说明
 
 ================================================================
-视频生成重新设计：从文生视频改为图生视频（方案，尚未实现）
+一、视频生成逻辑
 ================================================================
 
-一、为什么要改
+视频生成单位 = 一个分镜头 cut，例如：E01-01-C01。
 
-现状：视频阶段只把分镜的 h3Prompt（或 Seedance 拼接提示词）当文字发给视频模型，
-没有传任何图片。同一角色、同一场景在不同分段里每次都由模型凭文字重新想象，
-所以外观、服装、空间布局会漂移。文字再详细也压不住这一点。
+1. 第一镜 / 新场景 / 明确切断
 
-结论：一致性要靠"图"来锁定，视频模型只负责让图动起来。
+固定场景：
+  场景图 + 角色参考图 + 道具参考图 + 当前镜头提示词
 
-二、已核实的事实（来自智谱开放平台官方文档，设计以此为界）
+非固定场景：
+  角色参考图 + 道具参考图 + 当前镜头提示词
 
-1. CogVideoX-3 支持三种输入：文生视频、图生视频、首尾帧生视频。
-2. image_url：URL 或 Base64；格式 png/jpeg/jpg；单张不超过 5MB。
-   传 1 张是首帧；传 2 张时第一张是首帧、第二张是尾帧。
-3. 首尾帧模式只支持 quality=speed。
-4. prompt 最多 512 字符；时长只能 5 或 10 秒；size 取固定几档。
-5. with_audio 只生成 AI 音效，文档没有承诺台词和口型。
-6. 同一个接口还提供 Vidu 系列：viduq1-image、vidu2-image（图生，1 张首帧）、
-   viduq1-start-end、vidu2-start-end（首尾帧）、vidu2-reference（参考图生视频，1–3 张）。
-   Vidu 图片格式含 webp，单张最大 50MB，时长 4 或 5 秒（以官方文档为准）。
-7. GLM-Image（智谱出图模型）只接受文字，没有参考图参数。
+2. 连续镜头
 
-以下内容尚未核实，落地前必须先查官方文档：Wan 图生视频的模型名与请求字段、
-Seedance 的多图参考方式、各出图模型"带参考图出图"的接口。
+只有同时满足：
+  - 同一集
+  - 同一 sceneIndex
+  - 当前 cut.continuity.mode == "inherit"
+  - 当前 cut.continuity.referenceFrame 明确指向紧接着的上一镜
+  - 如果跨 segment，则当前 segment.continuityMode == "continuous"
 
-三、核心思路：先出图，再动起来
+才使用：
+  上一个视频的真实最后一帧 + 角色参考图 + 道具参考图 + 当前镜头提示词
 
-  分镜 -> 【新】分镜图阶段(frames) -> 【改】图生视频阶段(video) -> 【新】拼接阶段(concat)
+3. 以下情况绝不继承上一镜最后一帧：
+  - hard_cut
+  - cut
+  - 换场 / sceneIndex 改变
+  - referenceFrame 缺失
+  - referenceFrame 指向的不是紧接上一镜
+  - 跨 segment 但没有 continuityMode == continuous
 
-1. 分镜图阶段（frames，新增）
-   - 输入：storyboard.json 每个分镜的 frame（分镜图提示词，直呼角色名）、
-           角色参考图（images/refs 阶段产物）、场景设定图（<地点>-sheet.png）。
-   - 输出：output/frames/<段号>/f<切序>.png，与技能包约定的目录结构一致。
-   - 关键：出图时把"角色参考图 + 场景图"作为参考图一起传入，
-     而不是只传文字。这一步决定整条链路的一致性上限。
-   - 不带参考图的出图模型（如 GLM-Image）做不到这一点。
-     需要换成支持参考图的出图模型，或改用"编辑/合成"类接口。具体型号待核实后选定。
-   - 每张图先人工快速过目，不合格的单张重出，再进入视频阶段。
-
-2. 图生视频阶段（video，改造）
-   - 单位：以"分镜"（cut）为单位生成，不再以"段"为单位。
-     原因：每个分镜都有自己的分镜图，一图对一镜，最能锁定画面；
-     CogVideoX-3 的 5/10 秒档位也和 2–10 秒的分镜更接近。
-   - 三种模式，由 models.json 里每个视频模型的 input_mode 决定：
-       t2v   文生视频：保持现状，作为兜底。
-       i2v   图生视频：首帧 = 该分镜的分镜图。
-       flf   首尾帧：首帧 = 本分镜图，尾帧 = 同段下一个分镜图（同场景时使用）。
-     推荐默认 i2v；同一场景内需要镜头衔接时用 flf。
-   - 提示词：图生视频不需要再描述外观，只写"怎么动"。
-     取分镜的 shot（运镜 + 主体动作 + 位置变化）和 camera 字段，去掉角色名，
-     控制在 512 字符内（CogVideoX-3 的上限），台词不写进提示词。
-   - 图片传入：本地 PNG 转成 Base64（data URI）提交；超过 5MB 先压成 JPEG。
-   - 画幅：由分镜图的实际尺寸决定，保证与分镜图一致，不再硬写 1920x1080。
-
-3. 拼接阶段（concat，新增，可后做）
-   - 用 FFmpeg 按段号、切序拼接各分镜视频，按分镜秒数裁切到目标时长
-     （CogVideoX-3 只给 5/10 秒，需要裁切）。
-   - 台词配音走单独的 TTS 轨，不依赖视频模型出声。
-
-四、manifest（video-manifest.json）需要新增的字段
-
-每个条目增加：mode、first_frame、last_frame、image_inputs、cut_id、target_seconds、
-actual_seconds、frame_check（frame 图是否通过人工确认）。
-任务状态沿用 planned / submitting / polling / succeeded / failed，
-续跑规则不变：已有 task_id 的任务只查原平台，避免重复计费。
-
-五、保证一致性的手段，按效果从大到小排序
-
-1. 分镜图出图时带角色参考图 + 场景图（最关键）。
-2. 同一场景内用首尾帧模式，让相邻分镜的画面首尾对上。
-3. 同一部戏固定画幅、固定出图风格词，不要中途换模型。
-4. 视频生成后逐条质检，不合格的单条重抽，不重做整集。
-5. 台词多的镜头尽量用反应镜头、背影、画外音，减少对口型的依赖。
-
-六、需要提前知道的限制
-
-1. CogVideoX-3 的 with_audio 只出音效，不保证台词和口型。
-   需要对口型的镜头，要另选支持的模型，或后期配音处理。
-2. 首尾帧模式只能用 speed 画质，画质可能低于 quality。
-3. 首尾帧要求两张图构图相近，否则中间会"变形过渡"。
-   不同场景的分镜之间不要用首尾帧。
-4. 每个 5 秒以内的分镜也要付一个 5 秒的钱，分镜切得越碎越贵。
-5. 提示词 512 字符的上限会丢信息，所以动作描述要写短。
-
-七、分步落地计划
-
-第 1 步：先核实"带参考图出图"的模型接口（候选和计费），选定一个出图模型。
-第 2 步：实现 frames 阶段，先对 1 集的 3 个分镜试出图，人工看一致性。
-第 3 步：改 video 阶段支持 i2v（Base64 首帧），先对 1 个分镜试生成，确认画面、时长、费用。
-第 4 步：加 flf 模式，只在同场景相邻分镜里使用。
-第 5 步：加 concat 阶段和质检清单。
-第 6 步：补离线测试（用本地假接口覆盖 i2v / flf 请求体、Base64 超限压缩、断点续跑）。
-
-八、验收标准
-
-- 同一角色在同一集多个分镜里，脸型、发型、服装可以人工确认是同一个人。
-- 同一场景的空间布局（门窗、家具位置）在相邻分镜里不乱。
-- 预览模式不调用任何付费接口；提交模式支持只提交指定分镜。
-- 失败的分镜单独重试，不影响已完成的分镜。
-
-九、待你决定
-
-1. 出图模型：是否已有支持"参考图"的出图接口？没有的话选哪家？
-2. 视频模型：以 CogVideoX-3 为主，还是同时保留 Wan / Seedance 的图生视频？
-3. 台词镜头：接受"视频只出音效 + 后期配音"，还是要求视频模型直接对口型？
-4. 生成单位：按分镜（推荐）还是按段？
-
-
+注意：同一个 sceneIndex 不代表连续镜头。程序以 storyboard 的 continuity 字段为准。
 
 ================================================================
-图生视频：已实现部分与待你反馈的事项（CogVideoX-3 优先）
+二、最重要的命令
 ================================================================
 
-按你的决定（生成单位按分镜、视频只出音效、先做 CogVideoX-3），已在 main 实现：
+1. 只生成单个镜头的视频计划，不调用视频 API：
 
-一、已实现（有离线测试，尚未用真实 Key 跑过）
+python run_agent.py run --stages video --eps 1 --shots E01-01-C01
 
-1. 新协议：--video-protocol i2v
-   每个分镜一条任务，镜头 ID 为 E01-01-C01 这种写法，可用 --shots 单独提交或重试。
-2. 首帧：<分镜图目录>/<段号>/f<切序>.png，默认 output/frames，可用 --frames-dir 改。
-3. 首尾帧：加 --video-flf，用同段下一个分镜的图作尾帧；该模式自动改用 speed 画质（官方限制）。
-   同段最后一个分镜没有下一张图，自动退回单首帧。
-4. 提示词：只写"怎么动"（运镜 + 画面 + 音效 + 保持首帧外观），不再放 h3 全文；
-   超过 512 字符时自动压缩截断。
-5. 画幅：图生视频不传 size，按分镜图比例决定。
-6. 图片：自动转 Base64；格式只收 png/jpg/jpeg；超过 5MB 时用 Pillow 转 JPEG 压缩
-   （没装 Pillow 会明确报错）。Base64 不写进 video-manifest.json。
-7. 分镜图缺失：该镜头记为失败并说明缺哪张，不会调用 API，也不会计费。
-8. 其他适配器（Wan 等）收到图片会报"暂未支持图生视频"，等你后面再完善。
-9. 命令示例见 docs/video-model-adapters.md 的"图生视频"一节。
+2. 提交第一个镜头：
 
-二、需要你反馈 / 确认的事项（我没有把握，所以没有擅自定死）
+python run_agent.py run --stages video --eps 1 --shots E01-01-C01 --video-submit
 
-1. 分镜图怎么出（frames 阶段，目前没有实现，需要你定）
-   现在仓库里只有角色图、场景图的批量出图，没有"分镜图"的批量出图。
-   你说有支持参考图的出图接口，但没说具体是哪一家、接口格式是什么。
-   我的建议：
-   a) 你告诉我具体平台和型号（以及参考图参数的写法，或贴一段官方示例请求），
-      我按它实现 frames 阶段：每个分镜以 frame 提示词 + 对应角色图 + 场景图作参考图出图，
-      落到 output/frames/<段号>/f<切序>.png，和上面视频阶段的约定直接衔接。
-   b) 在这之前，你可以手工或用现有工具把分镜图放进该目录，视频阶段就能直接跑。
-   c) 参考图一次传几张通常有上限：建议每个分镜最多传"出镜角色图 + 场景图"，
-      不要把整集的图都塞进去。
+3. 提交下一个连续镜头：
 
-2. 图片参数的两处写法需用一次真实调用确认
-   a) 单张图时，我传的是字符串（image_url: "..."）；两张时传数组。
-      智谱国际站文档写的是数组类型，国内站文档写"URL 或 Base64"，两者表述不完全一致。
-   b) Base64 默认带 data URI 头（data:image/png;base64,...）。
-      如果接口报图片格式错误，在模型配置里加 "image_encoding": "base64" 改成纯字符串。
-   建议：先用 --shots 只提交 1 个分镜做小额试跑，确认后再批量。
-   如果试跑报错，把完整错误信息发我，我再改。
+python run_agent.py run --stages video --eps 1 --shots E01-01-C02 --video-submit
 
-3. 台词与口型
-   你选了"视频直接出音效"。需要知道：CogVideoX-3 的 with_audio 只生成 AI 音效，
-   文档没有承诺人物会说出台词、口型也不会对上。
-   建议：台词镜头先小额试跑看效果；如果人物不说话，后期再加配音轨。
-   这是模型能力，不是代码能解决的。
+如果 C02 是连续镜头，程序必须先确认 C01 已成功，并确认 C01 的真实最后一帧存在。
+没有最后一帧时，C02 直接拒绝提交，不会错误退回文字生视频。
 
-4. 5 秒 / 10 秒取整
-   CogVideoX-3 时长只有 5 或 10 秒：不超过 5 秒的分镜取 5，其余取 10。
-   一个 6 秒的分镜会生成 10 秒视频，多出的 4 秒需要后期裁切，也按 10 秒计费。
-   建议：分镜时长尽量落在 5 秒或 10 秒附近；或接受后期裁切（拼接阶段尚未实现）。
+4. 整集按顺序生成：
 
-5. 拼接阶段（concat）尚未实现
-   需要 FFmpeg。你想让程序自动拼接成整集（按分镜秒数裁切再拼），还是先导出各分镜片段手工剪辑？
-   告诉我选哪个，我再做。
+python run_agent.py run --stages video --eps 1 --video-submit
 
-6. 首尾帧的使用范围
-   首尾帧要求两张图构图相近。建议只在同一场景、相邻分镜机位变化不大时使用；
-   对话正反打（机位反转）不建议用首尾帧，容易出现变形过渡。
-   目前 --video-flf 是整次运行统一开关，不会自动判断；如果你想按分镜单独控制，
-   我可以加一个"只对指定镜头启用首尾帧"的参数。
+程序逐镜生成：上一镜完成 → 下载 → FFmpeg 提取最后一帧 → 判断下一镜 → 提交下一镜。
 
+5. 指定多个镜头：
 
+python run_agent.py run --stages video --eps 1 --shots E01-01-C01,E01-01-C02 --video-submit
+
+6. 只预览 Seedance 风格提示词：
+
+python run_agent.py run --stages video --eps 1 --video-protocol seedance
+
+默认协议：h3，直接使用 storyboard 的 h3Prompt。
 
 ================================================================
-分镜图（frames 阶段）：已实现
+三、连续性判断示例
 ================================================================
 
-一、三条命令（先不加 --frames-gen 是预览，只整理任务和参考图引用，不调用出图接口）
+例 1：同一场连续
 
-1. 单个分镜（编号 = 视频阶段的镜头 ID，E01-01-C01 = 第 1 集第 1 段第 1 个分镜）：
-   python run_agent.py run --stages frames --frames-gen --frames-only E01-01-C01
-   也可以写段号 E01-01（该段所有分镜）或 E01（整集），多个用逗号分隔。
-2. 一集批量：
-   python run_agent.py run --stages frames --frames-gen --eps 1
-3. 全部批量：
-   python run_agent.py run --stages frames --frames-gen
+E01-01-C01
+E01-01-C02
 
-已出好的分镜图自动跳过；要重出，加 --force（配合 --frames-only 只重出选中的）。
-出完后接视频阶段：
-   python run_agent.py run --stages video --eps 1 --video-protocol i2v --video-model cogvideox3_zhipu --shots E01-01-C01 --video-submit
+C02：
+  continuity.mode = inherit
+  continuity.referenceFrame = E01-01/f1.png
 
-二、分镜图编号与存放
+=> C02 使用 C01 视频真实最后一帧。
 
-output/frames/<段号>/f<切序>.png，例如 output/frames/E01-01/f1.png。
-f<切序> 就是该段第几个分镜；视频阶段首帧直接读这里。
-清单：output/frames/frames-manifest.json（每张图的提示词、参考图、状态、平台、错误）。
-接口返回 jpg 时按 jpg 保存，视频阶段会自动识别 png / jpg / jpeg。
+例 2：同一场但硬切
 
-三、参考图引用规则
+E01-01-C01
+E01-01-C02
 
-每个分镜自动引用，顺序固定，编号从 1 起：
-  图1.. 该分镜 characters 里的角色图（来自 images 阶段的角色图）
-  下一张  所属场景图（剧本该场 sceneId 对应的 art 场景图）
-  最后    该分镜 props 里的道具图
-提示词最前面自动加一段"参考图说明"，例如：
-  参考图说明：图1是角色「徐今朝」的外观（脸型、发型、服装）；图2是场景「院子」的空间布局与光线……
-然后才是分镜的 frame 提示词。参考图数量超过接口上限（max_references，默认 4）时，
-角色优先，后面的丢弃并写进清单的 missing_references。
-某个角色/场景/道具还没有参考图时，清单里会写明缺哪张，不会假装引用了；
-先运行 images 阶段补出这些图，再出分镜图，一致性才有保证。
+C02：
+  continuity.mode = cut
 
-四、配置：不需要新增
+=> C02 不使用 C01 最后一帧。
 
-分镜图和角色图、场景图共用 models.json 的 image 号池（同一个接口），不另设配置。
-请求体和角色图、场景图一致（model / prompt / size / n / quality），只多一个参考图字段：
-  "image": [参考图1, 参考图2, ...]     // Base64 data URI，默认字段名 image
-平台的参考图字段写法不同时，在 image 条目里按需追加这些可选字段（都不必填）：
-  "sizes": {"16:9": "1536x1024", "9:16": "1024x1536"}   // 竖屏剧按画幅选尺寸，没有就用 size
-  "reference_field": "image"            // 参考图放在哪个字段
-  "reference_style": "list"             // list | single（只传第 1 张）| objects（[{"image_url": ...}]）
-  "image_encoding": "data_uri"          // 或 base64
-  "max_references": 4                   // 最多传几张
-  "request_template": {...}             // 请求体整体特殊时才用，可用 {{model}} {{prompt}} {{size}} {{quality}} {{images}} {{image}}
+例 3：跨 segment 但同一场连续
 
-五、需要你确认的事项
+E01-01-C02
+E01-02-C01
 
-1. 先小额试跑：用单个分镜命令出 1 张，看日志打印的请求体（参考图只显示文件名）和出图效果。
-   如果接口报参考图字段错误，把完整错误发我，通常只要在 image 条目里加 reference_field / reference_style。
-2. 响应格式沿用角色图、场景图的解析（data[0].b64_json 或 url），不需要改。
+E01-02：
+  continuityMode = continuous
+  C01.continuity.mode = inherit
+  C01.continuity.referenceFrame = E01-01/f2.png
 
+=> E01-02-C01 使用 E01-01-C02 视频真实最后一帧。
 
-==== 角色多视图设定图 + FLUX 提示词优化 ====
-1. 角色出图默认回到多角度设定图（image.sheet：半身像 + 正/侧/背三视图 + 细节条）。想要单人半身像，在 models.json 里写 "image_style": {"character_mode": "portrait"}。
-2. characters / art 阶段写 JSON 之前，会调文本模型按 skills/flux-image-best-practices 优化 image.prompt / image.sheet（角色、场景、道具）。失败自动保留原提示词；缓存 output/work/flux/；AGENT_FLUX_OPTIMIZE=0 关闭。
-3. 已生成过的 cast.json / art.json 不会自动改写：用 --force 重跑 characters / art 阶段才会走新流程。
+例 4：换场
 
-==== 批量优化提示词命令 ====
-python run_agent.py run --stages optimize --optimize-mode flux|wan|both [--optimize-kinds characters,scenes,props] [--optimize-only 名字或编号,...]
-结果：output/prompts/<书名>-<characters|scenes|props>-<flux|wan>.json，不改 cast.json / art.json。wan 的写法依据公开的 Wan 提示词公式，不是上游仓库原文。
+E01-01-C02 -> sceneIndex=1
+E01-02-C01 -> sceneIndex=2
 
-==== 角色卡分批生成 ====
-characters 阶段每 10 个角色合并成一次请求（环境变量 AGENT_CARD_BATCH 可改，设 1 即逐个角色）；一批不合格只重来这一批。同批的 FLUX 提示词优化并发执行；出卡前会清掉名单之外的旧 card-*.json。
-视频：cogvideox_zhipu 适配器按 model 分流：model=vidu2-reference 走参考生视频；其他（如 cogvideox-3）走文生 / 图生 / 首尾帧。
+=> 不继承上一镜最后一帧；重新使用新场景图（如果有）+ 角色/道具参考图。
 
-==== 分镜图：上一镜参考帧 ====
-frames 阶段的参考图顺序：角色设定图 → 场景设定图 → 道具设定图 → 上一镜参考帧，提示词里写"图N是…"。
-上一镜参考帧只在 cut.continuity.mode == "inherit" 时加入：同段取上一切；段首取前一段末切（该段 continuityMode 为 hard_cut 时不取）；continuity.referenceFrame 写了已知分镜编号则以它为准。旧分镜没有 continuity 字段时不引用。
-名额不够时先舍弃道具、场景，保留角色和上一镜参考帧。上一镜必须先有图：整段 / 整集按顺序出图会自动用刚出的图；单独出某一镜而上一镜还没图时，本张不用并在清单的 missing_references 里提示。
-提示词里说明：上一镜参考帧只用来继承人物身份、服装、姿态、道具持握和空间关系，本镜机位仍以 frame 为准。
+================================================================
+四、最后一帧在哪里
+================================================================
 
-==== 分镜图提示词：英文改写 / 固定结尾 / 镜头信息 ====
-frames 阶段出图那一刻（--frames-gen）：
-1. 把中文 frame + 镜头信息（景别 size、焦距景深 lens、机位 cameraPosition、构图 composition、视线 eyeline、焦点 focus、cut.continuity.stateBefore 位置状态、段内 blocking 走位）交给 models.json 的 text 模型，改写成一条英文提示词；参考图说明也用英文（"Image 1 is the character sheet of 「名字」 …"）。有参考图的角色保留原名（指向对应参考图），没有参考图的角色用外貌描述代替名字。
-2. 改写结果缓存在 output/work/frames-en/，清单里 frame_en 记录英文版，prompt_sent 记录实际发出的提示词。
-3. 改写失败 / 没配 text 模型 / 结果混有中文：自动退回中文 frame，并把镜头信息追加成中文一行（"镜头信息：景别：…"）。AGENT_FRAME_EN=0 可关闭改写。
-4. 无论哪种，提示词末尾都统一追加固定句：No text, no watermark, no borders — a single clean full-bleed frame.
+视频成功下载后：
+
+output/video/last-frames/E01-01-C01.png
+
+这是下一连续镜头真正使用的首关键帧。
+
+不再使用：
+  output/frames/<段号>/f<切序>.png
+
+静态 frames 阶段仍可独立运行，但不再决定视频连续性。
+
+================================================================
+五、video-manifest.json
+================================================================
+
+output/video/video-manifest.json 每个镜头包含：
+
+  input_mode
+    scene_or_assets / previous_last_frame
+
+  continuity_decision
+    程序实际采用的连续性判断结果
+
+  previous_shot_id
+    当前镜头依赖的上一镜
+
+  scene_fixed
+    是否找到可用场景图
+
+  initial_reference
+    scene_reference / previous_last_frame / none
+
+  last_frame_path
+    当前视频真实最后一帧
+
+================================================================
+六、模型要求
+================================================================
+
+新的设计要求视频模型支持参考图 / 图生视频输入。
+当前代码对 Wan R2V 的支持最完整：
+
+  adapter = aliyun_wan
+  mode = r2v
+
+R2V 参考媒体顺序：
+  1. 连续镜头：上一视频真实最后一帧（本镜首关键帧）
+  2. 场景图（固定场景时）
+  3. 角色参考图
+  4. 道具参考图
+
+总参考图数量不能超过模型接口允许的上限。
+
+================================================================
+七、models.json 示例
+================================================================
+
+{
+  "video": [
+    {
+      "key": "wan-r2v",
+      "name": "Wan R2V",
+      "adapter": "aliyun_wan",
+      "mode": "r2v",
+      "submit_url": "https://your-provider.example/v1/videos/generations",
+      "status_url_template": "https://your-provider.example/v1/tasks/{task_id}",
+      "api_key_env": "VIDEO_API_KEY",
+      "model": "your-r2v-model"
+    }
+  ]
+}
+
+实际 URL、模型名、请求字段和鉴权方式必须按供应商官方接口填写。
+
+================================================================
+八、旧命令
+================================================================
+
+以下命令已经删除：
+
+  --video-protocol i2v
+  --frames-dir
+  --video-flf
+
+原因：旧逻辑依赖静态分镜图作为视频首帧，并不能实现“上一段视频真实最后一帧 → 下一段视频首关键帧”的连续链路。
+
+================================================================
+九、FFmpeg
+================================================================
+
+必须安装 FFmpeg，并保证命令：
+
+  ffmpeg
+
+可以直接在终端执行。
