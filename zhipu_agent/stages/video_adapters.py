@@ -104,12 +104,28 @@ def _wan_r2v_prompt(item: dict) -> str:
 
 
 def _prepare_prompt(provider: dict, item: dict) -> None:
+    """Optimize lazily for the provider being attempted, always from the untouched source prompt."""
     from ..video_middleware import optimize_prompt_with_skill
-    adapter = str(provider.get("adapter") or "generic").strip().lower(); original = str(item.get("prompt_original") or item.get("prompt") or "").strip()
-    if item.get("prompt_optimized_adapter") == adapter and item.get("prompt_optimized"):
-        item["prompt"] = item["prompt_optimized"]; return
-    optimized = optimize_prompt_with_skill(adapter, original)
-    item["prompt_original"], item["prompt_optimized"], item["prompt_optimized_adapter"], item["prompt"] = original, optimized, adapter, optimized
+
+    adapter = str(provider.get("adapter") or "generic").strip().lower()
+    original = str(item.get("prompt_original") or item.get("prompt") or "").strip()
+    cache = item.get("prompt_optimized_by_adapter_cache")
+    if not isinstance(cache, dict):
+        cache = {}
+
+    # A failed provider may be followed by a provider with different prompt rules.
+    # Never feed the previous provider's optimized prompt into the next optimizer.
+    if adapter in cache:
+        optimized = str(cache[adapter])
+    else:
+        optimized = optimize_prompt_with_skill(adapter, original)
+        cache[adapter] = optimized
+
+    item["prompt_original"] = original
+    item["prompt_optimized_by_adapter_cache"] = cache
+    item["prompt_optimized"] = optimized
+    item["prompt_optimized_adapter"] = adapter
+    item["prompt"] = optimized
 
 
 def build_request(provider: dict, item: dict, manifest: dict) -> dict:
