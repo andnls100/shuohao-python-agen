@@ -231,6 +231,14 @@ class StoryboardRepairTest(unittest.TestCase):
             if old is not None:
                 os.environ["AGENT_STORYBOARD_PARAMS"] = old
 
+    def test_beats_odd_shapes(self):
+        from zhipu_agent.stages.storyboard_repair import repair_beats_and_symbols
+        doc = {"episodes": [{"ep": 1, "segments": [{"id": "E01-01", "sceneIndex": 1, "cuts": [
+            {"beats": ["1"]}, {"beats": "2-4"}, {"beats": [5, 6, 7]}, {"beats": [8, None]}, {"beats": [9, 9]}]}]}]}
+        repair_beats_and_symbols(doc)
+        self.assertEqual([c["beats"] for c in doc["episodes"][0]["segments"][0]["cuts"]],
+                         [[1, 1], [2, 4], [5, 7], [8, 8], [9, 9]])
+
 
 if __name__ == "__main__":
     unittest.main()
