@@ -35,6 +35,7 @@ def _build_parser() -> argparse.ArgumentParser:
             s.add_argument("--prompt-lang", default="en", choices=["en", "zh"], help="H3 提示词语言")
             s.add_argument("--fight-enhancement", default="auto", choices=["off", "auto", "enhanced"], help="打戏增强")
             s.add_argument("--visual-style", default="live-action", choices=["manju", "live-action"], help="视觉提示词风格")
+            s.add_argument("--visual-style-prompt", default="", help="自定义视觉风格描述；优先于 --visual-style，并作为视频提示词硬约束")
             s.add_argument("--max-chars", type=int, default=30, help="最多角色数")
             s.add_argument("--images", help="场景设定图目录")
             s.add_argument("--refs-names", help="refs 阶段只处理这些角色，逗号分隔")
@@ -153,6 +154,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     opts: Dict[str, Any] = {
         "params": params, "aspect": args.aspect, "prompt_lang": args.prompt_lang,
         "fight_enhancement": args.fight_enhancement, "visual_style": args.visual_style,
+        "visual_style_prompt": args.visual_style_prompt.strip(),
         "max_chars": args.max_chars, "refs_look": args.refs_look or ("写实" if args.visual_style == "live-action" else "动漫"),
         "refs_gen": args.refs_gen, "optimize_mode": args.optimize_mode,
         "optimize_kinds": [k.strip() for k in args.optimize_kinds.split(",") if k.strip()],

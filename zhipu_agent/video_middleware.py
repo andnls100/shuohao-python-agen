@@ -71,19 +71,46 @@ def optimize_prompt(adapter: str, prompt: str) -> str:
     return text
 
 
-def optimize_prompt_with_skill(adapter: str, prompt: str) -> str:
-    """每次只优化一个即将提交的视频镜头；不保留跨镜头对话历史。"""
+def _apply_style_constraint(prompt: str, style_instruction: str) -> str:
+    """Append an authoritative style constraint after optimization."""
     text = str(prompt or "").strip()
+    style = str(style_instruction or "").strip()
+    if not style:
+        return text
+    marker = "视觉风格硬约束（最高优先级，必须遵守）"
+    text = re.sub(r"视觉风格硬约束（最高优先级，必须遵守）：.*$", "", text, flags=re.S).strip()
+    return f"{text}\\n\\n{marker}：{style}" if text else f"{marker}：{style}"
+
+
+def optimize_prompt_with_skill(adapter: str, prompt: str, style_instruction: str = "") -> str:
+    """Optimize one shot while treating the selected/user-defined visual style as immutable."""
+    text = str(prompt or "").strip()
+    style = str(style_instruction or "").strip()
     rules = skill_instructions(adapter)
     if not rules:
-        return optimize_prompt(adapter, text)
+        return _apply_style_constraint(optimize_prompt(adapter, text), style)
 
+    if style:
+        style_rules = (
+            "\\n\\n视觉风格硬约束：\\n"
+            + style
+            + "\\n这是最高优先级要求。删除或改写与该风格冲突的描述，不得反转风格。"
+            "不得额外添加国漫、动漫、插画、卡通、写实摄影等未被指定的风格标签。"
+        )
+    else:
+        style_rules = (
+            "\\n\\n视觉风格硬约束：必须保留原提示词中已有的视觉风格及限制，"
+            "不得自行新增、替换或反转风格；原提示词未指定风格时，不得创造新风格。"
+        )
     system = (
-        "你是视频生成提示词优化器。只优化当前一个镜头，不处理其他镜头。\n"
+        "你是视频生成提示词优化器。只优化当前一个镜头，不处理其他镜头。\\n"
         "严格遵守下面的模型技能包规则。保留原提示词中的事实、人物、动作、镜头和时序意图，"
         "不要虚构剧情；删除冗余说明；输出只允许是一段可直接提交给视频模型的最终 prompt，"
-        "不要解释、不要 Markdown、不要前后引号。\n\n"
-        f"模型技能包规则：\n{rules}"
+        "不要解释、不要 Markdown、不要前后引号。\\n"
+        "视觉风格是不可擅自修改的硬约束。"
+        + style_rules
+        + "\\n\\n模型技能包规则：\\n"
+        + rules
     )
     try:
         optimized = chat(
@@ -95,15 +122,14 @@ def optimize_prompt_with_skill(adapter: str, prompt: str) -> str:
             temperature=0,
         ).strip()
         print(
-            f"\n===== 视频技能包优化器返回内容（{adapter}，{len(optimized)} 字）=====\n"
-            f"{optimized}\n"
-            "===== 优化器返回内容结束 =====\n",
+            f"\\n===== 视频技能包优化器返回内容（{adapter}，{len(optimized)} 字）=====\\n"
+            f"{optimized}\\n"
+            "===== 优化器返回内容结束 =====\\n",
             flush=True,
         )
     except Exception:
-        # 优化器失败时不阻断视频生成，仍执行确定性模型约束。
         optimized = text
-    return optimize_prompt(adapter, optimized)
+    return _apply_style_constraint(optimize_prompt(adapter, optimized), style)
 
 
 def prepare_prompt(provider: dict, prompt: str) -> str:

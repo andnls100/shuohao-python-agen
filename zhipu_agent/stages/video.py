@@ -47,7 +47,7 @@ def _prompt(segment: dict, protocol: str) -> str:
     return "\n\n".join(parts)
 
 
-def _shot_prompt(segment: dict, cut: dict, shot_index: int, visual_style: str) -> str:
+def _shot_prompt(segment: dict, cut: dict, shot_index: int, visual_style: str, visual_style_prompt: str = "") -> str:
     parts = []
     if segment.get("blocking"):
         parts.append("【人物关系与构图逻辑】\n" + str(segment["blocking"]))
@@ -60,7 +60,7 @@ def _shot_prompt(segment: dict, cut: dict, shot_index: int, visual_style: str) -
     if segment.get("music"): parts.append("音乐：" + str(segment["music"]))
     if segment.get("h3Prompt"): parts.append("剧情与台词上下文（仅供本镜头参考）：\n" + str(segment["h3Prompt"]))
     parts.append("只生成当前这个镜头；保持角色外观、服装、场景和空间关系连续；避免字幕、画面文字和多余人物。")
-    parts.append(visual_style_instruction(visual_style))
+    parts.append(visual_style_instruction(visual_style, visual_style_prompt))
     return "\n\n".join(parts)
 
 
@@ -91,7 +91,7 @@ def _is_continuous(previous: Optional[dict], current: dict) -> tuple[bool, str]:
     return True, "explicit_inherit"
 
 
-def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str, shots: Optional[list] = None) -> dict:
+def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str, shots: Optional[list] = None, visual_style_prompt: str = "") -> dict:
     source = ctx.artifact("storyboard")
     if not source.is_file(): raise FileNotFoundError(f"找不到分镜文件：{source}；请先运行 storyboard 阶段")
     board = read_json(source); wanted = set(eps or []); items = []; previous = None
@@ -110,7 +110,7 @@ def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str
                            "shotIndex": cut_index, "frame_ref": f"{sid}/f{cut_index}.png", "duration_seconds": duration,
                            "reference_assets": refs, "continuity": cut.get("continuity") or {},
                            "continuity_mode": str(segment.get("continuityMode") or ""),
-                           "prompt": _shot_prompt(segment, cut, cut_index, visual_style) if protocol == "seedance" else _prompt(segment, protocol),
+                           "prompt": _shot_prompt(segment, cut, cut_index, visual_style, visual_style_prompt) if protocol == "seedance" else _prompt(segment, protocol),
                            "state": "planned", "task_id": None, "video_url": None, "video_path": None, "last_frame_path": None, "error": None}
                 continuous, reason = _is_continuous(previous, current)
                 current["input_mode"] = "previous_last_frame" if continuous else "scene_or_assets"
@@ -125,6 +125,8 @@ def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str
         if unknown: raise ValueError("找不到指定镜头 ID：" + "、".join(sorted(unknown)))
     if not items: raise ValueError("所选集没有可生成的视频镜头")
     return {"version": 3, "source": ctx.title, "protocol": protocol, "visual_style": visual_style,
+            "visual_style_prompt": str(visual_style_prompt or "").strip(),
+            "visual_style_instruction": visual_style_instruction(visual_style, visual_style_prompt),
             "aspect_ratio": board.get("aspectRatio", "16:9"),
             "continuity_rule": "explicit inherit + same episode + same scene + immediately previous shot", "items": items}
 
@@ -358,9 +360,9 @@ def check(ctx: Context) -> Result:
 
 
 def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: bool = False, visual_style: str = "manju",
-        shots: Optional[list] = None, video_model: Optional[str] = None, frames_dir: Optional[Path] = None, flf: bool = False) -> Path:
+        visual_style_prompt: str = "", shots: Optional[list] = None, video_model: Optional[str] = None, frames_dir: Optional[Path] = None, flf: bool = False) -> Path:
     if protocol == "i2v": raise ValueError("旧的 --video-protocol i2v 已取消：视频阶段现在直接按连续镜头规则生成")
-    root = ctx.out / "video"; root.mkdir(parents=True, exist_ok=True); path = artifact(ctx); manifest = _collect(ctx, eps, protocol, visual_style, shots)
+    root = ctx.out / "video"; root.mkdir(parents=True, exist_ok=True); path = artifact(ctx); manifest = _collect(ctx, eps, protocol, visual_style, shots, visual_style_prompt)
     previous = {}
     if path.is_file() and not ctx.force:
         try: previous = {str(x.get("id")): x for x in read_json(path).get("items", [])}
