@@ -98,7 +98,7 @@ def repair_minor_cut_durations(doc: Dict[str, Any], lang: str = "en",
     """Snap tiny upper-bound overruns (e.g. 5.1s) to 5.0s, then resync H3 timing."""
     repaired: List[str] = []
     try:
-        upper = float((doc.get("params") or {}).get("maxCutSeconds", 10))
+        upper = float((doc.get("params") or {}).get("maxCutSeconds", 8))
     except (TypeError, ValueError):
         upper = 10.0
     for segment in _segments(doc):
@@ -133,7 +133,7 @@ def repair_dialogue_fit(doc: Dict[str, Any], script: Dict[str, Any], lang: str =
     """
     params = doc.get("params") or {}
     try:
-        upper = float(params.get("maxCutSeconds", 10))
+        upper = float(params.get("maxCutSeconds", 8))
     except (TypeError, ValueError):
         upper = 10.0
     try:
@@ -203,7 +203,7 @@ def repair_deterministic_storyboard(doc: Dict[str, Any], lang: str = "en") -> Li
 
 
 def balance_episode_durations(doc: Dict[str, Any], script: Dict[str, Any],
-                              tolerance: float = 1.0, min_cut_seconds: float = 2.0) -> List[str]:
+                              tolerance: float = 1.0, min_cut_seconds: float = 4.0) -> List[str]:
     """Trim only action-only cuts, in 0.1s steps, when an episode exceeds its target window."""
     params = doc.get("params") or {}
     try:

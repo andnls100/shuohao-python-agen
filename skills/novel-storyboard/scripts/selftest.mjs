@@ -111,7 +111,7 @@ eq(stats.dialogue.length, 19, '第 1 集 19 句台词全部对到段和切');
 ok(stats.dialogue.every((d) => /^E01-\d{2}$/.test(d.segment) && d.cut >= 1), '对齐单带段号和切序');
 eq(stats.episodes[0].withLines, 10, '台词段计数——本样例每段都带台词，纯画面收在分镜级');
 eq(paramsOf({}).maxSegmentSeconds, DEFAULT_PARAMS.maxSegmentSeconds, '默认段上限 15 秒');
-eq(paramsOf({}).maxCutSeconds, 5, '默认分镜上限 5 秒');
+eq(paramsOf({}).maxCutSeconds, 8, '默认分镜上限 8 秒');
 eq(paramsOf({ params: { maxCutSeconds: 4 } }).maxCutSeconds, 4, '分镜上限可调');
 
 /* ---------------- 质量门：全绿基线 ---------------- */

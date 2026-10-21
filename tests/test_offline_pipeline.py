@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 import tempfile
@@ -30,6 +31,9 @@ BOOK = ROOT / "skills" / "novel-characters" / "examples" / "渡口.txt"
 def _context(out: Path):
     settings = load_settings(api_key="fake", model="fake-model", concurrency=2, fix_rounds=2)
     return workflow.build_context(settings, BOOK, out, interactive=False)
+
+
+os.environ.setdefault("AGENT_STORYBOARD_PARAMS", '{"minCutSeconds": 2, "maxCutSeconds": 10}')  # 样例分镜是 3 秒节奏
 
 
 def _outline_params():
