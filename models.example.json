@@ -34,25 +34,28 @@
     {"name": "百炼-CosyVoice", "provider": "cosyvoice_tts", "speech_url": "https://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer", "voice_design_url": "https://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/customization", "api_key_env": "DASHSCOPE_API_KEY", "model": "cosyvoice-v3.5-flash", "response_format": "mp3", "sample_rate": 24000, "voice_language_hints": ["zh"], "language_hints": ["zh"], "voice_preview_text": "你好，我是这个故事中的角色，很高兴认识你。", "timeout": 120}
   ],
   "video": [
-    {
-      "key": "wan_prime",
-      "name": "阿里云百炼-Wan3.0-Video-Prime",
-      "adapter": "aliyun_wan",
-      "enabled": true,
-      "active": true,
-      "submit_url": "https://{workspace_id}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis",
-      "status_url_template": "https://{workspace_id}.cn-beijing.maas.aliyuncs.com/api/v1/tasks/{task_id}",
-      "workspace_id_env": "DASHSCOPE_WORKSPACE_ID",
-      "api_key_env": "DASHSCOPE_API_KEY",
-      "model": "wan3.0-video-prime",
-      "resolution": "480P",
+ 
+ {
+	  "key": "wan_r3",
+	  "name": "wan3.0-video-prime",
+	  "adapter": "aliyun_wan",
+	  "enabled": true,
+	  "active": false,
+	  "submit_url": "https://llm-yygg5z4v26uyzh2y.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis",
+	  "status_url_template": "https://llm-yygg5z4v26uyzh2y.cn-beijing.maas.aliyuncs.com/api/v1/tasks/{task_id}",
+	  "workspace_id": "llm-yygg5z4v26uyzh2y",
+	  "api_key": "---",
+	  "model": "wan3.0-video-prime",
+	  "resolution": "720P",
       "ratio": "16:9",
-      "prompt_extend": true,
+      "prompt_extend": false,
       "timeout": 120,
       "poll_interval": 15,
       "max_wait": 1800,
-      "note": "普通 Wan 文生视频配置。"
-    },
+      "note": "Wan R2V：参考图自动从当前分镜引用的 character/art 资产读取，不在 models.json 中配置参考图；使用 --video-model wan_r2v。"
+	   
+	   
+	},
     {
       "key": "wan_r2v",
       "name": "阿里云百炼-Wan2.7-R2V",
