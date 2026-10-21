@@ -56,6 +56,12 @@ Generate selected cuts sequentially:
 python run_agent.py run --stages video --eps 1 --shots E01-01-C01,E01-01-C02 --video-submit
 ```
 
+Generate whole segments (all cuts, in order):
+
+```bash
+python run_agent.py run --stages video --eps 1 --segments E01-01,E01-02 --video-submit
+```
+
 Preview Seedance-style prompts:
 
 ```bash
