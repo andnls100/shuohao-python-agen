@@ -70,6 +70,12 @@ python run_agent.py run --stages video --eps 1 --shots E01-01-C01,E01-01-C02 --v
 python run_agent.py run --stages video --eps 1 --segments E01-01 --video-submit
 python run_agent.py run --stages video --eps 1 --segments E01-01,E01-02 --video-submit
 
+5.2 合并调用（默认开启）：同一段内、与上一镜连续（continuity=inherit 且引用上一镜）的镜头合并为一次视频调用，总时长不超过 10 秒；
+    新场景/硬切/跨段非连续的镜头不会合并。合并后的 ID 形如 E01-01-C01-C02，--shots 写其中任一镜头 ID 即可。
+
+不合并（逐镜头一次调用）：python run_agent.py run --stages video --eps 1 --segments E01-01 --video-merge-seconds 0 --video-submit
+改上限为 8 秒：  python run_agent.py run --stages video --eps 1 --segments E01-01 --video-merge-seconds 8 --video-submit
+
 说明：每个镜头是否接上一镜最后一帧，始终按整集顺序判断；段首镜头若与上一段连续，需上一段最后一镜已生成，否则报错提示先生成。
 
 6. 只预览 Seedance 风格提示词：

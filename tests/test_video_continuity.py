@@ -54,6 +54,41 @@ class VideoContinuityTest(unittest.TestCase):
             item = video._collect(ctx, None, "seedance", "live-action")["items"][1]
         self.assertEqual(item["input_mode"], "previous_last_frame")
 
+    def test_merge_continuous_shots_up_to_ten_seconds(self):
+        inh = lambda n: {"mode": "inherit", "referenceFrame": f"E01-01/f{n}.png"}
+        board = {"episodes": [{"ep": 1, "segments": [
+            {"id": "E01-01", "sceneIndex": 1, "cuts": [
+                {"seconds": 4, "shot": "a"},
+                {"seconds": 4, "shot": "b", "continuity": inh(1)},
+                {"seconds": 4, "shot": "c", "continuity": inh(2)},
+                {"seconds": 3, "shot": "d", "continuity": inh(3)},
+            ]},
+            {"id": "E01-02", "sceneIndex": 1, "continuityMode": "continuous", "cuts": [
+                {"seconds": 3, "shot": "e", "continuity": {"mode": "inherit", "referenceFrame": "E01-01/f4.png"}},
+            ]},
+        ]}]}
+        ctx = self._ctx(board)
+        with mock.patch.object(video, "_reference_assets", return_value=[]):
+            items = video._collect(ctx, None, "seedance", "live-action", merge_seconds=10)["items"]
+            single = video._collect(ctx, None, "seedance", "live-action")["items"]
+        self.assertEqual(len(single), 5)
+        self.assertEqual([i["id"] for i in items], ["E01-01-C01-C02", "E01-01-C03-C04", "E01-02-C01"])
+        self.assertEqual(items[0]["duration_seconds"], 8)
+        self.assertEqual(items[1]["shot_ids"], ["E01-01-C03", "E01-01-C04"])
+        self.assertEqual(items[1]["previous_shot_id"], "E01-01-C01-C02")
+        self.assertEqual(items[2]["input_mode"], "previous_last_frame")
+        self.assertEqual(items[2]["previous_shot_id"], "E01-01-C03-C04")
+        self.assertEqual(items[0]["input_mode"], "scene_or_assets")
+
+    def test_merge_never_crosses_cut(self):
+        board = {"episodes": [{"ep": 1, "segments": [
+            {"id": "E01-01", "sceneIndex": 1, "cuts": [
+                {"seconds": 3, "shot": "a"}, {"seconds": 3, "shot": "b", "continuity": {"mode": "cut"}}]}]}]}
+        ctx = self._ctx(board)
+        with mock.patch.object(video, "_reference_assets", return_value=[]):
+            items = video._collect(ctx, None, "seedance", "live-action", merge_seconds=10)["items"]
+        self.assertEqual([i["id"] for i in items], ["E01-01-C01", "E01-01-C02"])
+
 
 if __name__ == "__main__":
     unittest.main()
