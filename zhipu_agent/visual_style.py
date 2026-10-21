@@ -16,8 +16,11 @@ VISUAL_STYLES = {
 }
 
 
-def visual_style_instruction(style: str) -> str:
-    """Return the prompt guidance for a validated visual style."""
+def visual_style_instruction(style: str, custom_style: str = "") -> str:
+    """Return custom user style when provided; otherwise use the selected preset."""
+    custom = str(custom_style or "").strip()
+    if custom:
+        return custom
     try:
         return VISUAL_STYLES[style]
     except KeyError as exc:
