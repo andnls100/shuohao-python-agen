@@ -2,7 +2,7 @@
 
 三层：**集 → 段（segment）→ 分镜（cut）**。
 
-- **段** = 一次视频生成调用，总时长 ≤ `maxSegmentSeconds`（默认 15 秒），不跨场次——换景必开新段
+- **段** = 一次视频生成调用，总时长 ≤ `maxSegmentSeconds`（默认 20 秒），不跨场次——换景必开新段
 - **分镜** = 段内的一次剪切，`minCutSeconds`–`maxCutSeconds`（默认 4–8 秒），各自认领剧本节拍、带景别运镜和一张分镜图
 - **分镜图** = 每个分镜一张关键帧：第 1 切的是**主分镜图**（钉在 0.00 秒），其余是**子分镜图**（各钉在自己的切点时刻）。**每段一个文件夹**：`<段号>/f<切序>.png` + `prompt.md`（export 生成，内容就是 h3Prompt）
 
@@ -11,7 +11,7 @@
   "source": "渡口",
   "aspectRatio": "16:9",
   "promptLang": "zh",
-  "params": { "maxSegmentSeconds": 15, "minCutSeconds": 4, "maxCutSeconds": 8, "maxOnScreen": 3, "tolerance": 1.0 },
+  "params": { "maxSegmentSeconds": 20, "minCutSeconds": 4, "maxCutSeconds": 8, "maxOnScreen": 3, "tolerance": 1.0 },
   "episodes": [ { "ep": 1, "segments": [ ... ] } ]
 }
 ```

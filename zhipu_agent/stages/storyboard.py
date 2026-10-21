@@ -2,7 +2,7 @@
 
 流程（对应 skills/novel-storyboard/SKILL.md）：
   seed      每批 ≤3 集，把剧本节拍展开成工作底稿 seedScenes（每拍几秒是算出来的）
-  切镜      批内每集一次模型调用：先按剧情单元分段（≤15 秒），段内切 4–8 秒的分镜，写 frame / shot / h3Prompt
+  切镜      批内每集一次模型调用：先按剧情单元分段（≤20 秒），段内切 4–8 秒的分镜，写 frame / shot / h3Prompt
   校验      先自动修复轻微时长超限并重算 H3 时间；其余可定位错误只修单个分镜
             → 不因一个分镜的问题重新生成整集；无法定位或修复失败则保存批次并停止
   输出      md / html 报告 + export 导出投产包（每段一个文件夹）
@@ -335,7 +335,7 @@ def run(
                     + "\n"
                 )
             prompt = (
-                f"## 任务\n给第 {ep} 集切分镜：先按剧情单元分段（每段 9–15 秒、不跨场），段内切 4–8 秒的分镜。\n\n"
+                f"## 任务\n给第 {ep} 集切分镜：先按剧情单元分段（每段 9–20 秒、不跨场），段内切 4–8 秒的分镜。\n\n"
                 + f"## 画幅与语言\naspectRatio = {aspect}；promptLang = {prompt_lang}（h3Prompt 正文、对齐行、镜头标记、声景和配乐字段都必须使用该语言；台词在 <d> 里保留原文）。\n\n"
                 + ("## 中文模式硬约束\n除协议固定 token 和台词外，frame、shot、h3Prompt 全部使用简体中文。h3Prompt 使用“参考图与目标视频的对齐——”开头，字段为“整体视听描述：”“整体音景：”“非叙事配乐：”，镜头标记使用连续的 [镜头 1]、[镜头 2]。禁止使用英文版 How the reference pictures align、integrated_multimodal_description、overall_soundscape、non_diegetic_music 或 [Shot k]。\n\n" if prompt_lang == "zh" else "")
                 + ("## 英文模式硬约束\nh3Prompt 正文、对齐行、镜头标记、声景和配乐字段全部使用英文及官方英文骨架，镜头标记使用连续的 [Shot 1]、[Shot 2]。\n\n" if prompt_lang == "en" else "")
