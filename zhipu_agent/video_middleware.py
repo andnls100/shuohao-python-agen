@@ -87,9 +87,9 @@ def optimize_prompt_with_skill(adapter: str, prompt: str, style_instruction: str
     text = str(prompt or "").strip()
     style = str(style_instruction or "").strip()
     print(
-        f"\\n===== 生视频提示词（优化前，{adapter}，{len(text)} 字）=====\\n"
-        f"{text}\\n"
-        "===== 优化前提示词结束 =====\\n",
+        f"\n===== 生视频提示词（优化前，{adapter}，{len(text)} 字）=====\n"
+        f"{text}\n"
+        "===== 优化前提示词结束 =====\n",
         flush=True,
     )
     rules = skill_instructions(adapter)
