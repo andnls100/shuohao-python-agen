@@ -142,7 +142,28 @@ def build_request(provider: dict, item: dict, manifest: dict) -> dict:
                 "size": str(provider.get("size") or "1280x720"), "movement_amplitude": str(provider.get("movement_amplitude") or "auto"),
                 "with_audio": bool(provider.get("with_audio", True))}
     if adapter == "aliyun_wan":
-        mode = str(provider.get("mode") or "").lower() or ("r2v" if "r2v" in str(context["model"]).lower() else "")
+        model_name = str(context["model"]).lower()
+        mode = str(provider.get("mode") or "").lower() or ("r2v" if "r2v" in model_name else "")
+        if "wan3.0-video" in model_name:
+            media = item.get("reference_media") or []
+            prompt = str(context["prompt"]).strip()
+            labels = []
+            for index, entry in enumerate(media, 1):
+                if entry.get("type") in ("reference_image", "reference_video", "reference_audio") and entry.get("label"):
+                    labels.append(f"图{index}是{entry['label']}" if entry["type"] == "reference_image" else f"素材{index}是{entry['label']}")
+            if labels:
+                prompt = "；".join(labels) + "。\n\n" + prompt
+            ratio = context["aspect_ratio"] if context["aspect_ratio"] in ("21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive") else "adaptive"
+            parameters = {
+                "resolution": context["resolution"] if context["resolution"] in ("480P", "720P", "1080P") else "480P",
+                "ratio": provider.get("ratio") or ratio,
+                "duration": max(2, min(30, int(round(float(item["duration_seconds"]))))),
+                "prompt_extend": bool(provider.get("prompt_extend", True)),
+            }
+            body = {"model": context["model"], "input": {"prompt": prompt}, "parameters": parameters}
+            if media:
+                body["input"]["media"] = [{"type": entry["type"], "url": entry["url"]} for entry in media]
+            return body
         if mode == "r2v":
             media = _reference_media(provider, item)
             if not media: raise ValueError("Wan R2V 没有参考媒体")
