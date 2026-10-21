@@ -233,3 +233,12 @@ R2V 参考媒体顺序：
 - 临时改范围，不改代码：设置环境变量 AGENT_STORYBOARD_PARAMS，例如
   Windows PowerShell:  $env:AGENT_STORYBOARD_PARAMS='{"minCutSeconds":2,"maxCutSeconds":10}'
 - 改完时长规则后需重新切分镜：python run_agent.py run --stages storyboard --eps 1 --force
+
+只用 Seedance 逐镜头协议时的分镜命令（不检查 h3Prompt 的结构、运镜词、台词块、语言）：
+python run_agent.py run --stages storyboard --eps 2 --video-protocol seedance --force
+
+- 加了 --video-protocol seedance 后，h3Gates 自动关闭；默认（h3 协议）仍检查。
+- 视频提示词里允许出现的称呼（不当作角色名拦截）：内置娘亲/姐姐/师兄等亲属称呼；其他用 nameAllow 追加。
+- 一次设置多项参数（PowerShell）：
+  $env:AGENT_STORYBOARD_PARAMS='{"minCutSeconds":4,"maxCutSeconds":10,"maxOnScreen":5,"maxSegmentSeconds":20,"nameAllow":["九尾狐妖"]}'
+  python run_agent.py run --stages storyboard --eps 2 --video-protocol seedance --force

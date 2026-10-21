@@ -104,7 +104,8 @@ def run_stage(ctx: Context, name: str, opts: Dict[str, Any]) -> Optional[Path]:
         return module.run(ctx, eps=eps, submit=opts.get("audio_submit", False))
     if name == "storyboard":
         return module.run(ctx, eps=eps, aspect=opts.get("aspect", "16:9"), prompt_lang=opts.get("prompt_lang", "en"),
-                          visual_style=opts.get("visual_style", "manju"), fight_enhancement=opts.get("fight_enhancement", "auto"))
+                          visual_style=opts.get("visual_style", "manju"), fight_enhancement=opts.get("fight_enhancement", "auto"),
+                          h3_gates=opts.get("video_protocol", "h3") != "seedance")
     if name == "frames":
         return module.run(ctx, eps=eps, generate=opts.get("frames_gen", False), only=opts.get("frames_only"))
     if name == "optimize":

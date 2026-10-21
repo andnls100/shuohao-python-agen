@@ -32,17 +32,19 @@ BATCH = 3
 PASSES = ["storyboard-pass.md", "shot-writing.md", "h3-prompt.md", "frame.md"]
 
 
-def _params_override() -> Dict[str, Any]:
+def _params_override(h3_gates: bool = True) -> Dict[str, Any]:
     """环境变量 AGENT_STORYBOARD_PARAMS（JSON）可覆盖技能包默认分镜参数，如 {"minCutSeconds":2,"maxCutSeconds":10}。"""
     raw = os.environ.get("AGENT_STORYBOARD_PARAMS", "").strip()
-    if not raw:
-        return {}
-    try:
-        data = json.loads(raw)
-    except ValueError as exc:
-        raise ValueError(f"AGENT_STORYBOARD_PARAMS 不是合法 JSON：{exc}") from exc
-    if not isinstance(data, dict):
-        raise ValueError("AGENT_STORYBOARD_PARAMS 必须是 JSON 对象")
+    data: Dict[str, Any] = {}
+    if raw:
+        try:
+            data = json.loads(raw)
+        except ValueError as exc:
+            raise ValueError(f"AGENT_STORYBOARD_PARAMS 不是合法 JSON：{exc}") from exc
+        if not isinstance(data, dict):
+            raise ValueError("AGENT_STORYBOARD_PARAMS 必须是 JSON 对象")
+    if not h3_gates:
+        data = {**data, "h3Gates": False}
     return data
 
 
@@ -190,6 +192,7 @@ def run(
     prompt_lang: str = "en",
     visual_style: str = "manju",
     fight_enhancement: str = "auto",
+    h3_gates: bool = True,
 ) -> Path:
     if fight_enhancement not in {"off", "auto", "enhanced"}:
         raise ValueError("fight_enhancement 只能是 off、auto 或 enhanced")
@@ -227,8 +230,8 @@ def run(
     if path.is_file() and not ctx.force:
         main = read_json(path)
         main.setdefault("promptLang", prompt_lang)
-    if _params_override():
-        main["params"] = {**(main.get("params") or {}), **_params_override()}
+    if _params_override(h3_gates):
+        main["params"] = {**(main.get("params") or {}), **_params_override(h3_gates)}
     # Existing merged output can also contain stale IDs from older runs. Repair them
     # before deciding which episodes are complete, and persist the deterministic fix.
     normalized_existing = False
@@ -286,8 +289,8 @@ def run(
         seed_eps = {e["ep"]: e for e in seed["episodes"]}
         batch_doc: Dict[str, Any] = {"source": ctx.title, "aspectRatio": aspect,
                                      "promptLang": prompt_lang, "episodes": []}
-        if _params_override():
-            batch_doc["params"] = _params_override()
+        if _params_override(h3_gates):
+            batch_doc["params"] = _params_override(h3_gates)
         batch_path = work / "storyboard-batch.json"
         items: List[Item] = []
         for ep in group:
