@@ -193,6 +193,26 @@ class StoryboardRepairTest(unittest.TestCase):
         self.assertIn("repaired shot", segment["h3Prompt"])
         self.assertIn("[Shot 3] At 00:08.100, third shot", segment["h3Prompt"])
 
+    def test_repair_beats_size_and_symbols(self):
+        from zhipu_agent.stages.storyboard_repair import repair_beats_and_symbols
+        doc = {"episodes": [{"ep": 2, "segments": [
+            {"id": "E02-01", "sceneIndex": 1, "soundscape": "<风声>", "music": "（低音弦乐）",
+             "cuts": [{"beats": [1, 8], "size": "Wide Shot"}, {"beats": [9], "size": "close-up"}]},
+            {"id": "E02-02", "sceneIndex": 1, "cuts": [{"beats": [14, 20], "size": "Low Angle"}, {"beats": [21]}]},
+            {"id": "E02-03", "sceneIndex": 2, "cuts": [{"beats": [1]}]},
+        ]}]}
+        repair_beats_and_symbols(doc)
+        a, b = doc["episodes"][0]["segments"][0]["cuts"]
+        c, d = doc["episodes"][0]["segments"][1]["cuts"]
+        self.assertEqual(a["size"], "wide")
+        self.assertEqual(b["beats"], [9, 13])      # 终点 = 下一镜起点 - 1
+        self.assertEqual(b["size"], "close")
+        self.assertEqual(c["size"], "Low Angle")   # 认不出来不猜
+        self.assertEqual(d["beats"], [21, 21])     # 场内最后一镜：只补成单拍，缺口仍由质量门报出
+        self.assertEqual(doc["episodes"][0]["segments"][2]["cuts"][0]["beats"], [1, 1])
+        self.assertEqual(doc["episodes"][0]["segments"][0]["soundscape"], "风声")
+        self.assertEqual(doc["episodes"][0]["segments"][0]["music"], "低音弦乐")
+
 
 if __name__ == "__main__":
     unittest.main()

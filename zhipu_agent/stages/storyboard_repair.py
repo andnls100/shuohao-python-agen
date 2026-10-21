@@ -178,6 +178,73 @@ def repair_dialogue_fit(doc: Dict[str, Any], script: Dict[str, Any], lang: str =
     return fixes
 
 
+_SIZE_ALIASES = {
+    "extreme-wide": ("extremewide", "extremewideshot", "大远景", "极远景", "远景大全景"),
+    "wide": ("wide", "wideshot", "全景", "远景", "longshot"),
+    "medium": ("medium", "mediumshot", "中景", "midshot", "mediumwide"),
+    "close": ("close", "closeup", "closeupshot", "特写", "近景"),
+    "extreme-close": ("extremeclose", "extremecloseup", "大特写", "极特写"),
+}
+
+
+def _norm_size(value: Any) -> Optional[str]:
+    """把模型写的景别别名（大小写、连字符、Shot 后缀、中文词）归到枚举；认不出来的返回 None，不猜。"""
+    key = re.sub(r"[\s_\-]+", "", str(value or "")).lower()
+    if not key:
+        return None
+    for canon, names in _SIZE_ALIASES.items():
+        if key == canon.replace("-", "") or key in names:
+            return canon
+    return None
+
+
+def _strip_wrappers(text: str, chars: str) -> str:
+    return re.sub("[" + re.escape(chars) + "]", "", text).strip()
+
+
+def repair_beats_and_symbols(doc: Dict[str, Any]) -> List[str]:
+    """确定性修复：beats 缺终点、景别别名、soundscape/music 自带的 <> 与括号。不改剧情内容。"""
+    repaired: List[str] = []
+    for episode in doc.get("episodes", []) or []:
+        flat = [(seg, idx, cut) for seg in episode.get("segments", []) or [] if isinstance(seg, dict)
+                for idx, cut in enumerate(seg.get("cuts", []) or [], 1) if isinstance(cut, dict)]
+        for pos, (seg, idx, cut) in enumerate(flat):
+            beats = cut.get("beats")
+            start = None
+            if isinstance(beats, (int, float)) and not isinstance(beats, bool):
+                start = int(beats)
+            elif isinstance(beats, list) and beats and isinstance(beats[0], (int, float)) and not isinstance(beats[0], bool) \
+                    and (len(beats) == 1 or beats[1] in (None, "")):
+                start = int(beats[0])
+            if start is not None:
+                end = start
+                for nxt_seg, _i, nxt in flat[pos + 1:]:
+                    if nxt_seg.get("sceneIndex") != seg.get("sceneIndex"):
+                        break
+                    nb = nxt.get("beats")
+                    nstart = nb[0] if isinstance(nb, list) and nb else nb
+                    if isinstance(nstart, (int, float)) and not isinstance(nstart, bool) and int(nstart) > start:
+                        end = int(nstart) - 1
+                    break
+                cut["beats"] = [start, end]
+                repaired.append(f"{seg.get('id', '?')}#{idx}: beats 补齐为 [{start}, {end}]")
+            canon = _norm_size(cut.get("size"))
+            if canon and cut.get("size") != canon:
+                repaired.append(f"{seg.get('id', '?')}#{idx}: 景别「{cut.get('size')}」归一为「{canon}」")
+                cut["size"] = canon
+        for seg in episode.get("segments", []) or []:
+            if not isinstance(seg, dict):
+                continue
+            for key, chars in (("soundscape", "<>＜＞"), ("music", "（）()")):
+                value = seg.get(key)
+                if isinstance(value, str):
+                    cleaned = _strip_wrappers(value, chars)
+                    if cleaned != value:
+                        seg[key] = cleaned
+                        repaired.append(f"{seg.get('id', '?')}: 去掉 {key} 自带的符号")
+    return repaired
+
+
 def repair_deterministic_storyboard(doc: Dict[str, Any], lang: str = "en") -> List[str]:
     """Apply safe, deterministic repairs that do not invent story content."""
     shot_size_terms = {
@@ -188,7 +255,7 @@ def repair_deterministic_storyboard(doc: Dict[str, Any], lang: str = "en") -> Li
         "extreme-close": "大特写",
     }
 
-    repaired: List[str] = []
+    repaired: List[str] = repair_beats_and_symbols(doc)
     for segment in _segments(doc):
         for index, cut in enumerate(segment.get("cuts", []), 1):
             size = cut.get("size")
