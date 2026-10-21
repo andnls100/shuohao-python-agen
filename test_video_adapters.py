@@ -48,6 +48,36 @@ class VideoAdapterTests(unittest.TestCase):
         self.assertEqual(body["parameters"]["duration"], 4)
         self.assertEqual(body["parameters"]["ratio"], "9:16")
 
+    def test_fallback_adapter_optimizes_from_original_prompt(self):
+        from unittest import mock
+        from zhipu_agent.stages.video_adapters import build_request
+
+        item = {"prompt": "original shot", "duration_seconds": 4}
+        manifest = {"aspect_ratio": "16:9"}
+        calls = []
+
+        def optimize(adapter, prompt):
+            calls.append((adapter, prompt))
+            return f"{adapter} optimized: {prompt}"
+
+        seedance = {"adapter": "seedance", "VIDEO_API_MODEL": "seedance-model"}
+        wan = {"adapter": "aliyun_wan", "VIDEO_API_MODEL": "wan-video-model"}
+
+        with mock.patch("zhipu_agent.video_middleware.optimize_prompt_with_skill", side_effect=optimize):
+            first = build_request(seedance, item, manifest)
+            second = build_request(wan, item, manifest)
+            # Retrying an already-attempted adapter reuses its own cached result.
+            third = build_request(wan, item, manifest)
+
+        self.assertEqual(first["prompt"], "seedance optimized: original shot")
+        self.assertEqual(second["input"]["prompt"], "aliyun_wan optimized: original shot")
+        self.assertEqual(third["input"]["prompt"], "aliyun_wan optimized: original shot")
+        self.assertEqual(calls, [
+            ("seedance", "original shot"),
+            ("aliyun_wan", "original shot"),
+        ])
+
+
     def test_template_preserves_numeric_types(self):
         provider = {
             "adapter": "generic",
