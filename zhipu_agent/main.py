@@ -51,6 +51,7 @@ def _build_parser() -> argparse.ArgumentParser:
             s.add_argument("--video-protocol", default="h3", choices=["h3", "seedance"], help="视频提示词协议；视频输入由连续性规则决定")
             s.add_argument("--video-submit", action="store_true", help="提交云端视频任务；不加只生成清单")
             s.add_argument("--video-model", help="选择 models.json 中 video[].key")
+            s.add_argument("--segments", help="只处理指定分段 ID，逗号分隔，例如 E01-01,E01-02；seedance/i2v 下会展开为该段全部镜头")
             s.add_argument("--shots", help="只处理指定分镜头 ID，逗号分隔，例如 E01-01-C01,E01-01-C02")
             s.add_argument("--audio-submit", action="store_true", help="调用 TTS API")
             s.add_argument("--force", action="store_true", help="忽略已有产物和缓存")
@@ -164,6 +165,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         "video_protocol": args.video_protocol, "video_submit": args.video_submit, "video_model": args.video_model,
         "frames_gen": args.frames_gen,
         "frames_only": [n.strip() for n in args.frames_only.split(",") if n.strip()] if args.frames_only else None,
+        "video_segments": [n.strip() for n in args.segments.split(",") if n.strip()] if args.segments else None,
         "video_shots": [n.strip() for n in args.shots.split(",") if n.strip()] if args.shots else None,
         "audio_submit": args.audio_submit,
         "refs_names": [n.strip() for n in args.refs_names.split(",") if n.strip()] if args.refs_names else None,

@@ -361,7 +361,8 @@ def check(ctx: Context) -> Result:
 
 
 def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: bool = False, visual_style: str = "manju",
-        visual_style_prompt: str = "", shots: Optional[list] = None, video_model: Optional[str] = None, frames_dir: Optional[Path] = None, flf: bool = False) -> Path:
+        visual_style_prompt: str = "", shots: Optional[list] = None, video_model: Optional[str] = None, frames_dir: Optional[Path] = None, flf: bool = False,
+        segments: Optional[list] = None) -> Path:
     if protocol == "i2v": raise ValueError("旧的 --video-protocol i2v 已取消：视频阶段现在直接按连续镜头规则生成")
     root = ctx.out / "video"; root.mkdir(parents=True, exist_ok=True); path = artifact(ctx); manifest = _collect(ctx, eps, protocol, visual_style, shots, visual_style_prompt)
     previous = {}
@@ -379,15 +380,19 @@ def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: 
     qc += [f"- [ ] {x['id']}：{x['state']} | {x['input_mode']} | {x['continuity_decision']}" for x in manifest["items"]]; (root / "qc-checklist.md").write_text("\n".join(qc) + "\n", encoding="utf-8")
     ctx.log(f"视频阶段：已生成 {len(manifest['items'])} 个镜头清单：{path}")
     if not submit: return path
-    providers = _config(video_model); requested = {str(v).strip() for v in shots or []}; last_frame = None
+    providers = _config(video_model); requested = {str(v).strip() for v in shots or [] if str(v).strip()}
+    seg_ids = {str(v).strip() for v in segments or [] if str(v).strip()}
+    if seg_ids:
+        known = {str(x.get("segmentId")) for x in manifest["items"]}
+        if seg_ids - known: raise ValueError("找不到指定分段 ID：" + "、".join(sorted(seg_ids - known)) + "；分段 ID 形如 E01-01")
+        requested |= {x["id"] for x in manifest["items"] if str(x.get("segmentId")) in seg_ids}
     for item in manifest["items"]:
         if requested and item["id"] not in requested: continue
+        last_frame = None
         if item["input_mode"] == "previous_last_frame":
-            if not last_frame:
-                previous_item = next((x for x in manifest["items"] if x["id"] == item.get("previous_shot_id")), None)
-                if previous_item and previous_item.get("last_frame_path"): last_frame = _resolve(root, previous_item["last_frame_path"])
+            previous_item = next((x for x in manifest["items"] if x["id"] == item.get("previous_shot_id")), None)
+            if previous_item and previous_item.get("last_frame_path"): last_frame = _resolve(root, previous_item["last_frame_path"])
             if not last_frame or not last_frame.is_file(): raise RuntimeError(f"镜头 {item['id']} 必须先生成上一个连续镜头 {item.get('previous_shot_id')}，才能取得真实最后一帧")
         generated = _submit_one(item, manifest, providers, root, path, last_frame if item["input_mode"] == "previous_last_frame" else None)
         if item.get("state") != "succeeded": raise RuntimeError(f"镜头 {item['id']} 生成失败：{item.get('error')}")
-        last_frame = generated
     return path
