@@ -1,83 +1,126 @@
 # 视频生成阶段
 
-本阶段接在 storyboard 之后，不改变 outline、characters、art、script、staging、storyboard 和 refs 的既有流程。
+视频阶段现在按**单个分镜头（cut）顺序生成**，不再把静态 `frames/` 分镜图当作视频首帧，也不再使用旧的 `--video-protocol i2v` / `--video-flf` 逻辑。
 
-## 1. 先生成提示词，不花视频生成费用
+## 1. 核心规则
+
+每个分镜头先判断它和上一个分镜头的关系：
+
+1. **第一镜 / 新场景 / 明确切断**
+   - 固定场景：`场景图 + 角色参考图 + 道具参考图 + 当前镜头提示词`
+   - 非固定场景：`角色参考图 + 道具参考图 + 当前镜头提示词`
+2. **连续镜头**
+   - 必须同时满足：同一集、同一 `sceneIndex`、当前 cut 的 `continuity.mode == "inherit"`、`referenceFrame` 明确指向上一个镜头、跨 segment 时 `continuityMode == "continuous"`。
+   - 输入：`上一段视频真实最后一帧 + 角色参考图 + 道具参考图 + 当前镜头提示词`
+3. `hard_cut`、`cut`、换场、缺少/错误 `referenceFrame` 都不会继承上一段视频最后一帧。
+
+**同一场景并不自动等于连续。** 连续性以 storyboard 明确写入的 continuity 字段为准。
+
+## 2. 最重要的命令
+
+### 先只生成一个镜头的计划，不调用视频 API
 
 ```bash
-python run_agent.py run --stages video --eps 1
+python run_agent.py run --stages video --eps 1 --shots E01-01-C01
 ```
 
-默认读取 `output/storyboard/<书名>-storyboard.json`，按分段写入：
-
-- `output/video/video-manifest.json`：每段的提示词、时长、任务 ID、状态、使用的平台、视频 URL 和本地路径。
-- `output/video/prompts/<分段ID>.txt`：逐段提示词。
-- `output/video/qc-checklist.md`：人工质检清单。
-- `output/video/videos/<分段ID>.mp4`：API 返回可下载地址且下载成功时保存的视频文件。
-
-默认协议为 `h3`，直接使用分镜中的 `h3Prompt`。若要从结构化分镜字段拼接 Seedance 风格提示词：
+### 提交第一个镜头
 
 ```bash
-python run_agent.py run --stages video --eps 1 --video-protocol seedance
+python run_agent.py run --stages video --eps 1 --shots E01-01-C01 --video-submit
 ```
 
-## 2. 在 models.json 配置视频 API 号池
+### 提交下一个连续镜头
 
-模型配置统一放在项目根目录的 `models.json`。首次配置时复制 `models.example.json` 为 `models.json`，保留需要的 `text` / `vision` 列表，并填写 `video` 列表：
-
-```json
-{
-  "video": [
-    {
-      "name": "视频平台主用",
-      "submit_url": "https://provider-a.example/v1/videos/generations",
-      "status_url_template": "https://provider-a.example/v1/videos/{task_id}",
-      "api_key_env": "VIDEO_PRIMARY_API_KEY",
-      "model": "video-model-a",
-      "timeout": 120,
-      "poll_interval": 5,
-      "max_wait": 900
-    },
-    {
-      "name": "视频平台备用",
-      "submit_url": "https://provider-b.example/v1/videos/generations",
-      "status_url_template": "https://provider-b.example/v1/videos/{task_id}",
-      "api_key_env": "VIDEO_BACKUP_API_KEY",
-      "model": "video-model-b"
-    }
-  ]
-}
+```bash
+python run_agent.py run --stages video --eps 1 --shots E01-01-C02 --video-submit
 ```
 
-- `video` 是视频生成 API 号池，按数组顺序尝试；提交请求失败时自动切换下一个备用平台。
-- 每项必填 `name`、`submit_url`、`model`，以及 `api_key` 或 `api_key_env`。建议用 `api_key_env` 引用系统环境变量，避免把真实密钥写进配置文件。
-- `status_url_template` 可选；如果平台返回 `task_id` 而不是视频 URL，就必须填写，并包含 `{task_id}` 占位符。
-- `timeout`、`poll_interval`、`max_wait` 分别控制请求超时、轮询间隔和最长等待时间。
-- 为避免同一分段重复提交并产生费用，任务一旦返回 `task_id`，后续续查固定使用创建该任务的平台，不会因轮询失败而转投其他平台。
-- `models.json` 已被 `.gitignore` 忽略。视频 API 的字段、鉴权或请求路径因平台而异，必要时需按供应商文档调整 `zhipu_agent/stages/video.py`。
+如果 `E01-01-C02` 被 storyboard 标记为连续镜头，程序会先检查 `E01-01-C01` 是否已经成功，并读取 `E01-01-C01` 生成视频的**真实最后一帧**。没有最后一帧就拒绝提交 C02，避免错误地退回文字生视频。
 
-使用 `api_key_env` 时，可通过系统环境变量设置 Key（Windows CMD 示例）：
-
-```bat
-set VIDEO_PRIMARY_API_KEY=你的主用Key
-set VIDEO_BACKUP_API_KEY=你的备用Key
-```
-
-通用适配器提交时 POST JSON `model`、`prompt`、`duration`、`aspect_ratio`，使用 Bearer Token 鉴权。不能假定任意 OpenAI 兼容接口都支持视频生成。
-
-## 3. 明确提交云端任务
-
-检查提示词、模型、价格和平台限制后，才运行：
+### 按整集顺序生成
 
 ```bash
 python run_agent.py run --stages video --eps 1 --video-submit
 ```
 
-未指定 `--video-submit` 时绝不调用视频 API。首次提交会异步创建云端任务并立即保存 `task_id`，不会逐段阻塞等待视频渲染；再次运行相同命令时，会查询已保存的任务并下载完成的视频。已成功生成的分段会跳过。生成失败会记录到 manifest，不会悄悄当作成功。
+程序严格按 storyboard 顺序逐镜生成。上一镜完成并提取最后一帧后，才允许下一连续镜头提交。
 
-## 4. 当前边界
+### 只生成多个指定镜头
 
-- 这是通用 API 适配器，不是对 Seedance、MiniMax 或其他特定平台的官方 SDK。请以实际供应商 API 文档为准。
-- `seedance` 提示词会尽量复用结构化分镜字段，并附带现有 H3 提示词作为台词参考；正式投产前应人工检查。
-- 视频下载失败时仍保留云端 URL，并在 manifest 写入 `download_error`。
-- 本阶段生成的视频片段尚未自动拼接成整集。人工审核通过后，可再接入 FFmpeg 剪辑阶段。
+```bash
+python run_agent.py run --stages video --eps 1 --shots E01-01-C01,E01-01-C02 --video-submit
+```
+
+如果指定的后一个镜头依赖前一个连续镜头，而前一个镜头没有可用的成功结果，程序会直接停止并说明依赖关系。
+
+### 只看 Seedance 风格提示词
+
+```bash
+python run_agent.py run --stages video --eps 1 --video-protocol seedance
+```
+
+默认 `h3` 直接使用 storyboard 的 `h3Prompt`。
+
+## 3. 视频输入判断写入 manifest
+
+`output/video/video-manifest.json` 的每个镜头包含：
+
+- `input_mode`: `scene_or_assets` 或 `previous_last_frame`
+- `continuity_decision`: 程序实际采用的判断原因
+- `previous_shot_id`: 连续镜头依赖的上一镜 ID
+- `scene_fixed`: 是否找到可用场景设定图
+- `initial_reference`: `scene_reference`、`previous_last_frame` 或 `none`
+- `last_frame_path`: 当前视频生成后由 FFmpeg 提取的真实最后一帧
+
+程序不会仅凭 `sceneIndex` 判断连续性。
+
+## 4. 最后一帧
+
+视频下载成功后，程序自动用 FFmpeg 提取最后一帧到：
+
+```text
+output/video/last-frames/E01-01-C01.png
+```
+
+这个文件是下一连续镜头的首关键帧输入，而不是 `output/frames/` 中的静态分镜图。
+
+需要安装 FFmpeg，并确保 `ffmpeg` 在 PATH 中。
+
+## 5. 视频模型配置
+
+视频模型配置仍放在根目录 `models.json` 的 `video` 数组中。要实现上述参考图链路，所选模型必须支持参考图/图生视频输入。当前最完整的适配是 Wan R2V：程序会把“上一镜最后一帧”放在参考媒体列表的第一位，并继续传入角色、场景、道具参考图。
+
+示意：
+
+```json
+{
+  "video": [
+    {
+      "key": "wan-r2v",
+      "name": "Wan R2V",
+      "adapter": "aliyun_wan",
+      "mode": "r2v",
+      "submit_url": "https://your-provider.example/v1/videos/generations",
+      "status_url_template": "https://your-provider.example/v1/tasks/{task_id}",
+      "api_key_env": "VIDEO_API_KEY",
+      "model": "your-r2v-model"
+    }
+  ]
+}
+```
+
+实际 URL、模型名和字段必须按供应商官方接口填写。
+
+## 6. 产物
+
+```text
+output/video/
+├── video-manifest.json
+├── prompts/
+├── videos/
+├── last-frames/
+└── qc-checklist.md
+```
+
+`video-manifest.json` 是续跑的状态来源。重新运行同一命令不会重复提交已经成功且本地视频仍存在的镜头。
