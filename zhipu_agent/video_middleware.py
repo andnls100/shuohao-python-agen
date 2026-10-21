@@ -86,6 +86,12 @@ def optimize_prompt_with_skill(adapter: str, prompt: str, style_instruction: str
     """Optimize one shot while treating the selected/user-defined visual style as immutable."""
     text = str(prompt or "").strip()
     style = str(style_instruction or "").strip()
+    print(
+        f"\n===== 生视频提示词（优化前，{adapter}，{len(text)} 字）=====\n"
+        f"{text}\n"
+        "===== 优化前提示词结束 =====\n",
+        flush=True,
+    )
     rules = skill_instructions(adapter)
     if not rules:
         return _apply_style_constraint(optimize_prompt(adapter, text), style)
