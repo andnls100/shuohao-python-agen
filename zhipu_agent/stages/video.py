@@ -233,7 +233,8 @@ def _encode(path: Path, encoding: str = "data_uri") -> str:
 def _extract_last_frame(video_path: Path, target: Path) -> None:
     if not shutil.which("ffmpeg"): raise RuntimeError("生成下一镜首关键帧需要 ffmpeg；请安装 ffmpeg 并确保它在 PATH 中")
     target.parent.mkdir(parents=True, exist_ok=True); temp = target.with_suffix(".tmp.png")
-    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-sseof", "-0.05", "-i", str(video_path), "-frames:v", "1", "-update", "1", str(temp)]
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-sseof", "-1", "-i", str(video_path), "-frames:v", "1", "-update", "1", str(temp)]
+    print(f"FFmpeg 提取视频最后一帧命令：{subprocess.list2cmdline(cmd)}", flush=True)
     try: result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired) as exc: raise RuntimeError(f"提取视频最后一帧失败：{exc}") from exc
     if result.returncode != 0 or not temp.is_file() or temp.stat().st_size == 0: raise RuntimeError(f"提取视频最后一帧失败：{result.stderr[-1000:]}")
