@@ -15,10 +15,8 @@ from . import workflow
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="zhipu_agent", description="用 Python + AI API 驱动 shuohao-skills 技能包")
     sub = p.add_subparsers(dest="command", required=True)
-
     d = sub.add_parser("doctor", help="检查运行环境")
     d.add_argument("--ping", action="store_true", help="真的调用一次模型，确认密钥、地址和模型名可用")
-
     for name, help_text in (("run", "运行流水线"), ("status", "查看各阶段产物状态")):
         s = sub.add_parser(name, help=help_text)
         s.add_argument("--book", default=str(REPO_ROOT / "input" / "novel.txt"), help="小说文本文件")
@@ -77,7 +75,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         nonlocal problems
         if ok is False:
             problems += 1
-        print(f"  {{True: '✓', False: '✗', None: '·'}}[ok] {{text}}")
+        mark = {True: "✓", False: "✗", None: "·"}[ok]
+        print(f"  {mark} {text}")
     print(f"Python {sys.version.split()[0]}")
     try:
         import openai
