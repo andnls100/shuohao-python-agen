@@ -1,15 +1,8 @@
-"""命令行入口。
-
-    python -m zhipu_agent.main doctor [--ping]          检查环境（Python 依赖、Node、技能包、模型配置）
-    python -m zhipu_agent.main run  --book input/novel.txt --episodes 6 --minutes 2 --genre 都市
-    python -m zhipu_agent.main status                   各阶段产物是否存在、是否通过校验
-"""
+"""命令行入口。"""
 from __future__ import annotations
 
 import argparse
-import os
 import sys
-import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -20,7 +13,7 @@ from . import workflow
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="zhipu_agent", description="用 Python + AI API 驱动 shuohao-skills 技能包（不需要 Codex）")
+    p = argparse.ArgumentParser(prog="zhipu_agent", description="用 Python + AI API 驱动 shuohao-skills 技能包")
     sub = p.add_subparsers(dest="command", required=True)
 
     d = sub.add_parser("doctor", help="检查运行环境")
@@ -28,54 +21,48 @@ def _build_parser() -> argparse.ArgumentParser:
 
     for name, help_text in (("run", "运行流水线"), ("status", "查看各阶段产物状态")):
         s = sub.add_parser(name, help=help_text)
-        s.add_argument("--book", default=str(REPO_ROOT / "input" / "novel.txt"), help="小说文本文件（UTF-8 或 GBK 均可）")
+        s.add_argument("--book", default=str(REPO_ROOT / "input" / "novel.txt"), help="小说文本文件")
         s.add_argument("--out", default=str(REPO_ROOT / "output"), help="输出目录")
-        s.add_argument("--title", help="书名；不给就从正文里的《……》或文件名推断")
+        s.add_argument("--title", help="书名")
         s.add_argument("--lang", default="zh", choices=["zh", "en", "ja"], help="角色报告语言")
         if name == "run":
-            s.add_argument("--stages", default="all",
-                           help=f"要运行的阶段，逗号分隔；all = {','.join(workflow.DEFAULT_STAGES)}；可选：{','.join(workflow.STAGES)}")
-            s.add_argument("--episodes", type=int, help="总集数（outline 阶段必填）")
-            s.add_argument("--minutes", type=float, help="单集分钟数（outline 阶段必填）")
-            s.add_argument("--genre", help="题材（outline 阶段必填，自由文本，决定爽点类型）")
-            s.add_argument("--adapt-mode", default="抽核", help="改编幅度：忠实 / 抽核 / 借壳（默认 抽核）")
-            s.add_argument("--preferences", default="", help="想保留的角色或场景等偏好")
-            s.add_argument("--eps", help="只处理这些集，如 1-3 或 1,3,5（script / staging / storyboard 阶段）")
+            s.add_argument("--stages", default="all", help=f"阶段，逗号分隔；all = {','.join(workflow.DEFAULT_STAGES)}；可选：{','.join(workflow.STAGES)}")
+            s.add_argument("--episodes", type=int, help="总集数")
+            s.add_argument("--minutes", type=float, help="单集分钟数")
+            s.add_argument("--genre", help="题材")
+            s.add_argument("--adapt-mode", default="抽核", help="改编幅度")
+            s.add_argument("--preferences", default="", help="偏好")
+            s.add_argument("--eps", help="只处理这些集，如 1-3 或 1,3,5")
             s.add_argument("--aspect", default="16:9", choices=["16:9", "9:16"], help="分镜画幅")
-            s.add_argument("--prompt-lang", default="en", choices=["en", "zh"], help="H3 提示词语言（官方口径默认 en）")
-            s.add_argument("--fight-enhancement", default="auto", choices=["off", "auto", "enhanced"],
-                           help="打戏增强：off=关闭，auto=仅强化重要打戏（默认），enhanced=强化所有打戏；改模式后建议加 --force")
-            s.add_argument("--visual-style", default="live-action", choices=["manju", "live-action"],
-                           help="视觉提示词风格：manju=漫剧，live-action=真人（默认漫剧）")
-            s.add_argument("--max-chars", type=int, default=30, help="没有大纲时，最多给几个角色出角色卡")
-            s.add_argument("--images", help="场景设定图目录（staging 认图用，需要配置视觉模型）")
-            s.add_argument("--refs-names", help="refs 阶段只处理这些角色，逗号分隔；默认主角和重要配角")
-            s.add_argument("--refs-look", help="refs 阶段的画风；不指定时跟随 --visual-style")
-            s.add_argument("--refs-gen", action="store_true", help="refs 阶段真的出图（需先配置 character-refs 的出图模型）")
-            s.add_argument("--optimize-mode", default="flux", choices=["flux", "wan", "both"], help="optimize 阶段：按哪种写法批量优化已保存的出图提示词（调用 models.json 的 text 模型），结果写到 output/prompts/ 下带 flux / wan 的单独文件，不改 cast.json")
-            s.add_argument("--optimize-kinds", default="characters", help="optimize 阶段处理哪些：characters,scenes,props（逗号分隔，默认 characters）")
-            s.add_argument("--optimize-only", help="optimize 阶段只处理这些角色 / 场景 / 道具（名字或编号，逗号分隔）；默认全部")
-            s.add_argument("--images-gen", action="store_true", help="从已保存的 cast.json / art.json 提示词批量出角色、场景和道具图；需配置 models.json 的 image 号池")
-            s.add_argument("--images-only", help="只出这几张图：写任务名、角色名、场景名或编号，逗号分隔，如 徐今朝 或 C03,S01；配合 --images-gen")
-            s.add_argument("--frames-gen", action="store_true", help="frames 阶段真的出分镜图（和角色图、场景图共用 models.json 的 image 号池）；不加只整理任务和参考图引用")
-            s.add_argument("--frames-only", help="只出这些分镜图：分镜编号 E01-01-C01、段号 E01-01（整段）或 E01（整集），逗号分隔")
-            s.add_argument("--video-protocol", default="h3", choices=["h3", "seedance", "i2v"], help="视频提示词协议（默认 h3）；i2v = 按分镜图生视频（首帧取 <frames-dir>/<段号>/f<切序>.png）")
-            s.add_argument("--frames-dir", help="分镜图目录（i2v 用），默认 output/frames")
-            s.add_argument("--video-flf", action="store_true", help="i2v 下用同段下一张分镜图作尾帧（首尾帧模式，仅 speed 画质）")
-            s.add_argument("--video-submit", action="store_true", help="明确提交云端视频生成任务；不加此参数只生成提示词和清单")
-            s.add_argument("--video-model", help="选择 models.json 中 video[].key；不指定时使用 active=true 的模型")
-            s.add_argument("--shots", help="只处理指定镜头 ID，逗号分隔，例如 E01-01-C01；ID 可从 video-manifest.json 查看")
-            s.add_argument("--audio-submit", action="store_true", help="明确调用 TTS API 生成角色对白音频；不加此参数只生成音频清单")
-            s.add_argument("--force", action="store_true", help="忽略已有产物和缓存，全部重做")
-            s.add_argument("--yes", action="store_true", help="不暂停：骨架拍板点自动确认")
-            s.add_argument("--concurrency", type=int, help="同时进行的模型调用数（默认 3）")
-            s.add_argument("--fix-rounds", type=int, help="校验不过时最多回炉几轮（默认 1）")
-    op = sub.add_parser("optimize-prompts", help="使用分镜 skill 优化一集所有提示词，不生成图片或视频")
-    op.add_argument("--out", default=str(REPO_ROOT / "output"), help="项目输出目录，默认 output/")
-    op.add_argument("--episode", "--eps", dest="episode", type=int, required=True, help="要优化的集号，例如 1")
-    op.add_argument("--input", help="分镜 JSON 路径；不指定时自动查找 --out/storyboard/*-storyboard.json")
-    op.add_argument("--output-file", help="优化结果 JSON 路径；不指定时写入 storyboard/<书名>-E01-optimized-prompts.json")
-
+            s.add_argument("--prompt-lang", default="en", choices=["en", "zh"], help="H3 提示词语言")
+            s.add_argument("--fight-enhancement", default="auto", choices=["off", "auto", "enhanced"], help="打戏增强")
+            s.add_argument("--visual-style", default="live-action", choices=["manju", "live-action"], help="视觉提示词风格")
+            s.add_argument("--max-chars", type=int, default=30, help="最多角色数")
+            s.add_argument("--images", help="场景设定图目录")
+            s.add_argument("--refs-names", help="refs 阶段只处理这些角色，逗号分隔")
+            s.add_argument("--refs-look", help="refs 阶段画风")
+            s.add_argument("--refs-gen", action="store_true", help="refs 阶段真的出图")
+            s.add_argument("--optimize-mode", default="flux", choices=["flux", "wan", "both"])
+            s.add_argument("--optimize-kinds", default="characters")
+            s.add_argument("--optimize-only")
+            s.add_argument("--images-gen", action="store_true", help="批量出角色、场景和道具图")
+            s.add_argument("--images-only", help="只出指定图片")
+            s.add_argument("--frames-gen", action="store_true", help="真的生成静态分镜图")
+            s.add_argument("--frames-only", help="只出指定分镜图")
+            s.add_argument("--video-protocol", default="h3", choices=["h3", "seedance"], help="视频提示词协议；视频输入由连续性规则决定")
+            s.add_argument("--video-submit", action="store_true", help="提交云端视频任务；不加只生成清单")
+            s.add_argument("--video-model", help="选择 models.json 中 video[].key")
+            s.add_argument("--shots", help="只处理指定分镜头 ID，逗号分隔，例如 E01-01-C01,E01-01-C02")
+            s.add_argument("--audio-submit", action="store_true", help="调用 TTS API")
+            s.add_argument("--force", action="store_true", help="忽略已有产物和缓存")
+            s.add_argument("--yes", action="store_true", help="不暂停")
+            s.add_argument("--concurrency", type=int, help="并发数")
+            s.add_argument("--fix-rounds", type=int, help="回炉轮数")
+    op = sub.add_parser("optimize-prompts", help="优化一集所有提示词")
+    op.add_argument("--out", default=str(REPO_ROOT / "output"))
+    op.add_argument("--episode", "--eps", dest="episode", type=int, required=True)
+    op.add_argument("--input")
+    op.add_argument("--output-file")
     return p
 
 
@@ -86,17 +73,14 @@ def _mask(value: str) -> str:
 def cmd_doctor(args: argparse.Namespace) -> int:
     settings = load_settings()
     problems = 0
-
     def line(ok: Optional[bool], text: str) -> None:
         nonlocal problems
-        mark = {True: "✓", False: "✗", None: "·"}[ok]
         if ok is False:
             problems += 1
-        print(f"  {mark} {text}")
-
+        print(f"  {{True: '✓', False: '✗', None: '·'}}[ok] {{text}}")
     print(f"Python {sys.version.split()[0]}")
     try:
-        import openai  # noqa: F401
+        import openai
         line(True, f"openai 包 {openai.__version__}")
     except ImportError:
         line(False, "缺少 openai 包：pip install -r requirements.txt")
@@ -106,26 +90,22 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         line(False, str(exc))
     try:
         pack = workflow.load_pack(settings)
-        missing = [n for n in ("novel-outline", "novel-characters", "novel-art", "novel-script",
-                               "novel-staging", "novel-storyboard", "character-refs") if n not in pack]
+        missing = [n for n in ("novel-outline", "novel-characters", "novel-art", "novel-script", "novel-staging", "novel-storyboard", "character-refs") if n not in pack]
         line(not missing, f"技能包 {settings.skills_dir}（{len(pack.names)} 个技能）" + (f"，缺：{missing}" if missing else ""))
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         line(False, str(exc))
     if settings.models_file:
-        line(True, f"模型配置：{settings.models_file}（策略 {settings.strategy}，出错平台冷却 {settings.cooldown:.0f}s）")
+        line(True, f"模型配置：{settings.models_file}（策略 {settings.strategy}）")
     else:
-        line(None, "模型配置：环境变量 / .env（单平台）。要配置多个模型或平台，见 models.example.json")
+        line(None, "模型配置：环境变量 / .env")
     for kind, title in (("text", "文本模型"), ("vision", "视觉模型")):
         eps = settings.endpoints(kind)
         if not eps:
-            if kind == "text":
-                line(False, "文本模型：未配置（设置 ZHIPU_API_KEY 和 ZHIPU_MODEL，或创建 models.json）")
-            else:
-                line(None, "视觉模型：未配置（staging 将只能按提示词推算站位）")
+            line(False if kind == "text" else None, f"{title}：未配置")
             continue
         for ep in eps:
             line(True, f"{title} {ep.name}：{ep.model} · {ep.base_url} · Key {_mask(ep.api_key)}")
-    line(None, f"并发 {settings.concurrency} · 回炉 {settings.fix_rounds} 轮 · 整本直读阈值 {settings.direct_chars} 字")
+    line(None, f"并发 {settings.concurrency} · 回炉 {settings.fix_rounds} 轮")
     if args.ping and settings.text_endpoints():
         for kind, label, ok, note, secs in ping_all(settings):
             line(ok, f"{'文本' if kind == 'text' else '视觉'} {label}：" + (f"可用（{secs:.1f}s）{note!r}" if ok else f"调用失败 {note}"))
@@ -134,27 +114,24 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def _ctx_from(args: argparse.Namespace, settings, *, skip_source: bool = False) -> "workflow.Context":
-    return workflow.build_context(
-        settings, Path(args.book), Path(args.out), title=args.title, lang=args.lang,
-        interactive=False if args.command == "status" else (not args.yes and sys.stdin.isatty()),
-        force=getattr(args, "force", False),
-        images_dir=Path(args.images) if getattr(args, "images", None) else None,
-        skip_source=skip_source,
-    )
+    return workflow.build_context(settings, Path(args.book), Path(args.out), title=args.title, lang=args.lang,
+                                  interactive=False if args.command == "status" else (not args.yes and sys.stdin.isatty()),
+                                  force=getattr(args, "force", False),
+                                  images_dir=Path(args.images) if getattr(args, "images", None) else None,
+                                  skip_source=skip_source)
 
 
 def cmd_status(args: argparse.Namespace) -> int:
     settings = load_settings()
     ctx = _ctx_from(args, settings)
-    for name in [n for n in workflow.STAGES if n not in ("refs",)]:
+    for name in [n for n in workflow.STAGES if n != "refs"]:
         module = workflow.MODULES[name]
         path = module.artifact(ctx)
         if not path.is_file():
             print(f"  · {name:<11} 未生成")
             continue
         result = module.check(ctx)
-        print(f"  {'✓' if result.ok else '✗'} {name:<11} {path.relative_to(ctx.out)}"
-              + ("" if result.ok else f"  （{len(result.violations)} 处违规）"))
+        print(f"  {'✓' if result.ok else '✗'} {name:<11} {path.relative_to(ctx.out)}")
     return 0
 
 
@@ -166,50 +143,34 @@ def cmd_run(args: argparse.Namespace) -> int:
         overrides["fix_rounds"] = max(0, args.fix_rounds)
     settings = load_settings(**overrides)
     stages = workflow.parse_stages(args.stages)
-    # Images/video consume saved production JSON and do not need a text-model credential.
     if any(stage not in ("images", "frames", "video", "audio") for stage in stages):
         settings.require()
-
-    interactive = not args.yes and sys.stdin.isatty()
     params: Dict[str, Any] = {}
     if "outline" in stages:
-        episodes, minutes, genre = args.episodes, args.minutes, args.genre
-        if interactive:
-            if episodes is None:
-                episodes = int(input("总集数：").strip())
-            if minutes is None:
-                minutes = float(input("单集时长（分钟）：").strip())
-            if not genre:
-                genre = input("题材（决定爽点类型，如 都市 / 悬疑 / 女频打脸）：").strip()
-        if not (episodes and minutes and genre):
-            raise ValueError("outline 阶段必须给出 --episodes（总集数）、--minutes（单集分钟数）、--genre（题材）")
-        params = {
-            "episodes": episodes, "minutesPerEpisode": minutes, "genre": genre,
-            "adaptMode": args.adapt_mode, "preferences": args.preferences,
-        }
-
+        if not (args.episodes and args.minutes and args.genre):
+            raise ValueError("outline 阶段必须给出 --episodes、--minutes、--genre")
+        params = {"episodes": args.episodes, "minutesPerEpisode": args.minutes, "genre": args.genre,
+                  "adaptMode": args.adapt_mode, "preferences": args.preferences}
     opts: Dict[str, Any] = {
         "params": params, "aspect": args.aspect, "prompt_lang": args.prompt_lang,
-        "fight_enhancement": args.fight_enhancement,
-        "visual_style": args.visual_style,
-        "max_chars": args.max_chars, "refs_look": args.refs_look or ("写实" if args.visual_style == "live-action" else "动漫"), "refs_gen": args.refs_gen,
-        "optimize_mode": args.optimize_mode,
+        "fight_enhancement": args.fight_enhancement, "visual_style": args.visual_style,
+        "max_chars": args.max_chars, "refs_look": args.refs_look or ("写实" if args.visual_style == "live-action" else "动漫"),
+        "refs_gen": args.refs_gen, "optimize_mode": args.optimize_mode,
         "optimize_kinds": [k.strip() for k in args.optimize_kinds.split(",") if k.strip()],
         "optimize_only": [n.strip() for n in args.optimize_only.split(",") if n.strip()] if args.optimize_only else None,
         "images_gen": args.images_gen,
         "images_only": [n.strip() for n in args.images_only.split(",") if n.strip()] if args.images_only else None,
-        "video_protocol": args.video_protocol, "video_submit": args.video_submit,
-        "video_model": args.video_model, "frames_dir": args.frames_dir, "frames_gen": args.frames_gen,
-        "frames_only": [n.strip() for n in args.frames_only.split(",") if n.strip()] if args.frames_only else None, "video_flf": args.video_flf,
+        "video_protocol": args.video_protocol, "video_submit": args.video_submit, "video_model": args.video_model,
+        "frames_gen": args.frames_gen,
+        "frames_only": [n.strip() for n in args.frames_only.split(",") if n.strip()] if args.frames_only else None,
         "video_shots": [n.strip() for n in args.shots.split(",") if n.strip()] if args.shots else None,
         "audio_submit": args.audio_submit,
-        "refs_names": [n.strip() for n in args.refs_names.split(",")] if args.refs_names else None,
+        "refs_names": [n.strip() for n in args.refs_names.split(",") if n.strip()] if args.refs_names else None,
     }
     if args.eps:
         from .stages.base import parse_eps
         opts["eps"] = parse_eps(args.eps)
-
-    ctx = _ctx_from(args, settings, skip_source=all(stage in ("optimize", "images", "frames", "continuity") for stage in stages))
+    ctx = _ctx_from(args, settings, skip_source=all(stage in ("optimize", "images", "frames", "continuity", "video") for stage in stages))
     results = workflow.run_pipeline(ctx, stages, opts)
     ctx.log("全部完成：")
     for name, path in results.items():
@@ -219,34 +180,30 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def cmd_optimize_prompts(args: argparse.Namespace) -> int:
     from .prompt_optimizer import optimize_episode
-
     settings = load_settings()
     settings.require()
-    optimize_episode(
-        episode=args.episode,
-        out_dir=Path(args.out),
-        input_file=Path(args.input) if args.input else None,
-        output_file=Path(args.output_file) if args.output_file else None,
-    )
+    optimize_episode(episode=args.episode, out_dir=Path(args.out),
+                      input_file=Path(args.input) if args.input else None,
+                      output_file=Path(args.output_file) if args.output_file else None)
     return 0
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         try:
-            stream.reconfigure(encoding="utf-8", errors="replace")  # Windows 控制台中文不乱码
+            stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass
     args = _build_parser().parse_args(argv)
     try:
         return {"doctor": cmd_doctor, "run": cmd_run, "status": cmd_status, "optimize-prompts": cmd_optimize_prompts}[args.command](args)
     except KeyboardInterrupt:
-        print("\n已中断。已完成的条目都缓存在 output/work/ 里，重新运行会接着做。")
+        print("\n已中断。已完成的条目保留在 output/，重新运行可继续。")
         return 130
     except StageFailed as exc:
-        print(f"\n✗ 阶段回炉 {load_settings().fix_rounds} 轮后仍未通过校验，文件已保留，可手工修改后重跑：\n{exc.result.text}")
+        print(f"\n✗ 阶段回炉后仍未通过校验：\n{exc.result.text}")
         return 1
-    except (ConfigError, NodeError, LLMError, FileNotFoundError, ValueError) as exc:
+    except (ConfigError, NodeError, LLMError, FileNotFoundError, ValueError, RuntimeError) as exc:
         print(f"\n✗ {exc}")
         return 2
 
