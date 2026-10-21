@@ -182,7 +182,7 @@ _SIZE_ALIASES = {
     "extreme-wide": ("extremewide", "extremewideshot", "大远景", "极远景", "远景大全景"),
     "wide": ("wide", "wideshot", "全景", "远景", "longshot"),
     "medium": ("medium", "mediumshot", "中景", "midshot", "mediumwide"),
-    "close": ("close", "closeup", "closeupshot", "特写", "近景"),
+    "close": ("close", "closeup", "closeupshot", "特写", "近景", "mediumclose", "mediumcloseup", "mediumcloseupshot", "中近景", "中特写"),
     "extreme-close": ("extremeclose", "extremecloseup", "大特写", "极特写"),
 }
 

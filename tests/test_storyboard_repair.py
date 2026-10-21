@@ -207,6 +207,10 @@ class StoryboardRepairTest(unittest.TestCase):
         self.assertEqual(a["size"], "wide")
         self.assertEqual(b["beats"], [9, 13])      # 终点 = 下一镜起点 - 1
         self.assertEqual(b["size"], "close")
+        from zhipu_agent.stages.storyboard_repair import _norm_size
+        for raw in ("medium-close", "medium_close_up", "Medium Close-Up"):
+            self.assertEqual(_norm_size(raw), "close")
+        self.assertEqual(_norm_size("medium"), "medium")
         self.assertEqual(c["size"], "Low Angle")   # 认不出来不猜
         self.assertEqual(d["beats"], [21, 21])     # 场内最后一镜：只补成单拍，缺口仍由质量门报出
         self.assertEqual(doc["episodes"][0]["segments"][2]["cuts"][0]["beats"], [1, 1])
