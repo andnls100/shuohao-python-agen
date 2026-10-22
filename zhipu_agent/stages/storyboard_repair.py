@@ -202,6 +202,22 @@ def _strip_wrappers(text: str, chars: str) -> str:
     return re.sub("[" + re.escape(chars) + "]", "", text).strip()
 
 
+def _beat_numbers(value: Any) -> List[int]:
+    """从 beats 的各种写法里取出整数：[9]、9、"9"、"9-12"、[9, None]、[9, "12"]、[9,10,11]。"""
+    if value is None or isinstance(value, bool):
+        return []
+    if isinstance(value, (int, float)):
+        return [int(value)]
+    if isinstance(value, str):
+        return [int(x) for x in re.findall(r"\d+", value)]
+    if isinstance(value, (list, tuple)):
+        out: List[int] = []
+        for item in value:
+            out.extend(_beat_numbers(item))
+        return out
+    return []
+
+
 def repair_beats_and_symbols(doc: Dict[str, Any]) -> List[str]:
     """确定性修复：beats 缺终点、景别别名、soundscape/music 自带的 <> 与括号。不改剧情内容。"""
     repaired: List[str] = []
@@ -209,22 +225,22 @@ def repair_beats_and_symbols(doc: Dict[str, Any]) -> List[str]:
         flat = [(seg, idx, cut) for seg in episode.get("segments", []) or [] if isinstance(seg, dict)
                 for idx, cut in enumerate(seg.get("cuts", []) or [], 1) if isinstance(cut, dict)]
         for pos, (seg, idx, cut) in enumerate(flat):
-            beats = cut.get("beats")
+            nums = _beat_numbers(cut.get("beats"))
             start = None
-            if isinstance(beats, (int, float)) and not isinstance(beats, bool):
-                start = int(beats)
-            elif isinstance(beats, list) and beats and isinstance(beats[0], (int, float)) and not isinstance(beats[0], bool) \
-                    and (len(beats) == 1 or beats[1] in (None, "")):
-                start = int(beats[0])
+            if len(nums) >= 2 and not (isinstance(cut.get("beats"), list) and len(cut["beats"]) == 2
+                                       and all(isinstance(x, int) and not isinstance(x, bool) for x in cut["beats"])):
+                cut["beats"] = [min(nums), max(nums)]
+                repaired.append(f"{seg.get('id', '?')}#{idx}: beats 规整为 [{min(nums)}, {max(nums)}]")
+            elif len(nums) == 1:
+                start = nums[0]
             if start is not None:
                 end = start
                 for nxt_seg, _i, nxt in flat[pos + 1:]:
                     if nxt_seg.get("sceneIndex") != seg.get("sceneIndex"):
                         break
-                    nb = nxt.get("beats")
-                    nstart = nb[0] if isinstance(nb, list) and nb else nb
-                    if isinstance(nstart, (int, float)) and not isinstance(nstart, bool) and int(nstart) > start:
-                        end = int(nstart) - 1
+                    nn = _beat_numbers(nxt.get("beats"))
+                    if nn and min(nn) > start:
+                        end = min(nn) - 1
                     break
                 cut["beats"] = [start, end]
                 repaired.append(f"{seg.get('id', '?')}#{idx}: beats 补齐为 [{start}, {end}]")
