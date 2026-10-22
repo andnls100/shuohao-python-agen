@@ -34,8 +34,18 @@ export const DEFAULT_PARAMS = {
   nameAllow: [],         // 视频提示词里允许出现的称呼（如 '九尾狐妖'），不当作角色名拦截
 };
 
+/** 开关型参数容错：false / 0 / "false" / "0" / "no" / "off" / "关" 都算关。 */
+const asSwitch = (v, dflt) => {
+  if (v === undefined || v === null || v === '') return dflt;
+  if (typeof v === 'string') return !['false', '0', 'no', 'off', '关', '否'].includes(v.trim().toLowerCase());
+  return Boolean(v);
+};
+
 export function paramsOf(doc) {
-  return { ...DEFAULT_PARAMS, ...(doc?.params ?? {}) };
+  const p = { ...DEFAULT_PARAMS, ...(doc?.params ?? {}) };
+  p.h3Gates = asSwitch(p.h3Gates, true);
+  p.nameGate = asSwitch(p.nameGate, true);
+  return p;
 }
 
 /** 景别枚举：中文词必须出现在该分镜的分镜图提示词里（分镜图提示词是中文）。 */

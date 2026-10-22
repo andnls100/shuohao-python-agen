@@ -227,6 +227,8 @@ class StoryboardRepairTest(unittest.TestCase):
             self.assertEqual(storyboard._params_override(False), {"h3Gates": False})
             os.environ["AGENT_STORYBOARD_PARAMS"] = '{"maxOnScreen": 5}'
             self.assertEqual(storyboard._params_override(False), {"maxOnScreen": 5, "h3Gates": False})
+            os.environ["AGENT_STORYBOARD_PARAMS"] = '{"nameGate": "false"}'
+            self.assertEqual(storyboard._params_override(True), {"nameGate": False})
         finally:
             os.environ.pop("AGENT_STORYBOARD_PARAMS", None)
             if old is not None:
