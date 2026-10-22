@@ -43,6 +43,9 @@ def _params_override(h3_gates: bool = True) -> Dict[str, Any]:
             raise ValueError(f"AGENT_STORYBOARD_PARAMS 不是合法 JSON：{exc}") from exc
         if not isinstance(data, dict):
             raise ValueError("AGENT_STORYBOARD_PARAMS 必须是 JSON 对象")
+    for key in ("h3Gates", "nameGate"):
+        if isinstance(data.get(key), str):
+            data[key] = data[key].strip().lower() not in ("false", "0", "no", "off", "关", "否")
     if not h3_gates:
         data = {**data, "h3Gates": False}
     return data
