@@ -32,9 +32,41 @@ BATCH = 3
 PASSES = ["storyboard-pass.md", "shot-writing.md", "h3-prompt.md", "frame.md"]
 
 
+_PARAMS_KEY = "AGENT_STORYBOARD_PARAMS"
+
+
+def _params_raw() -> tuple:
+    """返回 (JSON 文本, 来源说明)。先看环境变量（非空才算），再直接读项目根目录 .env（不受"空环境变量占位"影响）。"""
+    value = os.environ.get(_PARAMS_KEY, "").strip()
+    if value:
+        return value, "环境变量"
+    from ..config import REPO_ROOT
+    env_file = REPO_ROOT / ".env"
+    if not env_file.is_file():
+        return "", f"未找到 {env_file}"
+    try:
+        lines = env_file.read_text(encoding="utf-8-sig").splitlines()
+    except OSError as exc:
+        return "", f"无法读取 {env_file}：{exc}"
+    for line in lines:
+        line = line.strip()
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        if key.strip() == _PARAMS_KEY:
+            val = val.strip()
+            if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'" and val[1:2] != "{":
+                val = val[1:-1]
+            if val:
+                return val, f".env（{env_file}）"
+    return "", f"{env_file} 里没有 {_PARAMS_KEY} 这一行"
+
+
 def _params_override(h3_gates: bool = True) -> Dict[str, Any]:
     """环境变量 AGENT_STORYBOARD_PARAMS（JSON）可覆盖技能包默认分镜参数，如 {"minCutSeconds":2,"maxCutSeconds":10}。"""
-    raw = os.environ.get("AGENT_STORYBOARD_PARAMS", "").strip()
+    raw, _src = _params_raw()
     data: Dict[str, Any] = {}
     if raw:
         try:
@@ -209,6 +241,7 @@ def run(
     script = read_json(script_path)
     wanted = eps or [e["ep"] for e in script["episodes"]]
     _eff = _params_override(h3_gates)
+    ctx.log(f"[storyboard] 分镜参数来源：{_params_raw()[1]}")
     ctx.log(f"[storyboard] 分镜参数覆盖：{json.dumps(_eff, ensure_ascii=False) if _eff else '无（使用技能包默认）'}；h3 检查={'开' if h3_gates else '关（seedance）'}")
     ctx.log(f"[storyboard] 打戏增强模式：{fight_enhancement}" + ("（已有分镜需 --force 才会按新模式重做）" if artifact(ctx).is_file() and not ctx.force else ""))
     path = artifact(ctx)
