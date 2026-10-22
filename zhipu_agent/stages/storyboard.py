@@ -300,6 +300,20 @@ def run(
             scene_ids = {s.get("sceneId") for s in seed_ep.get("seedScenes", [])}
             char_ids = {c for s in seed_ep.get("seedScenes", []) for c in s.get("characters", [])}
             prop_ids = {p for s in seed_ep.get("seedScenes", []) for p in s.get("props", [])}
+            _scene_rows = seed_ep.get("seedScenes", [])
+            _by_id: Dict[Any, List[int]] = {}
+            for _row in _scene_rows:
+                _by_id.setdefault(_row.get("sceneId"), []).append(_row.get("sceneIndex"))
+            scene_rule = (
+                "## 场次与节拍编号（硬规则）\n"
+                f"本集共 {len(_scene_rows)} 场，按 sceneIndex 顺序依次切分，不得跳场、合并或调换顺序；段不跨场，段的 sceneIndex 必须等于它所属场的 sceneIndex。"
+                "每个分镜的 beats 是该场自己的节拍编号 n（每场都从 1 重新开始，不接上一场），且 [起, 止] 不得超过该场的拍数。\n"
+            )
+            for _sid, _idx in _by_id.items():
+                if len(_idx) > 1:
+                    scene_rule += (f"注意：sceneId {_sid} 在本集出现了 {len(_idx)} 次（sceneIndex {'、'.join(str(i) for i in _idx)}），"
+                                   "它们是不同的场（中间隔着别的场），必须分别成段，不能合并成一场。\n")
+            scene_rule += "\n"
             scene_cards = [
                 compact({k: art_scenes[i].get(k) for k in ("id", "name", "anchors", "lighting")}, 200)
                 for i in sorted(scene_ids) if i in art_scenes
@@ -347,6 +361,7 @@ def run(
                 + f"## 视觉风格（frame、shot 和 h3Prompt 必须统一遵守）\n{style_hint}\n保持同一风格贯穿所有镜头，不要在漫剧插画与真人摄影之间混用。\n\n"
                 + "## 多人同框说明\n单个分镜 characters 超过 3 人时，该分镜必须写非空 note：说明前景主体是谁、其余人物作为背景群像如何站位，以及哪些人物不单独特写。不超过 3 人可不写。\n\n"
                 + "## 连续性状态表（必须落实到 JSON）\n每个 segment 增加 continuityMode：continuous 或 hard_cut；每个 cut 增加 continuity：{mode, stateBefore, stateAfter, referenceFrame}。mode 只允许 inherit 或 cut。stateBefore/stateAfter 用简短中文记录所有可见角色的位置（画面左右/前后、朝向、姿势）、服装、手持道具、伤势，以及关键物件位置；状态要具体可画，不能写“保持一致”。\n同场连续动作默认 inherit：下一切 stateBefore 必须承接上一切 stateAfter，动作按“起始姿态→动作中→结果姿态”推进；referenceFrame 填上一切的帧标识（如 E01-01/f1.png），供下游把前一帧作为构图/姿态参考。只有明确的时间跳跃、换地点或剧情要求重置构图时才用 cut，并写明原因；不要为了继承而强行复制上一镜构图。跨 segment 若同场且动作连续，也要在下一段首切的 stateBefore 承接前段末切 stateAfter，并把 referenceFrame 指向前段末帧。\nframe 只负责当前瞬间的构图、人物位置/姿态和状态；shot 负责几秒内动作过程、镜头运动与动作衔接。角色脸、服装、场景材质以设定图为准。必须在输出 JSON 中提供上述字段，不得只写在说明文字里。\n\n"
+                + scene_rule
                 + f"## 工作底稿 seedScenes（节拍编号、台词、每拍秒数已算好，不要重估；镜头必须认领这些节拍）\n{json.dumps(seed_ep.get('seedScenes', []), ensure_ascii=False, indent=1)}\n\n"
                 + f"## 场景卡\n{json.dumps(scene_cards, ensure_ascii=False, indent=1)}\n\n"
                 + f"## 角色卡（frame 里直呼角色名；视频正文用通用身份，不写名字）\n{json.dumps(char_cards, ensure_ascii=False, indent=1)}\n\n"

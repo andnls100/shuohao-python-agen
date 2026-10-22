@@ -1,3 +1,4 @@
+import math
 import unittest
 
 from zhipu_agent.stages.storyboard_repair import (
@@ -238,6 +239,20 @@ class StoryboardRepairTest(unittest.TestCase):
         repair_beats_and_symbols(doc)
         self.assertEqual([c["beats"] for c in doc["episodes"][0]["segments"][0]["cuts"]],
                          [[1, 1], [2, 4], [5, 7], [8, 8], [9, 9]])
+
+    def test_clean_shot_and_dialogue_ceiling(self):
+        from zhipu_agent.stages.storyboard_repair import _clean_shot, repair_dialogue_fit
+        self.assertEqual(_clean_shot("白狐抬头<d>[C01] 你好</d>，{你好}看向（远处）<风声>"), "白狐抬头，看向远处风声")
+        script = {"params": {"charsPerSecond": 4.5}, "episodes": [{"ep": 1, "scenes": [{"flow": [
+            {"line": "一二三四五六七八九十" * 1}, {"line": "一二三四五六七八九十" * 1}, {"line": "一二三四五六七八九十一二三"}]}]}]}
+        doc = {"params": {"maxCutSeconds": 10}, "episodes": [{"ep": 1, "segments": [{"id": "E01-01", "sceneIndex": 1, "cuts": [
+            {"seconds": 4.0, "beats": [1, 3]}]}]}]}
+        repair_dialogue_fit(doc, script, "zh")
+        sec = doc["episodes"][0]["segments"][0]["cuts"][0]["seconds"]
+        total = 0.0
+        for line in script["episodes"][0]["scenes"][0]["flow"]:
+            total += math.floor(len(line["line"]) / 4.5 * 10 + 0.5) / 10
+        self.assertGreaterEqual(sec, total)
 
 
 if __name__ == "__main__":
