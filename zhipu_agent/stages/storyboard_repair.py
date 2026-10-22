@@ -169,9 +169,13 @@ def repair_dialogue_fit(doc: Dict[str, Any], script: Dict[str, Any], lang: str =
                 for beat in flow[start - 1:end]:
                     if isinstance(beat, dict) and isinstance(beat.get("line"), str):
                         dialogue += _r1(len(re.sub(r"\s+", "", beat["line"])) / cps)
-                if dialogue > seconds + 1e-9 and _r1(dialogue) <= upper:
-                    cut["seconds"] = _r1(dialogue)
-                    fixes.append(f"{segment.get('id', '?')}#{index}: 台词 {_r1(dialogue):.1f}s，分镜 {seconds:.1f}s -> {cut['seconds']:.1f}s")
+                if dialogue > seconds and _r1(dialogue) <= upper:
+                    # 校验脚本是严格比较 dlg > seconds（浮点累加误差也算超），所以必须取到 >= dialogue 的值
+                    target = _r1(dialogue)
+                    if target < dialogue:
+                        target = math.ceil(dialogue * 100) / 100
+                    cut["seconds"] = target
+                    fixes.append(f"{segment.get('id', '?')}#{index}: 台词 {dialogue:.2f}s，分镜 {seconds:.1f}s -> {cut['seconds']:.2f}s")
                     changed = True
             if changed:
                 sync_segment_timing(segment, lang)
@@ -200,6 +204,15 @@ def _norm_size(value: Any) -> Optional[str]:
 
 def _strip_wrappers(text: str, chars: str) -> str:
     return re.sub("[" + re.escape(chars) + "]", "", text).strip()
+
+
+def _clean_shot(text: str) -> str:
+    """Seedance 镜头正文里不许有 H3 标记／台词块／协议符号：台词由程序从剧本补，所以整块删；<> 和（）只去符号留文字。"""
+    out = re.sub(r"<d>.*?</d>", "", text, flags=re.S | re.I)
+    out = re.sub(r"\{[^{}]*\}", "", out)
+    out = re.sub(r"\[Shot\s*\d+\]|\[镜头\s*\d+\]|<\s*Picture[^>]*>|@\s*\[?图片\s*\d*\]?", "", out, flags=re.I)
+    out = re.sub(r"[<>＜＞（）()\{\}]", "", out)
+    return re.sub(r"[ \t]{2,}", " ", out).strip()
 
 
 def _beat_numbers(value: Any) -> List[int]:
@@ -251,6 +264,12 @@ def repair_beats_and_symbols(doc: Dict[str, Any]) -> List[str]:
         for seg in episode.get("segments", []) or []:
             if not isinstance(seg, dict):
                 continue
+            for idx, cut in enumerate(seg.get("cuts", []) or [], 1):
+                if isinstance(cut, dict) and isinstance(cut.get("shot"), str):
+                    cleaned = _clean_shot(cut["shot"])
+                    if cleaned != cut["shot"]:
+                        cut["shot"] = cleaned
+                        repaired.append(f"{seg.get('id', '?')}#{idx}: 去掉 shot 里的协议符号")
             for key, chars in (("soundscape", "<>＜＞"), ("music", "（）()")):
                 value = seg.get(key)
                 if isinstance(value, str):
