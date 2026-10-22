@@ -240,7 +240,7 @@ python run_agent.py run --stages storyboard --eps 2 --video-protocol seedance --
 - 加了 --video-protocol seedance 后，h3Gates 自动关闭；默认（h3 协议）仍检查。
 - 视频提示词里允许出现的称呼（不当作角色名拦截）：内置娘亲/姐姐/师兄等亲属称呼；其他用 nameAllow 追加。
 - 一次设置多项参数（PowerShell）：
-  $env:AGENT_STORYBOARD_PARAMS='{"minCutSeconds":4,"maxCutSeconds":10,"maxOnScreen":5,"maxSegmentSeconds":20,"nameAllow":["九尾狐妖"]}'
+  $env:AGENT_STORYBOARD_PARAMS='{"minCutSeconds":4,"maxCutSeconds":10,"maxOnScreen":6,"maxSegmentSeconds":20,"nameAllow":["九尾狐妖"]}'
   python run_agent.py run --stages storyboard --eps 2 --video-protocol seedance --force
 
 永久设置分镜参数（不用每次设环境变量）：在项目根目录的 .env 文件里加一行（程序启动自动读取）：
