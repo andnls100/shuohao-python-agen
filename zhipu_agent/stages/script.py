@@ -56,6 +56,33 @@ def _ending(prev: Optional[Dict[str, Any]], outline_prev: Optional[Dict[str, Any
     return "（这是第一集，没有上一集）"
 
 
+def repair_hook_beat(episode: Dict[str, Any]) -> bool:
+    """hookBeat 是 [场号, 拍号]，都从 1 数起；模型常按 0 起写成 [0, 0]。含 0 时整体 +1（仍须通过后续校验）。"""
+    hb = episode.get("hookBeat")
+    if (isinstance(hb, list) and len(hb) == 2
+            and all(isinstance(x, int) and not isinstance(x, bool) for x in hb) and 0 in hb):
+        episode["hookBeat"] = [x + 1 for x in hb]
+        return True
+    return False
+
+
+def repair_speakers(episode: Dict[str, Any], known_ids: set) -> List[str]:
+    """说话人是 outline 里已有的角色、却没写进本场 characters 时，把他补进本场人物（VO 不动，未知 ID 不动）。"""
+    fixed: List[str] = []
+    for scene in episode.get("scenes", []) or []:
+        if not isinstance(scene, dict):
+            continue
+        cast = scene.setdefault("characters", [])
+        if not isinstance(cast, list):
+            continue
+        for beat in scene.get("flow", []) or []:
+            speaker = beat.get("speaker") if isinstance(beat, dict) else None
+            if isinstance(speaker, str) and speaker != "VO" and speaker in known_ids and speaker not in cast:
+                cast.append(speaker)
+                fixed.append(f"{scene.get('sceneId', '?')}: 补入说话人 {speaker}")
+    return fixed
+
+
 def run(ctx: Context, eps: Optional[List[int]] = None) -> Path:
     sk = ctx.skill(SKILL)
     work = ctx.work("script")
@@ -134,6 +161,10 @@ def run(ctx: Context, eps: Optional[List[int]] = None) -> Path:
             ep = int(key)
             episode = {k: v for k, v in data.items() if k != "seedNote"}
             episode["ep"] = ep
+            for fix in repair_speakers(episode, {c.get("id") for c in outline.get("characters", []) if isinstance(c, dict)}):
+                ctx.log(f"[script] 第 {ep} 集自动修正：{fix}")
+            if repair_hook_beat(episode):
+                ctx.log(f"[script] 第 {ep} 集 hookBeat 按 0 起编号，已自动 +1 → {episode['hookBeat']}")
             for k in ("targetSeconds", "hook", "cliff"):
                 episode.setdefault(k, _seed[ep].get(k))
             episode.setdefault("beatsClaimed", _seed[ep].get("beatsClaimed", []))
