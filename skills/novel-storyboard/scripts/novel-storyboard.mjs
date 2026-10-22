@@ -27,7 +27,7 @@ export const DEFAULT_PARAMS = {
   maxSegmentSeconds: 20, // 视频模型单段生成上限（秒）
   minCutSeconds: 4,      // 单个分镜下限
   maxCutSeconds: 8,       // 单个分镜上限——5 秒左右对齐视频模型的 5/10 秒档位
-  maxOnScreen: 3,        // 单个分镜同框人数上限，超了必须带拆解说明
+  maxOnScreen: 6,        // 单个分镜同框人数上限，超了必须带拆解说明
   tolerance: 1.0,        // 每集总时长对剧本目标的容差 ±100%
   h3Gates: true,         // false = 只用 Seedance 逐镜头协议，不检查 h3Prompt 结构/运镜词/台词块/语言
   nameGate: true,        // false = 不检查视频提示词里的角色名（例如靠角色参考图+名字标签出视频时）

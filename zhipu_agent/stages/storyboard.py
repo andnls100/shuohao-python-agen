@@ -205,6 +205,8 @@ def run(
         raise FileNotFoundError(f"需要先有剧本：{script_path}（先运行 script 阶段）")
     script = read_json(script_path)
     wanted = eps or [e["ep"] for e in script["episodes"]]
+    _eff = _params_override(h3_gates)
+    ctx.log(f"[storyboard] 分镜参数覆盖：{json.dumps(_eff, ensure_ascii=False) if _eff else '无（使用技能包默认）'}；h3 检查={'开' if h3_gates else '关（seedance）'}")
     ctx.log(f"[storyboard] 打戏增强模式：{fight_enhancement}" + ("（已有分镜需 --force 才会按新模式重做）" if artifact(ctx).is_file() and not ctx.force else ""))
     path = artifact(ctx)
 
@@ -343,6 +345,7 @@ def run(
                 + ("## 中文模式硬约束\n除协议固定 token 和台词外，frame、shot、h3Prompt 全部使用简体中文。h3Prompt 使用“参考图与目标视频的对齐——”开头，字段为“整体视听描述：”“整体音景：”“非叙事配乐：”，镜头标记使用连续的 [镜头 1]、[镜头 2]。禁止使用英文版 How the reference pictures align、integrated_multimodal_description、overall_soundscape、non_diegetic_music 或 [Shot k]。\n\n" if prompt_lang == "zh" else "")
                 + ("## 英文模式硬约束\nh3Prompt 正文、对齐行、镜头标记、声景和配乐字段全部使用英文及官方英文骨架，镜头标记使用连续的 [Shot 1]、[Shot 2]。\n\n" if prompt_lang == "en" else "")
                 + f"## 视觉风格（frame、shot 和 h3Prompt 必须统一遵守）\n{style_hint}\n保持同一风格贯穿所有镜头，不要在漫剧插画与真人摄影之间混用。\n\n"
+                + "## 多人同框说明\n单个分镜 characters 超过 3 人时，该分镜必须写非空 note：说明前景主体是谁、其余人物作为背景群像如何站位，以及哪些人物不单独特写。不超过 3 人可不写。\n\n"
                 + "## 连续性状态表（必须落实到 JSON）\n每个 segment 增加 continuityMode：continuous 或 hard_cut；每个 cut 增加 continuity：{mode, stateBefore, stateAfter, referenceFrame}。mode 只允许 inherit 或 cut。stateBefore/stateAfter 用简短中文记录所有可见角色的位置（画面左右/前后、朝向、姿势）、服装、手持道具、伤势，以及关键物件位置；状态要具体可画，不能写“保持一致”。\n同场连续动作默认 inherit：下一切 stateBefore 必须承接上一切 stateAfter，动作按“起始姿态→动作中→结果姿态”推进；referenceFrame 填上一切的帧标识（如 E01-01/f1.png），供下游把前一帧作为构图/姿态参考。只有明确的时间跳跃、换地点或剧情要求重置构图时才用 cut，并写明原因；不要为了继承而强行复制上一镜构图。跨 segment 若同场且动作连续，也要在下一段首切的 stateBefore 承接前段末切 stateAfter，并把 referenceFrame 指向前段末帧。\nframe 只负责当前瞬间的构图、人物位置/姿态和状态；shot 负责几秒内动作过程、镜头运动与动作衔接。角色脸、服装、场景材质以设定图为准。必须在输出 JSON 中提供上述字段，不得只写在说明文字里。\n\n"
                 + f"## 工作底稿 seedScenes（节拍编号、台词、每拍秒数已算好，不要重估；镜头必须认领这些节拍）\n{json.dumps(seed_ep.get('seedScenes', []), ensure_ascii=False, indent=1)}\n\n"
                 + f"## 场景卡\n{json.dumps(scene_cards, ensure_ascii=False, indent=1)}\n\n"
