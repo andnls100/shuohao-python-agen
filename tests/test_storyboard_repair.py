@@ -256,6 +256,25 @@ class StoryboardRepairTest(unittest.TestCase):
             total += math.floor(len(line["line"]) / 4.5 * 10 + 0.5) / 10
         self.assertGreaterEqual(sec, total)
 
+    def test_overlaps_and_short_cuts(self):
+        from zhipu_agent.stages.storyboard_repair import repair_beat_overlaps, repair_short_cuts
+        doc = {"params": {"minCutSeconds": 4, "maxSegmentSeconds": 20}, "episodes": [{"ep": 6, "segments": [
+            {"id": "E06-08", "sceneIndex": 2, "cuts": [
+                {"seconds": 5, "beats": [26, 29]}, {"seconds": 5, "beats": [29, 30]}, {"seconds": 2.5, "beats": [30, 30]}]},
+            {"id": "E06-09", "sceneIndex": 2, "cuts": [
+                {"seconds": 5, "beats": [31, 33]}, {"seconds": 5, "beats": [33, 33]}]},
+            {"id": "E06-10", "sceneIndex": 3, "cuts": [{"seconds": 3, "beats": [1, 1]}] * 1}]}]}
+        repair_beat_overlaps(doc)
+        c = doc["episodes"][0]["segments"][0]["cuts"]
+        self.assertEqual(c[1]["beats"], [30, 30])
+        self.assertEqual(c[2]["beats"], [30, 30])      # 完全相同的单拍：无法判断，保持不动
+        d = doc["episodes"][0]["segments"][1]["cuts"]
+        self.assertEqual(d[0]["beats"], [31, 32])      # 后一镜只剩 [33,33]，改缩前一镜
+        self.assertEqual(d[1]["beats"], [33, 33])
+        repair_short_cuts(doc, "zh")
+        self.assertEqual(doc["episodes"][0]["segments"][0]["cuts"][2]["seconds"], 4)
+        self.assertEqual(doc["episodes"][0]["segments"][2]["cuts"][0]["seconds"], 4)
+
 
 if __name__ == "__main__":
     unittest.main()

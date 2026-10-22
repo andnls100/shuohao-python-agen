@@ -280,6 +280,67 @@ def repair_beats_and_symbols(doc: Dict[str, Any]) -> List[str]:
     return repaired
 
 
+def _int_pair(value: Any) -> Optional[Tuple[int, int]]:
+    if (isinstance(value, list) and len(value) == 2
+            and all(isinstance(x, int) and not isinstance(x, bool) for x in value)):
+        return value[0], value[1]
+    return None
+
+
+def repair_beat_overlaps(doc: Dict[str, Any]) -> List[str]:
+    """同场相邻镜头的节拍区间重叠时消除：重复的那一拍归前一镜（后一镜起点后移）；后一镜会变空时改缩前一镜终点。"""
+    repaired: List[str] = []
+    for episode in doc.get("episodes", []) or []:
+        flat = [(seg, idx, cut) for seg in episode.get("segments", []) or [] if isinstance(seg, dict)
+                for idx, cut in enumerate(seg.get("cuts", []) or [], 1) if isinstance(cut, dict)]
+        for pos in range(1, len(flat)):
+            pseg, pidx, prev = flat[pos - 1]
+            seg, idx, cur = flat[pos]
+            if pseg.get("sceneIndex") != seg.get("sceneIndex"):
+                continue
+            a, b = _int_pair(prev.get("beats")) or (None, None)
+            c, d = _int_pair(cur.get("beats")) or (None, None)
+            if a is None or c is None or c > b:
+                continue
+            if d > b:
+                cur["beats"] = [b + 1, d]
+                repaired.append(f"{seg.get('id', '?')}#{idx}: 与上一镜重叠，起点 {c} -> {b + 1}")
+            elif b > a and c > a:
+                prev["beats"] = [a, c - 1]
+                repaired.append(f"{pseg.get('id', '?')}#{pidx}: 与下一镜重叠，终点 {b} -> {c - 1}")
+    return repaired
+
+
+def repair_short_cuts(doc: Dict[str, Any], lang: str = "en") -> List[str]:
+    """低于 minCutSeconds 的镜头补到下限（段总时长不超过 maxSegmentSeconds 才补），并重建 H3 时间。"""
+    params = doc.get("params") or {}
+    try:
+        lower = float(params.get("minCutSeconds", 4))
+        cap = float(params.get("maxSegmentSeconds", 20))
+    except (TypeError, ValueError):
+        return []
+    repaired: List[str] = []
+    for segment in _segments(doc):
+        cuts = segment.get("cuts")
+        if not isinstance(cuts, list):
+            continue
+        changed = False
+        for index, cut in enumerate(cuts, 1):
+            try:
+                seconds = float(cut.get("seconds"))
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if 0 < seconds < lower:
+                total = sum(float(c.get("seconds") or 0) for c in cuts if isinstance(c, dict))
+                if total - seconds + lower <= cap + 1e-9:
+                    cut["seconds"] = lower
+                    repaired.append(f"{segment.get('id', '?')}#{index}: {seconds:.1f}s 低于下限，补到 {lower:.1f}s")
+                    changed = True
+        if changed:
+            sync_segment_timing(segment, lang)
+    return repaired
+
+
 def repair_deterministic_storyboard(doc: Dict[str, Any], lang: str = "en") -> List[str]:
     """Apply safe, deterministic repairs that do not invent story content."""
     shot_size_terms = {
@@ -291,6 +352,8 @@ def repair_deterministic_storyboard(doc: Dict[str, Any], lang: str = "en") -> Li
     }
 
     repaired: List[str] = repair_beats_and_symbols(doc)
+    repaired += repair_beat_overlaps(doc)
+    repaired += repair_short_cuts(doc, lang)
     for segment in _segments(doc):
         for index, cut in enumerate(segment.get("cuts", []), 1):
             size = cut.get("size")
