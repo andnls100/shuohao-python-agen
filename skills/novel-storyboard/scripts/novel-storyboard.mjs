@@ -30,6 +30,7 @@ export const DEFAULT_PARAMS = {
   maxOnScreen: 3,        // 单个分镜同框人数上限，超了必须带拆解说明
   tolerance: 1.0,        // 每集总时长对剧本目标的容差 ±100%
   h3Gates: true,         // false = 只用 Seedance 逐镜头协议，不检查 h3Prompt 结构/运镜词/台词块/语言
+  nameGate: true,        // false = 不检查视频提示词里的角色名（例如靠角色参考图+名字标签出视频时）
   nameAllow: [],         // 视频提示词里允许出现的称呼（如 '九尾狐妖'），不当作角色名拦截
 };
 
@@ -803,7 +804,7 @@ export function gateReport(board, ctx = {}) {
   add('h3-dialogue', '认领节拍的台词逐字进 H3 提示词的 <d> 块', !h3On || bad.h3d.length === 0, script ? bad.h3d.join('；') : SKIP_SCRIPT);
   add('h3-lang', `H3 提示词语言与设定一致（promptLang=${promptLang}，正文${promptLang === 'en' ? '全英文' : '中文'}、骨架 token 官方英文格式）`, !h3On || bad.h3e.length === 0, bad.h3e.join('；'));
   add('frame-prompt', '分镜图提示词中文且非空', bad.frame.length === 0, bad.frame.join('；'));
-  add('prompt-no-names', '视频提示词不含角色名（H3 正文与 Seedance 镜头正文；分镜图提示词直呼其名放行）', bad.names.length === 0, banned.length ? bad.names.join('；') : SKIP_NAMES);
+  add('prompt-no-names', '视频提示词不含角色名（H3 正文与 Seedance 镜头正文；分镜图提示词直呼其名放行）', params.nameGate === false || bad.names.length === 0, banned.length ? bad.names.join('；') : SKIP_NAMES);
   add('composition', '构图量化字段齐全（每段 blocking；每镜焦距／机位／构图／视线落点／焦点／稳定性）', eps.length > 0 && bad.comp.length === 0, bad.comp.join('；'));
   add('seedance-shot', 'Seedance 镜头正文中文非空，不写时间、镜头编号、图片引用和协议符号', eps.length > 0 && bad.sd.length === 0, bad.sd.join('；'));
   add('refs', '场次／人物／道具对账剧本', bad.refs.length === 0, script ? bad.refs.join('；') : SKIP_SCRIPT);
