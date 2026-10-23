@@ -16,13 +16,10 @@ COMFY_URL = "http://127.0.0.1:8188"
 CLIENT_ID = "short_drama_batch"
 
 PROMPT = (
-    "电影级写实风格，古代中国客栈内部，夜晚，暖色油灯照明，"
-    "一名身穿深蓝色长袍的年轻男子坐在木桌旁，神情警觉，"
-    "中景构图，真实皮肤纹理，细节丰富，专业电影摄影，无文字，无水印"
-)
-NEGATIVE_PROMPT = "低质量，模糊，畸形手指，多余肢体，文字，水印，过曝"
-WIDTH = 1152
-HEIGHT = 896
+"cinematic film still, RAW photo, 8k ultra detailed, photorealistic, real human skin texture, fabric weave detail on linen and silk nighttime riverside ritual altar, raging bonfire in stone pit, tall flames leaping, glowing embers and sparks rising into dark air a crowd of coarse linen-clad villagers in rough hemp shorts and tunics, weathered faces lit by orange firelight, pushing and dragging forward two young people bound at the wrists with rope, wearing bright red traditional wedding robes, stumbling forward as they are shoved up the black stone steps:(燕溪山, young man with sharp defined features, short black hair, on the left side, forward-leaning posture, determined worried expression:1.3)(徐今朝, young man with softer pale features, on the right side, off-balance staggering gait, startled expression:1.3) intense orange firelight raking across faces and stone steps, strong chiaroscuro, deep blue-black night river receding into darkness in far background, high contrast between warm flame and cool night cinematic shallow depth of field, subtle lens bokeh, optical lens bloom on flames, realistic volumetric glow, film grain, natural raw color grading, no filter look, true live-action photography")
+NEGATIVE_PROMPT = "cartoon, illustration, anime, painting, 3d render, cgi, plastic skin, airbrushed, oversaturated, deformed hands, extra fingers, malformed limbs, bad anatomy, duplicate face, changing face, inconsistent character, blurry, lowres, jpeg artifacts, watermark, text, logo"
+WIDTH = 1080
+HEIGHT = 720
 STEPS = 20
 CFG = 2.5
 SEED = int(time.time()) % 2**32
