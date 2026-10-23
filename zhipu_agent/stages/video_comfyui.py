@@ -39,7 +39,82 @@ def is_ui_format(data: Any) -> bool:
     return isinstance(data, dict) and isinstance(data.get("nodes"), list)
 
 
-def load_workflow(path: Path) -> Dict[str, Any]:
+def _ui_to_api(data: Dict[str, Any], object_info: Dict[str, Any], source: str) -> Dict[str, Any]:
+    """Convert a ComfyUI canvas workflow (nodes/links) to /prompt API format."""
+    nodes = data.get("nodes")
+    if not isinstance(nodes, list) or not isinstance(data.get("links"), list):
+        raise ComfyError(f"{source} 缺少 nodes/links，无法转换为 ComfyUI API 工作流")
+
+    link_map = {}
+    for link in data["links"]:
+        if isinstance(link, list) and len(link) >= 6:
+            link_id, origin_id, origin_slot, target_id, target_slot = link[:5]
+            link_map[str(link_id)] = (str(origin_id), int(origin_slot), str(target_id), int(target_slot))
+
+    result: Dict[str, Any] = {}
+    for node in nodes:
+        if not isinstance(node, dict) or node.get("id") is None or not node.get("type"):
+            continue
+        node_id = str(node["id"])
+        node_type = str(node["type"])
+        resolved_type = node_type
+        if resolved_type not in object_info:
+            # Some custom nodes expose a display suffix in the canvas type.
+            candidates = [name for name in object_info if name == node_type.split(" (", 1)[0]]
+            if len(candidates) == 1:
+                resolved_type = candidates[0]
+            else:
+                raise ComfyError(
+                    f"{source} 节点 {node_id} 类型 {node_type!r} 不存在于服务器 /object_info；"
+                    "请确认远程 ComfyUI 已安装对应自定义节点"
+                )
+        schema = object_info[resolved_type]
+        allowed = set()
+        for section in ("required", "optional"):
+            values = (schema.get("input") or {}).get(section) or {}
+            allowed.update(values.keys())
+
+        inputs: Dict[str, Any] = {}
+        # Use the server's registered input schema to avoid submitting canvas-only metadata.
+        named = node.get("widgets_values_named")
+        if isinstance(named, dict):
+            for key, value in named.items():
+                if key in allowed:
+                    inputs[key] = value
+        # Connections are authoritative and override any stale widget values.
+        for port in node.get("inputs") or []:
+            if not isinstance(port, dict) or port.get("link") is None:
+                continue
+            link = link_map.get(str(port["link"]))
+            if not link:
+                raise ComfyError(f"{source} 节点 {node_id} 的输入 {port.get('name')} 引用了不存在的 link {port['link']}")
+            origin_id, origin_slot, target_id, _target_slot = link
+            if target_id != node_id:
+                raise ComfyError(f"{source} link {port['link']} 的目标节点不匹配")
+            inputs[str(port.get("name"))] = [origin_id, origin_slot]
+
+        missing = []
+        required = (schema.get("input") or {}).get("required") or {}
+        for key, spec in required.items():
+            if key not in inputs:
+                # Inputs with a connected socket are filled above; a required unconnected
+                # input must have a named widget value in the canvas JSON.
+                missing.append(key)
+        if missing:
+            raise ComfyError(
+                f"{source} 节点 {node_id}（{resolved_type}）缺少 API 必需输入：{', '.join(missing)}；"
+                "该节点可能没有 widgets_values_named，需导出包含完整控件值的工作流"
+            )
+        result[node_id] = {"class_type": resolved_type, "inputs": inputs}
+        title = node.get("title") or (node.get("properties") or {}).get("Node name for S&R")
+        if title:
+            result[node_id]["_meta"] = {"title": str(title)}
+    if not result:
+        raise ComfyError(f"{source} 没有可转换的工作流节点")
+    return result
+
+
+def load_workflow(path: Path, object_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     path = Path(path)
     try:
         data = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -48,11 +123,11 @@ def load_workflow(path: Path) -> Dict[str, Any]:
     except ValueError as exc:
         raise ComfyError(f"工作流 {path} 不是合法 JSON：{exc}") from exc
     if is_ui_format(data):
-        raise ComfyError(
-            f"{path.name} 是 ComfyUI 界面格式（含 nodes/links），不能直接提交到 /prompt；"
-            "请在 ComfyUI 里选「Save (API Format)」（导出 API）重新导出，替换该文件")
-    if not isinstance(data, dict) or not data or not all(isinstance(v, dict) and "class_type" in v for v in data.values()):
-        raise ComfyError(f"{path.name} 不是 API 格式工作流（应为 节点ID → {{class_type, inputs}}）")
+        if object_info is None:
+            raise ComfyError(f"{path.name} 是 ComfyUI 界面格式；转换为 /prompt API 格式需要先读取服务器 /object_info")
+        data = _ui_to_api(data, object_info, path.name)
+    if not isinstance(data, dict) or not data or not all(isinstance(v, dict) and "class_type" in v and isinstance(v.get("inputs"), dict) for v in data.values()):
+        raise ComfyError(f"{path.name} 不是有效的 ComfyUI 工作流（应为 API 格式，或含 nodes/links 的界面格式）")
     return data
 
 
@@ -194,6 +269,7 @@ class Client:
         self.timeout = timeout
         self.client_id = uuid.uuid4().hex
         self.log = print
+        self._object_info_cache: Optional[Dict[str, Any]] = None
 
     def _open(self, req: urllib.request.Request):
         try:
@@ -219,6 +295,23 @@ class Client:
             return json.loads(raw)
         except ValueError as exc:
             raise ComfyError(f"ComfyUI 返回非 JSON（{path}）：{raw[:300]}") from exc
+
+    def object_info(self) -> Dict[str, Any]:
+        """Fetch node schemas only when needed to convert a canvas-format workflow."""
+        if self._object_info_cache is None:
+            data = self._json("GET", "/object_info")
+            if not isinstance(data, dict) or not data:
+                raise ComfyError("ComfyUI /object_info 没有返回有效节点定义")
+            self._object_info_cache = data
+        return self._object_info_cache
+
+    def load_workflow(self, path: Path) -> Dict[str, Any]:
+        path = Path(path)
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            return load_workflow(path)
+        return load_workflow(path, self.object_info() if is_ui_format(raw) else None)
 
     def upload_image(self, path: Path) -> str:
         path = Path(path)
@@ -330,14 +423,14 @@ def generate(item: Dict[str, Any], manifest: Dict[str, Any], cfg: Dict[str, Any]
 
     use_i2v = bool(previous_last) and bool(cfg.get("workflow_i2v"))
     if use_i2v:
-        template = load_workflow(Path(cfg["workflow_i2v"]))
+        template = client.load_workflow(Path(cfg["workflow_i2v"]))
         uploaded = client.upload_image(previous_last)
         wf = build_i2v(template, prompt=prompt, seconds=seconds, uploaded=uploaded, seed=seed, prefix=prefix, nodes=nodes)
         mode, note = "i2v", "首帧=上一镜最后一帧"
     else:
         if not cfg.get("workflow_ref"):
             raise ComfyError("models.json 里没有配置 workflow_ref（Ref2VA 工作流路径）")
-        template = load_workflow(Path(cfg["workflow_ref"]))
+        template = client.load_workflow(Path(cfg["workflow_ref"]))
         refs: List[Tuple[str, Path]] = []
         if previous_last:  # 没配 i2v 工作流时，上一镜最后一帧作为第一张参考图
             refs.append(("previous", Path(previous_last)))
