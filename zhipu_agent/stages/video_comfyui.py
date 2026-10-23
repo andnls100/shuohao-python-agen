@@ -354,10 +354,13 @@ def generate(item: Dict[str, Any], manifest: Dict[str, Any], cfg: Dict[str, Any]
         max_refs = int(cfg.get("max_refs", 6))
         refs = plan_references(refs, max_refs, work_dir / f"collage-{item['id']}.png")
         uploaded_names = [client.upload_image(p) for _k, p in refs]
-        if "<Picture" not in prompt:
-            header = reference_header([k for k, _p in refs])
-            if header:
-                prompt = header + "\n" + prompt
+        # 图片编号按上传顺序生成；只要提示词没有完整引用所有参考图，就补上角色/场景/道具对应关系。
+        ref_kinds = [k for k, _p in refs]
+        header = reference_header(ref_kinds)
+        required_picture_refs = [f"<Picture {i}>" for i in range(1, len(refs) + 1)]
+        if header and not all(tag in prompt for tag in required_picture_refs):
+            prompt = header + "\n" + prompt
+
         wf = build_ref2va(template, prompt=prompt, seconds=seconds, aspect=aspect, size_preset=cfg.get("size_preset"),
                           uploaded=uploaded_names, seed=seed, prefix=prefix, nodes=nodes)
         mode, note = "ref2va", f"{len(refs)} 张参考图" + ("（含拼图）" if any(k == "collage" for k, _p in refs) else "")
