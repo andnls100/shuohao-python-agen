@@ -115,6 +115,24 @@
       "task_id_keys": ["id", "task_id", "taskId"],
       "status_keys": ["task_status", "status", "state"],
       "failed_states": ["failed", "fail", "failure", "error", "cancelled", "canceled"]
+    },
+    {
+      "key": "comfyui_h3",
+      "name": "ComfyUI H3（远程）",
+      "adapter": "comfyui",
+      "enabled": false,
+      "active": false,
+      "base_url": "https://jennifer-stereo-miller-oven.trycloudflare.com",
+      "workflow_ref": "workflow/kaggle_h3_ref2va.json",
+      "workflow_i2v": "workflow/MiniMax_H3_Fast_I2V.json",
+      "max_refs": 6,
+      "size_preset": "360p",
+      "max_seconds": 10,
+      "headers": {},
+      "timeout": 120,
+      "poll_interval": 10,
+      "max_wait": 3600,
+      "note": "ComfyUI 后端：新场景第一镜用 Ref2VA（场景+角色+道具，最多 max_refs 张，超出自动拼图），连续镜头用 I2V（上一镜最后一帧当首帧）。工作流必须是 API 格式导出。隧道地址变了只改 base_url。启用：enabled 改 true，命令加 --video-model comfyui_h3。"
     }
   ]
 }

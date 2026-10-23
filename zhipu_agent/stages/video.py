@@ -119,6 +119,11 @@ def _merge_clips(items: list, protocol: str, max_seconds: float) -> list:
             clip = dict(first); clip.update(id=f"{first['id']}-{ids[-1].rsplit('-', 1)[-1]}", shot_ids=ids,
                 shot_indexes=[x["shotIndex"] for x in group], duration_seconds=round(sum(x["duration_seconds"] for x in group), 2),
                 reference_assets=refs, scene_fixed=any(x.get("scene_fixed") for x in group))
+            all_refs, seen_all = [], set()
+            for x in group:
+                for ref in x.get("reference_assets_all") or x.get("reference_assets") or []:
+                    if ref.get("path") not in seen_all: seen_all.add(ref.get("path")); all_refs.append(dict(ref))
+            clip["reference_assets_all"] = [dict(r, no=i) for i, r in enumerate(all_refs[:12], 1)]
             if protocol == "seedance":
                 clip["prompt"] = f"本次视频由连续 {len(group)} 个镜头组成，按顺序在同一条视频内完成，镜头之间自然衔接，不要重复首帧画面：\n\n" + "\n\n".join(x["prompt"] for x in group)
         for sid in clip["shot_ids"]: clip_of[sid] = clip["id"]
@@ -143,9 +148,10 @@ def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str
                 except (TypeError, ValueError): duration = 0
                 if duration <= 0: raise ValueError(f"镜头 {shot_id} 的 seconds 必须大于 0")
                 refs = _reference_assets(ctx, ep, segment, cut)
+                refs_all = _reference_assets(ctx, ep, segment, cut, limit=12)
                 current = {"id": shot_id, "ep": ep, "sceneIndex": segment.get("sceneIndex"), "segmentId": sid,
                            "shotIndex": cut_index, "frame_ref": f"{sid}/f{cut_index}.png", "duration_seconds": duration,
-                           "reference_assets": refs, "continuity": cut.get("continuity") or {},
+                           "reference_assets": refs, "reference_assets_all": refs_all, "continuity": cut.get("continuity") or {},
                            "continuity_mode": str(segment.get("continuityMode") or ""),
                            "prompt": _shot_prompt(segment, cut, cut_index, visual_style, visual_style_prompt) if protocol == "seedance" else _prompt(segment, protocol),
                            "state": "planned", "task_id": None, "video_url": None, "video_path": None, "last_frame_path": None, "error": None}
@@ -189,6 +195,21 @@ def _config(model_key: Optional[str] = None) -> list:
         if "{workspace_id}" in status_template.lower(): status_template = re.sub(r"\{workspace_id\}", workspace_id, status_template, flags=re.I)
         model = str(entry.get("model") or "").strip(); api_key = str(entry.get("api_key") or "").strip()
         if not api_key and entry.get("api_key_env"): api_key = os.environ.get(str(entry["api_key_env"]), "").strip()
+        comfy = None
+        if adapter == "comfyui":
+            from ..config import REPO_ROOT
+            base_url = str(entry.get("base_url") or "").strip().rstrip("/")
+            if not base_url: raise ValueError(f"视频模型 {key}（{name}）缺少：base_url（ComfyUI 服务器地址，如 https://xxx.trycloudflare.com）")
+            if urlparse(base_url).scheme not in ("http", "https"): raise ValueError(f"视频模型 {key}（{name}）base_url 必须是 HTTP(S) 地址")
+            def _wf(value):
+                value = str(value or "").strip()
+                if not value: return None
+                path = Path(value); return str(path if path.is_absolute() else REPO_ROOT / path)
+            comfy = {"base_url": base_url, "headers": entry.get("headers") or {}, "workflow_ref": _wf(entry.get("workflow_ref")), "workflow_i2v": _wf(entry.get("workflow_i2v")),
+                     "max_refs": int(entry.get("max_refs", 6)), "size_preset": entry.get("size_preset"), "max_seconds": entry.get("max_seconds"),
+                     "nodes": entry.get("nodes") or {}, "timeout": max(10, int(entry.get("timeout", 120))), "poll": max(1, float(entry.get("poll_interval", 10))),
+                     "max_wait": max(60, int(entry.get("max_wait", 3600)))}
+            submit_url, model, api_key = base_url + "/prompt", model or "comfyui", api_key or "-"
         missing = [n for n, v in (("submit_url", submit_url), ("model", model), ("api_key", api_key)) if not v]
         if adapter == "aliyun_wan" and not workspace_id: missing.append("workspace_id 或 workspace_id_env")
         if missing: raise ValueError(f"视频模型 {key}（{name}）缺少：{'、'.join(missing)}")
@@ -200,7 +221,7 @@ def _config(model_key: Optional[str] = None) -> list:
                           "with_audio": bool(entry.get("with_audio", True)), "fps": int(entry.get("fps", 24)), "headers": entry.get("headers") or {},
                           "image_encoding": entry.get("image_encoding", "data_uri"), "video_url_keys": entry.get("video_url_keys") or ["video_url", "videoUrl", "output_url", "download_url"],
                           "task_id_keys": entry.get("task_id_keys") or ["task_id", "taskId", "job_id", "jobId", "id"], "status_keys": entry.get("status_keys") or ["status", "state"],
-                          "failed_states": entry.get("failed_states") or ["failed", "FAIL", "error", "ERROR"], "mode": entry.get("mode")})
+                          "failed_states": entry.get("failed_states") or ["failed", "FAIL", "error", "ERROR"], "mode": entry.get("mode"), "comfyui": comfy})
     return providers
 
 
@@ -374,6 +395,13 @@ def _submit_one(item: dict, manifest: dict, providers: list, video_root: Path, m
     for provider in providers:
         item["state"], item["provider"], item["error"] = "submitting", provider["name"], None; write_json(manifest_path, manifest)
         try:
+            if provider.get("adapter") == "comfyui":
+                from . import video_comfyui
+                target_base = video_root / "videos" / _safe(item["id"])
+                target, note = video_comfyui.generate(item, manifest, provider["comfyui"], video_root.parent, video_root / "work", previous_last, target_base)
+                last = video_root / "last-frames" / (_safe(item["id"]) + ".png"); _extract_last_frame(target, last)
+                item.update(state="succeeded", video_url=None, video_path=str(target.relative_to(video_root)), last_frame_path=str(last.relative_to(video_root)), error=None, comfy_mode=note); write_json(manifest_path, manifest)
+                print(f"视频完成：{item['id']}（ComfyUI {note}）\n视频：{target.resolve()}\n最后一帧：{last.resolve()}", flush=True); return last
             body = _build_body(provider, item, manifest, video_root.parent, previous_last)
             submitted_prompt = body.get("input", {}).get("prompt") if isinstance(body.get("input"), dict) else body.get("prompt")
             print(f"\n===== 视频镜头 {item['id']} | 输入模式={item['input_mode']} | 判断={item['continuity_decision']} | 模型={provider['name']} =====\n{submitted_prompt or item['prompt']}\n===== 提示词结束 =====\n", flush=True)

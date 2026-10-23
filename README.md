@@ -147,3 +147,14 @@ python run_agent.py run --stages audio --eps 1 --audio-submit --yes
 ```
 
 See [docs/video-generation.md](docs/video-generation.md) for the complete video workflow and `models.json` configuration details.
+
+### Remote ComfyUI backend
+
+Add a `video` entry with `"adapter": "comfyui"` (see `comfyui_h3` in `models.example.json`) and run:
+
+```bash
+python run_agent.py run --stages video --eps 1 --segments E01-01,E01-02 --video-model comfyui_h3 --video-submit
+```
+
+New-scene first shots use the Ref2VA workflow (scene + characters + props, max 6 images; extras are tiled into one collage without AI), continuation shots use the I2V workflow with the previous shot's last frame as the start frame. Workflows must be exported in ComfyUI **API format**.
+
