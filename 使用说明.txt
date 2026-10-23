@@ -256,11 +256,11 @@ AGENT_STORYBOARD_PARAMS={"minCutSeconds":4,"maxCutSeconds":10,"maxOnScreen":6,"m
    "base_url": "https://jennifer-stereo-miller-oven.trycloudflare.com",   <- 隧道地址变了只改这里
    "workflow_ref": "workflow/kaggle_h3_ref2va.json",    <- 新场景第一镜：场景图+角色图+道具图（Ref2VA）
    "workflow_i2v": "workflow/MiniMax_H3_Fast_I2V.json", <- 连续镜头：上一镜最后一帧当首帧（I2V）
-   "max_refs": 6, "size_preset": "360p", "max_seconds": 10
+   "max_refs": 15, "size_preset": "360p", "max_seconds": 10
 2) 命令（只是多了 --video-model comfyui_h3，其余和以前一样）：
    python run_agent.py run --stages video --eps 1 --segments E01-01,E01-02 --video-model comfyui_h3 --video-submit
 3) 规则：
-   - 新场景第一镜 → Ref2VA：参考图 = 角色、场景、道具（按顺序），超过 max_refs（6）张时，最后几张自动拼成一张拼图（程序拼，不调用 AI）。
+   - 新场景第一镜 → Ref2VA：参考图 = 角色、场景、道具（按顺序），超过 max_refs（默认 15）张时，最后几张自动拼成一张拼图（程序拼，不调用 AI）。
    - 连续镜头 → I2V：只用上一镜真实最后一帧当首帧（I2V 工作流没有角色/道具参考位）。
    - 提示词沿用原来的视频提示词；Ref2VA 会在开头自动加一句 <Picture N> 参考说明（提示词里已有 <Picture 时不加）。
    - 流程：上传图片 → 提交工作流 → 轮询结果 → 下载 mp4 → FFmpeg 取最后一帧（下一镜用）。

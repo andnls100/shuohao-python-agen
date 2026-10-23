@@ -193,12 +193,14 @@ class Client:
         self.headers = {"User-Agent": UA, **(headers or {})}
         self.timeout = timeout
         self.client_id = uuid.uuid4().hex
+        self.log = print
 
     def _open(self, req: urllib.request.Request):
         try:
             return urllib.request.urlopen(req, timeout=self.timeout)
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", "replace")[:1500]
+            detail = exc.read().decode("utf-8", "replace")[:8000]
+            self.log(f"[ComfyUI] HTTP {exc.code} {req.get_method()} {req.full_url}\n[ComfyUI] 响应头：{dict(exc.headers)}\n[ComfyUI] 响应体（完整）：\n{detail}")
             hint = ""
             if exc.code >= 500:
                 hint = "\n（500 表示 ComfyUI 服务器内部报错，真正原因在服务器控制台/Kaggle 输出的 Traceback 里；本次提交的工作流已存到 output/video/work/<镜头ID>.workflow.json）"
@@ -242,6 +244,7 @@ class Client:
             info = json.loads(raw)
         except ValueError as exc:
             raise ComfyError(f"上传图片返回非 JSON：{raw[:300]}") from exc
+        self.log(f"[ComfyUI] 上传 {path.name}（{path.stat().st_size} 字节）→ 服务器返回 {json.dumps(info, ensure_ascii=False)}")
         name = info.get("name")
         if not name:
             raise ComfyError(f"上传图片响应里没有 name：{raw[:300]}")
@@ -249,7 +252,9 @@ class Client:
         return f"{sub}/{name}" if sub else str(name)
 
     def queue(self, workflow: Dict[str, Any]) -> str:
+        self.log(f"[ComfyUI] POST {self.base}/prompt（client_id={self.client_id}，节点数={len(workflow)}）")
         data = self._json("POST", "/prompt", {"prompt": workflow, "client_id": self.client_id})
+        self.log(f"[ComfyUI] /prompt 响应：{json.dumps(data, ensure_ascii=False)[:2000]}")
         pid = data.get("prompt_id") if isinstance(data, dict) else None
         if not pid:
             raise ComfyError(f"提交工作流失败，响应里没有 prompt_id：{json.dumps(data, ensure_ascii=False)[:800]}")
@@ -260,6 +265,7 @@ class Client:
         while time.time() < deadline:
             hist = self._json("GET", f"/history/{urllib.parse.quote(prompt_id)}")
             entry = hist.get(prompt_id) if isinstance(hist, dict) else None
+            self.log(f"[ComfyUI] 轮询 {prompt_id}：" + (f"status={json.dumps(entry.get('status', {}), ensure_ascii=False)[:300]}" if entry else "尚未完成（排队/执行中）"))
             if entry:
                 status = entry.get("status") or {}
                 if status.get("status_str") == "error":
@@ -311,6 +317,7 @@ def generate(item: Dict[str, Any], manifest: Dict[str, Any], cfg: Dict[str, Any]
              previous_last: Optional[Path], target_base: Path, log=print) -> Tuple[Path, str]:
     """生成一个镜头，返回（下载好的视频路径, 说明）。cfg 是 models.json 里 comfyui 条目整理后的字典。"""
     client = Client(cfg["base_url"], cfg.get("headers"), cfg.get("timeout", 120))
+    client.log = log
     nodes = cfg.get("nodes") or {}
     seconds = float(item["duration_seconds"])
     cap = cfg.get("max_seconds")
@@ -355,6 +362,8 @@ def generate(item: Dict[str, Any], manifest: Dict[str, Any], cfg: Dict[str, Any]
                           uploaded=uploaded_names, seed=seed, prefix=prefix, nodes=nodes)
         mode, note = "ref2va", f"{len(refs)} 张参考图" + ("（含拼图）" if any(k == "collage" for k, _p in refs) else "")
     log(f"\n===== ComfyUI 镜头 {item['id']} | 模式={mode}（{note}）| 种子={seed} =====\n{prompt}\n===== 提示词结束 =====\n")
+    log(f"[ComfyUI] 服务器：{cfg['base_url']} | 工作流：{cfg.get('workflow_i2v') if mode == 'i2v' else cfg.get('workflow_ref')} | 时长={seconds}s | 画幅={aspect} | 清晰度={cfg.get('size_preset')}")
+    log(f"[ComfyUI] 即将提交的完整工作流 JSON：\n{json.dumps(wf, ensure_ascii=False, indent=1)}\n[ComfyUI] 工作流 JSON 结束")
     try:  # 保存实际提交的工作流，方便对照 ComfyUI 界面或服务器报错排查
         work_dir.mkdir(parents=True, exist_ok=True)
         (work_dir / f"{item['id']}.workflow.json").write_text(json.dumps(wf, ensure_ascii=False, indent=1), encoding="utf-8")

@@ -123,7 +123,7 @@ def _merge_clips(items: list, protocol: str, max_seconds: float) -> list:
             for x in group:
                 for ref in x.get("reference_assets_all") or x.get("reference_assets") or []:
                     if ref.get("path") not in seen_all: seen_all.add(ref.get("path")); all_refs.append(dict(ref))
-            clip["reference_assets_all"] = [dict(r, no=i) for i, r in enumerate(all_refs[:12], 1)]
+            clip["reference_assets_all"] = [dict(r, no=i) for i, r in enumerate(all_refs[:15], 1)]
             if protocol == "seedance":
                 clip["prompt"] = f"本次视频由连续 {len(group)} 个镜头组成，按顺序在同一条视频内完成，镜头之间自然衔接，不要重复首帧画面：\n\n" + "\n\n".join(x["prompt"] for x in group)
         for sid in clip["shot_ids"]: clip_of[sid] = clip["id"]
@@ -148,7 +148,7 @@ def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str
                 except (TypeError, ValueError): duration = 0
                 if duration <= 0: raise ValueError(f"镜头 {shot_id} 的 seconds 必须大于 0")
                 refs = _reference_assets(ctx, ep, segment, cut)
-                refs_all = _reference_assets(ctx, ep, segment, cut, limit=12)
+                refs_all = _reference_assets(ctx, ep, segment, cut, limit=15)
                 current = {"id": shot_id, "ep": ep, "sceneIndex": segment.get("sceneIndex"), "segmentId": sid,
                            "shotIndex": cut_index, "frame_ref": f"{sid}/f{cut_index}.png", "duration_seconds": duration,
                            "reference_assets": refs, "reference_assets_all": refs_all, "continuity": cut.get("continuity") or {},
