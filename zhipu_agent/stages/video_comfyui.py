@@ -199,7 +199,10 @@ class Client:
             return urllib.request.urlopen(req, timeout=self.timeout)
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:1500]
-            raise ComfyError(f"ComfyUI HTTP {exc.code}（{req.full_url}）：{detail}") from exc
+            hint = ""
+            if exc.code >= 500:
+                hint = "\n（500 表示 ComfyUI 服务器内部报错，真正原因在服务器控制台/Kaggle 输出的 Traceback 里；本次提交的工作流已存到 output/video/work/<镜头ID>.workflow.json）"
+            raise ComfyError(f"ComfyUI HTTP {exc.code}（{req.full_url}）：{detail}{hint}") from exc
         except urllib.error.URLError as exc:
             raise ComfyError(f"连接 ComfyUI 失败（{self.base}）：{exc}；隧道地址是否已生成/仍在运行？") from exc
 
@@ -352,6 +355,11 @@ def generate(item: Dict[str, Any], manifest: Dict[str, Any], cfg: Dict[str, Any]
                           uploaded=uploaded_names, seed=seed, prefix=prefix, nodes=nodes)
         mode, note = "ref2va", f"{len(refs)} 张参考图" + ("（含拼图）" if any(k == "collage" for k, _p in refs) else "")
     log(f"\n===== ComfyUI 镜头 {item['id']} | 模式={mode}（{note}）| 种子={seed} =====\n{prompt}\n===== 提示词结束 =====\n")
+    try:  # 保存实际提交的工作流，方便对照 ComfyUI 界面或服务器报错排查
+        work_dir.mkdir(parents=True, exist_ok=True)
+        (work_dir / f"{item['id']}.workflow.json").write_text(json.dumps(wf, ensure_ascii=False, indent=1), encoding="utf-8")
+    except OSError:
+        pass
     prompt_id = client.queue(wf)
     item["task_id"] = prompt_id
     outputs = client.wait(prompt_id, float(cfg.get("poll", 10)), float(cfg.get("max_wait", 3600)))
