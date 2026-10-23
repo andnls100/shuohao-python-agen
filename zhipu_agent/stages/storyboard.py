@@ -427,10 +427,14 @@ def run(
             # Bind every cut to deterministic, unique asset IDs. The model writes the
             # semantic names; the program resolves those names to canonical IDs so
             # downstream image/video stages can audit the exact asset-to-prompt mapping.
+            _script_ep = next(
+                (row for row in script.get("episodes", []) if int(row.get("ep", 0)) == ep),
+                {},
+            )
             _scene_id_by_index = {
-                int(row.get("sceneIndex")): str(row.get("sceneId"))
-                for row in seed_ep.get("seedScenes", [])
-                if row.get("sceneIndex") is not None and row.get("sceneId")
+                index: str(row.get("sceneId"))
+                for index, row in enumerate(_script_ep.get("scenes", []), start=1)
+                if row.get("sceneId")
             }
             _char_id_by_name = {}
             for _cid, _card in outline_chars.items():
