@@ -206,6 +206,12 @@ def _config(model_key: Optional[str] = None) -> list:
                 value = str(value or "").strip()
                 if not value: return None
                 path = Path(value)
+                # 2.json is only the canvas-format reference; never load it as the runtime template.
+                if path.name.lower() == "2.json":
+                    fallback = REPO_ROOT / "workflow" / "kaggle_h3_ref2va.json"
+                    if fallback.is_file():
+                        return str(fallback)
+                    raise ValueError("workflow_ref 不能指向 2.json；请配置 API 格式模板 workflow/kaggle_h3_ref2va.json")
                 resolved = path if path.is_absolute() else REPO_ROOT / path
                 return str(resolved)
             comfy = {"base_url": base_url, "headers": entry.get("headers") or {}, "workflow_ref": _wf(entry.get("workflow_ref")), "workflow_i2v": _wf(entry.get("workflow_i2v")),
