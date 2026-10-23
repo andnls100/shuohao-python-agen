@@ -205,7 +205,15 @@ def _config(model_key: Optional[str] = None) -> list:
             def _wf(value):
                 value = str(value or "").strip()
                 if not value: return None
-                path = Path(value); return str(path if path.is_absolute() else REPO_ROOT / path)
+                path = Path(value)
+                resolved = path if path.is_absolute() else REPO_ROOT / path
+                # Prefer the user's verified canvas workflow when the config still points
+                # at the repository's old Ref2VA template. Explicit custom paths are untouched.
+                normalized = value.replace("\\", "/").lstrip("./")
+                verified_canvas = REPO_ROOT / "2.json"
+                if normalized == "workflow/kaggle_h3_ref2va.json" and verified_canvas.is_file():
+                    return str(verified_canvas)
+                return str(resolved)
             comfy = {"base_url": base_url, "headers": entry.get("headers") or {}, "workflow_ref": _wf(entry.get("workflow_ref")), "workflow_i2v": _wf(entry.get("workflow_i2v")),
                      "max_refs": int(entry.get("max_refs", 6)), "size_preset": entry.get("size_preset"), "max_seconds": entry.get("max_seconds"),
                      "nodes": entry.get("nodes") or {}, "timeout": max(10, int(entry.get("timeout", 120))), "poll": max(1, float(entry.get("poll_interval", 10))),
