@@ -132,7 +132,7 @@
       "timeout": 120,
       "poll_interval": 10,
       "max_wait": 3600,
-      "note": "ComfyUI 后端：新场景第一镜用 Ref2VA（场景+角色+道具，最多 max_refs 张，超出自动拼图），连续镜头用 I2V（上一镜最后一帧当首帧）。工作流必须是 API 格式导出。隧道地址变了只改 base_url。启用：enabled 改 true，命令加 --video-model comfyui_h3。"
+      "note": "ComfyUI 后端：新场景第一镜用 Ref2VA（场景+角色+道具，最多 max_refs 张，超出自动拼图），连续镜头用 I2V（上一镜最后一帧当首帧）。workflow_ref 使用仓库根目录 2.json（画布格式由程序通过 /object_info 自动转换为 /prompt API 格式）。隧道地址变了只改 base_url。启用：enabled 改 true，命令加 --video-model comfyui_h3。"
     }
   ]
 }
