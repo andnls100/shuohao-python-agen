@@ -260,15 +260,36 @@ def _references(ctx: Context, ep: int, segment: dict, cut: dict, assets: dict, s
             return
         refs.append({"kind": kind, "name": str(found["name"]), "path": found["path"]})
 
-    for name in cut.get("characters") or []:
-        add("character", str(name), str(name))
-    scene_id = scene_ids.get((ep, int(segment.get("sceneIndex") or 0)))
-    if scene_id:
-        add("scene", scene_id, scene_id)
+    asset_refs = cut.get("assetRefs")
+    if isinstance(asset_refs, list):
+        # storyboard.py writes the canonical order and stable IDs: character -> scene -> prop.
+        # Resolve by the bound name, but retain the stable ID in the manifest for audit/debugging.
+        for ref in asset_refs:
+            if not isinstance(ref, dict):
+                continue
+            kind = str(ref.get("kind") or "")
+            name = str(ref.get("name") or "").strip()
+            if kind in ("character", "scene", "prop") and name:
+                add(kind, name, name)
+                if refs and refs[-1].get("name") == name and refs[-1].get("kind") == kind:
+                    refs[-1]["asset_id"] = str(ref.get("id") or "")
+        if not any(ref.get("kind") == "scene" for ref in refs):
+            scene_id = scene_ids.get((ep, int(segment.get("sceneIndex") or 0)))
+            if scene_id:
+                add("scene", scene_id, scene_id)
+            else:
+                missing.append("找不到分镜所属场景（缺剧本 sceneId），未引用场景图")
     else:
-        missing.append("找不到分镜所属场景（缺剧本 sceneId），未引用场景图")
-    for name in cut.get("props") or []:
-        add("prop", str(name), str(name))
+        # Backward compatibility for storyboard artifacts generated before assetRefs existed.
+        for name in cut.get("characters") or []:
+            add("character", str(name), str(name))
+        scene_id = scene_ids.get((ep, int(segment.get("sceneIndex") or 0)))
+        if scene_id:
+            add("scene", scene_id, scene_id)
+        else:
+            missing.append("找不到分镜所属场景（缺剧本 sceneId），未引用场景图")
+        for name in cut.get("props") or []:
+            add("prop", str(name), str(name))
     room = limit - 1 if prev else limit
     if len(refs) > room:
         missing.append(f"参考图 {len(refs) + (1 if prev else 0)} 张超过接口上限 {limit}，只传前 {room} 张设定图"

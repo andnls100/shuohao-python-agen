@@ -402,6 +402,7 @@ def run(
                 + f"## 场景卡\n{json.dumps(scene_cards, ensure_ascii=False, indent=1)}\n\n"
                 + f"## 角色卡（frame 里直呼角色名；视频正文用通用身份，不写名字）\n{json.dumps(char_cards, ensure_ascii=False, indent=1)}\n\n"
                 + f"## 叙事道具\n{json.dumps(prop_cards, ensure_ascii=False, indent=1)}\n\n"
+                + "## 资产绑定硬规则\n每个 cut.characters 只能填写角色卡中的准确角色名，cut.props 只能填写叙事道具卡中的准确名称；不得改名、缩写、合并或用代称。每切必须完整列出该画面实际可见或正在使用的角色与道具，空镜使用空数组。sceneIndex 必须指向实际场景卡。程序会根据这些字段生成唯一 assetRefs（角色→场景→道具），不要自行生成、复制或改写 assetRefs。资产绑定不得遗漏提示词中明确出现的角色、场景或道具，也不得把未出现在该切的资产加入绑定。\n\n"
                 + (f"## 每场第一段的开场走位句（blocking 请照抄对应那一场的这一句）\n" + "\n".join(first_blocking) + "\n\n"
                    if first_blocking else "")
                 + "## 输出\n只输出这一集的 JSON 对象：{\"ep\": N, \"segments\": [...]}，不要 seedScenes。"
@@ -422,11 +423,63 @@ def run(
             ep = int(key)
             episode = {k: v for k, v in data.items() if k != "seedScenes"}
             episode["ep"] = ep
+
+            # Bind every cut to deterministic, unique asset IDs. The model writes the
+            # semantic names; the program resolves those names to canonical IDs so
+            # downstream image/video stages can audit the exact asset-to-prompt mapping.
+            _script_ep = next(
+                (row for row in script.get("episodes", []) if int(row.get("ep", 0)) == ep),
+                {},
+            )
+            _scene_id_by_index = {
+                index: str(row.get("sceneId"))
+                for index, row in enumerate(_script_ep.get("scenes", []), start=1)
+                if row.get("sceneId")
+            }
+            _char_id_by_name = {}
+            for _cid, _card in outline_chars.items():
+                _name = str(_card.get("name") or "").strip()
+                if _name:
+                    _char_id_by_name.setdefault(_name, str(_cid))
+            for _card in cast_by_id.values():
+                _name = str(_card.get("name") or "").strip()
+                if _name and _card.get("id"):
+                    _char_id_by_name.setdefault(_name, str(_card["id"]))
+            _prop_id_by_name = {}
+            for _pid, _card in outline_props.items():
+                _name = str(_card.get("name") or "").strip()
+                if _name:
+                    _prop_id_by_name.setdefault(_name, str(_pid))
+
             # The task key is authoritative; models sometimes copy segment IDs from examples.
             for segment_index, segment in enumerate(episode["segments"], start=1):
                 if not isinstance(segment, dict):
                     raise ValueError(f"第 {segment_index} 段必须是 JSON 对象")
                 segment["id"] = f"E{ep:02d}-{segment_index:02d}"
+                scene_id = _scene_id_by_index.get(int(segment.get("sceneIndex") or 0))
+                for cut_index, cut in enumerate(segment.get("cuts") or [], start=1):
+                    if not isinstance(cut, dict):
+                        raise ValueError(f"{segment['id']} 第 {cut_index} 切必须是 JSON 对象")
+                    refs = []
+                    seen_refs = set()
+
+                    def bind_asset(kind, asset_id, name):
+                        name = str(name or "").strip()
+                        if not name:
+                            return
+                        stable_id = f"{kind}:{asset_id or name}"
+                        if stable_id in seen_refs:
+                            return
+                        seen_refs.add(stable_id)
+                        refs.append({"id": stable_id, "kind": kind, "name": name})
+
+                    for name in cut.get("characters") or []:
+                        bind_asset("character", _char_id_by_name.get(str(name), str(name)), name)
+                    if scene_id:
+                        bind_asset("scene", scene_id, scene_id)
+                    for name in cut.get("props") or []:
+                        bind_asset("prop", _prop_id_by_name.get(str(name), str(name)), name)
+                    cut["assetRefs"] = refs
             _doc["episodes"] = sorted(
                 [e for e in _doc["episodes"] if e["ep"] != ep] + [episode], key=lambda e: e["ep"])
             write_json(_path, _doc)
