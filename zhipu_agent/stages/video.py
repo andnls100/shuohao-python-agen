@@ -184,6 +184,7 @@ def _config(model_key: Optional[str] = None) -> list:
         matched = [e for e in entries if isinstance(e, dict) and model_key in (str(e.get("key") or ""), str(e.get("name") or ""), str(e.get("model") or ""))]
         if not matched: raise ValueError(f"models.json 的 video 列表中找不到模型 {model_key!r}")
         entries = [e for e in matched if e.get("enabled", True) is not False]
+        if not entries: raise ValueError(f"视频模型 {model_key!r} 在 models.json 里是 enabled=false；请改成 true 后再用 --video-model 指定")
     else:
         enabled = [e for e in entries if isinstance(e, dict) and e.get("enabled", True) is not False]; active = [e for e in enabled if e.get("active") is True]; entries = active or enabled
     providers = []
@@ -392,6 +393,8 @@ def _submit_one(item: dict, manifest: dict, providers: list, video_root: Path, m
             last = _resolve(video_root, str(item["last_frame_path"]))
             if last.is_file(): return last
     failures = []
+    if not providers:
+        item["state"], item["error"] = "failed", "没有可用的视频平台：models.json 的 video 列表里没有 enabled 的模型"; write_json(manifest_path, manifest); return None
     for provider in providers:
         item["state"], item["provider"], item["error"] = "submitting", provider["name"], None; write_json(manifest_path, manifest)
         try:
