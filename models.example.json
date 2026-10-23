@@ -123,7 +123,7 @@
       "enabled": false,
       "active": false,
       "base_url": "https://jennifer-stereo-miller-oven.trycloudflare.com",
-      "workflow_ref": "workflow/kaggle_h3_ref2va.json",
+      "workflow_ref": "2.json",
       "workflow_i2v": "workflow/MiniMax_H3_Fast_I2V.json",
       "max_refs": 15,
       "size_preset": "360p",
