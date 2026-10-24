@@ -27,7 +27,7 @@ def _optimize_h3_prompt(prompt: str, settings) -> str:
     if not original:
         raise ValueError("H3 提示词为空，无法优化")
 
-    original_picture_tags = re.findall(r"<Picture\\s+\\d+>", original)
+    original_picture_tags = re.findall(r"<Picture\s+\d+>", original)
     original_dialogues = re.findall(r"<d>.*?</d>", original, flags=re.S)
     protected = original
     dialogue_tokens = []
@@ -49,7 +49,7 @@ def _optimize_h3_prompt(prompt: str, settings) -> str:
         picture_tokens.append((token, match.group(0)))
         return token
 
-    protected = re.sub(r"<Picture\\s+\\d+>", protect_picture, protected)
+    protected = re.sub(r"<Picture\s+\d+>", protect_picture, protected)
 
     system = (
         "You are an expert prompt editor for MiniMax H3 reference-to-video (Ref2VA/R2F). "
@@ -63,12 +63,12 @@ def _optimize_h3_prompt(prompt: str, settings) -> str:
     )
     optimized = ask_text(
         system,
-        "Rewrite this prompt for MiniMax H3 Ref2VA/R2F. Preserve all placeholder tokens exactly:\\n\\n" + protected,
+        "Rewrite this prompt for MiniMax H3 Ref2VA/R2F. Preserve all placeholder tokens exactly:\n\n" + protected,
         settings,
     ).strip()
 
     # Accept a model that wraps the answer in a single markdown fence, but remove only that wrapper.
-    fence = re.fullmatch(r"```(?:text|english)?\\s*(.*?)\\s*```", optimized, flags=re.I | re.S)
+    fence = re.fullmatch(r"```(?:text|english)?\s*(.*?)\s*```", optimized, flags=re.I | re.S)
     if fence:
         optimized = fence.group(1).strip()
 
@@ -83,7 +83,7 @@ def _optimize_h3_prompt(prompt: str, settings) -> str:
     for token, value in dialogue_tokens:
         optimized = optimized.replace(token, value)
 
-    if re.findall(r"<Picture\\s+\\d+>", optimized) != original_picture_tags:
+    if re.findall(r"<Picture\s+\d+>", optimized) != original_picture_tags:
         raise ValueError("H3 英文提示词优化改变了 <Picture N> 标签的数量、顺序或写法；已停止提交。")
     if re.findall(r"<d>.*?</d>", optimized, flags=re.S) != original_dialogues:
         raise ValueError("H3 英文提示词优化改变了原始台词块；已停止提交。")
