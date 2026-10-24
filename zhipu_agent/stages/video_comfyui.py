@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import math
 import random
@@ -30,6 +31,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 UA = "Mozilla/5.0 (compatible; shuohao-agent/1.0)"  # Cloudflare 隧道会拦 Python-urllib 默认 UA
 VIDEO_EXTS = (".mp4", ".webm", ".mov", ".mkv", ".gif")
+
+
+# 本次运行里已上传的图片：(服务器地址, 内容哈希, 文件名) -> 服务器上的文件名
+_UPLOADED: Dict[Tuple[str, str, str], str] = {}
 
 
 class ComfyError(RuntimeError):
@@ -391,8 +396,16 @@ class Client:
 
     def upload_image(self, path: Path) -> str:
         path = Path(path)
+        data = path.read_bytes()
+        # 前缀取文件内容的哈希：内容相同 → 文件名相同，不再每次随机；内容不同仍不会同名互相覆盖。
+        digest = hashlib.sha1(data).hexdigest()[:8]
+        cache_key = (self.base, digest, path.name)
+        cached = _UPLOADED.get(cache_key)
+        if cached:
+            self.log(f"[ComfyUI] 跳过上传 {path.name}（本次运行已上传过相同内容）→ {cached}")
+            return cached
         boundary = "----shuohao" + uuid.uuid4().hex
-        filename = f"{uuid.uuid4().hex[:8]}_{path.name}"
+        filename = f"{digest}_{path.name}"
         chunks: List[bytes] = []
 
         def field(name: str, value: str) -> None:
@@ -403,7 +416,7 @@ class Client:
         mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg" if path.suffix.lower() in (".jpg", ".jpeg") else "application/octet-stream"
         chunks.append((f'--{boundary}\r\nContent-Disposition: form-data; name="image"; filename="{filename}"\r\n'
                        f"Content-Type: {mime}\r\n\r\n").encode())
-        chunks.append(path.read_bytes())
+        chunks.append(data)
         chunks.append(f"\r\n--{boundary}--\r\n".encode())
         headers = {**self.headers, "Content-Type": f"multipart/form-data; boundary={boundary}"}
         req = urllib.request.Request(self.base + "/upload/image", data=b"".join(chunks), headers=headers, method="POST")
@@ -418,7 +431,9 @@ class Client:
         if not name:
             raise ComfyError(f"上传图片响应里没有 name：{raw[:300]}")
         sub = str(info.get("subfolder") or "").strip("/")
-        return f"{sub}/{name}" if sub else str(name)
+        result = f"{sub}/{name}" if sub else str(name)
+        _UPLOADED[cache_key] = result
+        return result
 
     def queue(self, workflow: Dict[str, Any]) -> str:
         self.log(f"[ComfyUI] POST {self.base}/prompt（client_id={self.client_id}，节点数={len(workflow)}）")

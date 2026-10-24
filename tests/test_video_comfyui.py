@@ -181,6 +181,22 @@ class GenerateTest(unittest.TestCase):
             self.assertIn("subfolder=shuohao", _Handler.state["view"])
             self.assertIn("含拼图", note)
 
+    def test_upload_is_deterministic_and_not_repeated(self):
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            a = _png(td / "same.png", (1, 2, 3))
+            client = vc.Client(self.base)
+            client.log = lambda *_a, **_k: None
+            first = client.upload_image(a)
+            second = vc.Client(self.base).upload_image(a)  # 新客户端（下一镜）也不重复提交
+            self.assertEqual(first, second)
+            self.assertEqual(len(_Handler.state["uploads"]), 1)
+            self.assertTrue(first.endswith("_same.png"))
+            # 同名但内容不同 → 文件名不同，不会互相覆盖
+            other = _png(td / "other" / "same.png", (9, 9, 9)) if (td / "other").mkdir() is None else None
+            self.assertNotEqual(vc.Client(self.base).upload_image(other), first)
+            self.assertEqual(len(_Handler.state["uploads"]), 2)
+
     def test_continuation_uses_i2v_with_previous_frame(self):
         with tempfile.TemporaryDirectory() as td:
             td = Path(td)
