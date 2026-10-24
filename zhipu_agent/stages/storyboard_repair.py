@@ -419,6 +419,10 @@ def _repair_h3_protocol(segment: Dict[str, Any], scene: Optional[Dict[str, Any]]
     sound_start = next((i for i, line in enumerate(lines) if line.strip().startswith(sound_label)), None)
     music_start = next((i for i, line in enumerate(lines) if line.strip().startswith(music_label)), None)
     body_lines = lines[body_start + 1:sound_start if sound_start is not None else len(lines)] if body_start is not None else []
+    if body_start is not None and ":" in lines[body_start]:
+        inline = lines[body_start].split(":", 1)[1].strip()
+        if inline:
+            body_lines.insert(0, inline)
     sound_lines = lines[sound_start + 1:music_start if music_start is not None else len(lines)] if sound_start is not None else []
     music_lines = lines[music_start + 1:] if music_start is not None else []
     if sound_start is not None and ":" in lines[sound_start]:
