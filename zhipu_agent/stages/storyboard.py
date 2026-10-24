@@ -83,6 +83,26 @@ def _params_override(h3_gates: bool = True) -> Dict[str, Any]:
     return data
 
 
+def _h3_protocol_needs_repair(h3: str, cuts: List[Any], prompt_lang: str) -> bool:
+    """Catch missing H3 skeleton/shot markers even when no opposite-language token exists."""
+    if prompt_lang == "zh":
+        required = ("参考图与目标视频的对齐", "整体视听描述：", "整体音景：", "非叙事配乐：")
+        markers = [f"[镜头 {i}]" for i in range(1, len(cuts) + 1)]
+        foreign = ("How the reference pictures align", "integrated_multimodal_description:",
+                   "overall_soundscape:", "non_diegetic_music:", "[Shot ")
+    else:
+        required = ("How the reference pictures align", "integrated_multimodal_description:",
+                    "overall_soundscape:", "non_diegetic_music:")
+        markers = [f"[Shot {i}]" for i in range(1, len(cuts) + 1)]
+        foreign = ("参考图与目标视频的对齐", "整体视听描述：", "整体音景：", "非叙事配乐：", "[镜头 ")
+    if any(token not in h3 for token in required):
+        return True
+    if any(token in h3 for token in foreign):
+        return True
+    positions = [h3.find(marker) for marker in markers]
+    return any(pos < 0 for pos in positions) or positions != sorted(positions)
+
+
 def artifact(ctx: Context) -> Path:
     return ctx.artifact("storyboard")
 
@@ -320,6 +340,13 @@ def run(
         if prompt_lang == "zh" else
         "HARD OUTPUT CONTRACT: promptLang=en requires English for h3Prompt, alignment, shot markers, soundscape, and music fields. Use [Shot k] and official English field names. Preserve dialogue inside <d>, lyrics, and visible in-frame text in their source language."
     )
+    language_contract += (
+        "\\n\\nCUT FIELD CONTRACT: every cut.shot is always Simplified Chinese, regardless of promptLang; "
+        "every cut.frame is Simplified Chinese. cut.characters must contain only the canonical character IDs "
+        "provided by seedScenes (for example C01), never display names; cut.props must contain only canonical "
+        "prop IDs (for example P01), never display names. sceneIndex and beats must follow the supplied seedScenes "
+        "and script exactly. Do not invent or substitute IDs."
+    )
     system = build_system(sk, PASSES, extra=language_contract)
 
     for group in batches(todo, BATCH):
@@ -518,6 +545,7 @@ def run(
                     "严格按 promptLang 输出完整 H3 提示词：zh 用简体中文对齐行、[镜头 k]、"
                     "整体视听描述：、整体音景：、非叙事配乐：；en 用英文官方骨架、[Shot k]、"
                     "integrated_multimodal_description:、overall_soundscape:、non_diegetic_music:。"
+                    "注意：Seedance 的 cut.shot 和分镜图 cut.frame 始终必须是简体中文，与 promptLang 无关。"
                     "每个镜头段落必须存在且按顺序；运镜词必须与对应 cut.camera 匹配；"
                     "对齐行与每个切点时间必须由 cuts 秒数累计得出。人名不写进正文，"
                     "只允许在 <d> 台词块中保留剧本原文。只输出 JSON：{\"h3Prompt\":\"...\"}。"
@@ -557,16 +585,7 @@ def run(
                     h3 = segment.get("h3Prompt")
                     if not isinstance(h3, str):
                         continue
-                    mismatch = (
-                        prompt_lang == "zh" and any(t in h3 for t in (
-                            "How the reference pictures align", "integrated_multimodal_description:",
-                            "overall_soundscape:", "non_diegetic_music:", "[Shot "
-                        ))
-                    ) or (
-                        prompt_lang == "en" and any(t in h3 for t in (
-                            "参考图与目标视频的对齐", "整体视听描述：", "整体音景：", "非叙事配乐：", "[镜头 "
-                        ))
-                    )
+                    mismatch = _h3_protocol_needs_repair(h3, segment.get("cuts", []), prompt_lang)
                     if not mismatch:
                         continue
                     repair_system = (
@@ -604,16 +623,7 @@ def run(
                     h3 = segment.get("h3Prompt")
                     if not isinstance(h3, str):
                         continue
-                    mismatch = (
-                        prompt_lang == "zh" and any(t in h3 for t in (
-                            "How the reference pictures align", "integrated_multimodal_description:",
-                            "overall_soundscape:", "non_diegetic_music:", "[Shot "
-                        ))
-                    ) or (
-                        prompt_lang == "en" and any(t in h3 for t in (
-                            "参考图与目标视频的对齐", "整体视听描述：", "整体音景：", "非叙事配乐：", "[镜头 "
-                        ))
-                    )
+                    mismatch = _h3_protocol_needs_repair(h3, segment.get("cuts", []), prompt_lang)
                     if not mismatch:
                         continue
                     repair_system = (
