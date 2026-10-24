@@ -341,7 +341,174 @@ def repair_short_cuts(doc: Dict[str, Any], lang: str = "en") -> List[str]:
     return repaired
 
 
-def repair_deterministic_storyboard(doc: Dict[str, Any], lang: str = "en") -> List[str]:
+
+def _camera_for_cut(cut: Dict[str, Any]) -> Optional[str]:
+    """Normalize paired camera labels emitted by LLMs to one canonical H3 enum."""
+    camera = str(cut.get("camera") or "").strip()
+    valid = {
+        "Static Shot", "Push In", "Pull Out", "Zoom In", "Zoom Out",
+        "Pan Left", "Pan Right", "Truck Left", "Truck Right",
+        "Tilt Up", "Tilt Down", "Pedestal Up", "Pedestal Down",
+        "Arc Shot", "Tracking Shot", "Shake Slightly", "Shake Strongly",
+        "POV", "Roll Clockwise", "Roll Counterclockwise",
+    }
+    if camera in valid:
+        return camera
+    aliases = {
+        "Pan Left/Right": ("Pan Left", "Pan Right"),
+        "Truck Left/Right": ("Truck Left", "Truck Right"),
+        "Tilt Up/Down": ("Tilt Up", "Tilt Down"),
+        "Pedestal Up/Down": ("Pedestal Up", "Pedestal Down"),
+        "Zoom In/Out": ("Zoom In", "Zoom Out"),
+        "Roll Clockwise/Counterclockwise": ("Roll Clockwise", "Roll Counterclockwise"),
+        "Roll CW/CCW": ("Roll Clockwise", "Roll Counterclockwise"),
+        "Shake Slightly/Strongly": ("Shake Slightly", "Shake Strongly"),
+    }
+    choices = aliases.get(camera)
+    if not choices:
+        return None
+    text = " ".join(str(cut.get(key) or "") for key in ("shot", "frame", "note")).lower()
+    directional = {
+        "Pan Left/Right": (("left", "向左", "左摇", "左移"), ("right", "向右", "右摇", "右移")),
+        "Truck Left/Right": (("left", "向左", "左移"), ("right", "向右", "右移")),
+        "Tilt Up/Down": (("up", "向上", "上摇", "仰"), ("down", "向下", "下摇", "俯")),
+        "Pedestal Up/Down": (("up", "向上", "上升", "升起"), ("down", "向下", "下降")),
+        "Zoom In/Out": (("in", "推进", "拉近", "放大"), ("out", "拉远", "缩小")),
+        "Roll Clockwise/Counterclockwise": (("clockwise", "顺时针", "顺旋"), ("counterclockwise", "逆时针", "逆旋")),
+        "Roll CW/CCW": (("clockwise", "顺时针", "顺旋"), ("counterclockwise", "逆时针", "逆旋")),
+        "Shake Slightly/Strongly": (("slight", "轻微", "微晃"), ("strong", "强烈", "剧烈")),
+    }.get(camera, ((), ()))
+    for choice, words in zip(choices, directional):
+        if any(word in text for word in words):
+            return choice
+    # Ambiguous paired labels have no single official enum. Use the first listed
+    # direction as a stable fallback and log the repair; never leave an invalid enum.
+    return choices[0]
+
+
+def _script_scene_for_segment(segment: Dict[str, Any], script: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(script, dict):
+        return None
+    try:
+        ep_number = int(str(segment.get("id", "")).split("-")[0].lstrip("E"))
+        scene_index = int(segment.get("sceneIndex", 0))
+    except (TypeError, ValueError):
+        return None
+    episode = next((e for e in script.get("episodes", []) if int(e.get("ep", -1)) == ep_number), None)
+    scenes = episode.get("scenes", []) if isinstance(episode, dict) else []
+    return scenes[scene_index - 1] if 1 <= scene_index <= len(scenes) else None
+
+
+def _repair_h3_protocol(segment: Dict[str, Any], scene: Optional[Dict[str, Any]], lang: str) -> List[str]:
+    """Deterministically restore H3 skeleton, shot markers, camera terms and claimed dialogue."""
+    cuts = segment.get("cuts")
+    prompt = segment.get("h3Prompt")
+    if not isinstance(cuts, list) or not cuts or not isinstance(prompt, str) or not prompt.strip():
+        return []
+    lang = "zh" if lang == "zh" else "en"
+    zh = lang == "zh"
+    fields = (
+        ("整体视听描述：", "整体音景：", "非叙事配乐：")
+        if zh else
+        ("integrated_multimodal_description:", "overall_soundscape:", "non_diegetic_music:")
+    )
+    marker_re = re.compile(r"\[镜头\s*(\d+)\]" if zh else r"\[Shot\s*(\d+)\]")
+    sound_label, music_label = fields[1], fields[2]
+    lines = prompt.splitlines()
+    body_start = next((i for i, line in enumerate(lines) if line.strip().startswith(fields[0])), None)
+    sound_start = next((i for i, line in enumerate(lines) if line.strip().startswith(sound_label)), None)
+    music_start = next((i for i, line in enumerate(lines) if line.strip().startswith(music_label)), None)
+    body_lines = lines[body_start + 1:sound_start if sound_start is not None else len(lines)] if body_start is not None else []
+    sound_lines = lines[sound_start + 1:music_start if music_start is not None else len(lines)] if sound_start is not None else []
+    music_lines = lines[music_start + 1:] if music_start is not None else []
+    body = "\n".join(body_lines).strip()
+    matches = list(marker_re.finditer(body))
+    blocks: Dict[int, str] = {}
+    if matches:
+        # Keep any unmarked leading prose with shot 1 rather than discarding it.
+        if matches[0].start() > 0:
+            blocks[1] = body[:matches[0].start()].strip()
+        for idx, match in enumerate(matches):
+            number = int(match.group(1))
+            end = matches[idx + 1].start() if idx + 1 < len(matches) else len(body)
+            blocks[number] = body[match.start():end].strip()
+    elif body:
+        blocks[1] = body
+
+    starts = _starts(cuts)
+    repaired: List[str] = []
+    shot_blocks: List[str] = []
+    for index, cut in enumerate(cuts, 1):
+        camera = str(cut.get("camera") or "").strip()
+        block = blocks.get(index, "")
+        marker = f"[镜头 {index}]" if zh else f"[Shot {index}]"
+        if not block:
+            block = marker
+            fallback = "镜头保持对参考构图的稳定呈现。" if zh else "The camera holds on the referenced composition as the action continues."
+            block += " " + fallback
+            repaired.append(f"{segment.get('id', '?')}#{index}: 补建缺失的镜头段落")
+        elif not block.startswith(marker):
+            block = marker + " " + block
+        timestamp = _timecode(starts[index - 1])
+        if index > 1:
+            prefix = f"{marker} 于 {timestamp}，" if zh else f"{marker} At {timestamp},"
+            block = re.sub(rf"^\[镜头\s*{index}\]\s*于\s*\d{{2}}:\d{{2}}\.\d{{3}}，?" if zh else rf"^\[Shot\s*{index}\]\s*At\s*\d{{2}}:\d{{2}}\.\d{{3}},?", marker, block)
+            block = re.sub(rf"^\[镜头\s*{index}\]\s*" if zh else rf"^\[Shot\s*{index}\]\s*", "", block)
+            block = prefix + " " + block.lstrip()
+        term = camera if not zh else {
+            "Static Shot": "固定", "Push In": "推", "Pull Out": "拉",
+            "Zoom In": "变焦推", "Zoom Out": "变焦拉",
+            "Pan Left": "左摇", "Pan Right": "右摇",
+            "Truck Left": "左移", "Truck Right": "右移",
+            "Tilt Up": "仰摇", "Tilt Down": "俯摇",
+            "Pedestal Up": "升", "Pedestal Down": "降",
+            "Arc Shot": "环绕", "Tracking Shot": "跟拍",
+            "Shake Slightly": "轻微晃动", "Shake Strongly": "强烈晃动",
+            "POV": "主观视角", "Roll Clockwise": "顺旋",
+            "Roll Counterclockwise": "逆旋",
+        }.get(camera, camera)
+        if term and term.lower() not in block.lower():
+            phrase = f"镜头采用{term}。" if zh else f"The camera uses a {term.lower()}."
+            block = block.rstrip() + " " + phrase
+            repaired.append(f"{segment.get('id', '?')}#{index}: 补齐运镜词「{term}」")
+        if scene:
+            bounds = cut.get("beats", [])
+            if isinstance(bounds, list) and len(bounds) == 2:
+                try:
+                    claimed = scene.get("flow", [])[int(bounds[0]) - 1:int(bounds[1])]
+                except (TypeError, ValueError, IndexError):
+                    claimed = []
+                for beat in claimed:
+                    if not isinstance(beat, dict) or not isinstance(beat.get("line"), str):
+                        continue
+                    dialogue = beat["line"]
+                    exact = f"<d>[Chinese] {dialogue}</d>"
+                    if exact not in block and f"<d>[Chinese]{dialogue}</d>" not in block:
+                        block = block.rstrip() + " " + exact
+                        repaired.append(f"{segment.get('id', '?')}#{index}: 从剧本补入台词 <d> 块")
+        shot_blocks.append(block.strip())
+
+    alignment = _alignment(cuts, lang)
+    sound = "\n".join(line.strip() for line in sound_lines if line.strip())
+    music = "\n".join(line.strip() for line in music_lines if line.strip())
+    if not sound:
+        sound = "环境声与动作声自然呈现。" if zh else "Natural ambient and action sounds accompany the scene."
+        repaired.append(f"{segment.get('id', '?')}: 补齐音景字段")
+    if not music:
+        music = "无" if zh else "N/A"
+        repaired.append(f"{segment.get('id', '?')}: 补齐配乐字段")
+    rebuilt = "\n".join([
+        alignment, "", fields[0], "\n".join(shot_blocks), "",
+        sound_label, sound, "", music_label, music,
+    ])
+    if rebuilt != prompt.strip():
+        segment["h3Prompt"] = rebuilt
+        if not repaired:
+            repaired.append(f"{segment.get('id', '?')}: 规范化 H3 骨架")
+    return repaired
+
+
+def repair_deterministic_storyboard(doc: Dict[str, Any], lang: str = "en", script: Optional[Dict[str, Any]] = None) -> List[str]:
     """Apply safe, deterministic repairs that do not invent story content."""
     shot_size_terms = {
         "extreme-wide": "大远景",
@@ -362,6 +529,12 @@ def repair_deterministic_storyboard(doc: Dict[str, Any], lang: str = "en") -> Li
             if term and frame.strip() and term not in frame:
                 cut["frame"] = f"{term}，{frame.lstrip()}"
                 repaired.append(f"{segment.get('id', '?')}#{index}: 补齐景别词「{term}」")
+            canonical = _camera_for_cut(cut)
+            if canonical and canonical != cut.get("camera"):
+                repaired.append(f"{segment.get('id', '?')}#{index}: 运镜「{cut.get('camera')}」规范化为「{canonical}」")
+                cut["camera"] = canonical
+        scene = _script_scene_for_segment(segment, script)
+        repaired.extend(_repair_h3_protocol(segment, scene, lang))
         if sync_segment_timing(segment, lang):
             repaired.append(f"{segment.get('id', '?')}: 重建 H3 对齐行与切点时间")
     return repaired
