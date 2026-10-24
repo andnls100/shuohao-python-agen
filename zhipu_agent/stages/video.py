@@ -215,7 +215,7 @@ def _config(model_key: Optional[str] = None) -> list:
                 resolved = path if path.is_absolute() else REPO_ROOT / path
                 return str(resolved)
             comfy = {"base_url": base_url, "headers": entry.get("headers") or {}, "workflow_ref": _wf(entry.get("workflow_ref")), "workflow_i2v": _wf(entry.get("workflow_i2v")),
-                     "max_refs": int(entry.get("max_refs", 6)), "size_preset": entry.get("size_preset"), "max_seconds": entry.get("max_seconds"),
+                     "max_refs": int(entry.get("max_refs", 6)), "size_preset": str(entry.get("size_preset") or "480p").strip().lower(), "max_seconds": entry.get("max_seconds"),
                      "nodes": entry.get("nodes") or {}, "timeout": max(10, int(entry.get("timeout", 120))), "poll": max(1, float(entry.get("poll_interval", 10))),
                      "max_wait": max(60, int(entry.get("max_wait", 3600)))}
             submit_url, model, api_key = base_url + "/prompt", model or "comfyui", api_key or "-"

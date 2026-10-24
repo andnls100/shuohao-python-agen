@@ -536,7 +536,6 @@ def generate(item: Dict[str, Any], manifest: Dict[str, Any], cfg: Dict[str, Any]
     log(f"\n===== ComfyUI 镜头 {item['id']} | 模式={mode}（{note}）| 种子={seed} =====\n{prompt}\n===== 提示词结束 =====\n")
     log(f"[ComfyUI] 服务器：{cfg['base_url']} | 工作流：{cfg.get('workflow_i2v') if mode == 'i2v' else cfg.get('workflow_ref')} | 时长={seconds}s | 画幅={aspect} | 清晰度={cfg.get('size_preset')}")
     canvas_wf = canvas_from_api(wf)
-    log(f"[ComfyUI] 生成的画布格式工作流 JSON：\n{json.dumps(canvas_wf, ensure_ascii=False, indent=1)}\n[ComfyUI] 画布工作流 JSON 结束")
     try:  # 保存画布/UI 格式工作流，参数按当前镜头动态填充
         work_dir.mkdir(parents=True, exist_ok=True)
         (work_dir / f"{item['id']}.workflow.json").write_text(json.dumps(canvas_wf, ensure_ascii=False, indent=1), encoding="utf-8")
