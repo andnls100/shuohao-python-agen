@@ -431,6 +431,13 @@ def _repair_h3_protocol(segment: Dict[str, Any], scene: Optional[Dict[str, Any]]
             values.insert(0, inline)
         field_content[label] = values
     body_lines = field_content.get(fields[0], [])
+    if body_start is None:
+        first_field = min((pos for pos, _label in field_starts), default=len(lines))
+        body_lines = lines[:first_field]
+        # The first non-empty line is the alignment header, not shot prose.
+        first_nonempty = next((i for i, line in enumerate(body_lines) if line.strip()), None)
+        if first_nonempty is not None:
+            body_lines.pop(first_nonempty)
     sound_lines = field_content.get(sound_label, [])
     music_lines = field_content.get(music_label, [])
     body = "\n".join(body_lines).strip()
