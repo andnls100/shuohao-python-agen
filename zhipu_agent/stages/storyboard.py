@@ -683,13 +683,18 @@ def run(
                     "{\"cut\":{...需要修改的字段...},\"h3ShotText\":\"该镜完整的 [Shot k]/[镜头 k] 正文\"}。"
                     "若不需要修改 h3ShotText，原样返回它。"
                 )
+                script_episode = next((e for e in script.get("episodes", [])
+                                       if e.get("ep") == episode.get("ep")), {})
+                script_scenes = script_episode.get("scenes", [])
+                script_scene = next((sc for idx, sc in enumerate(script_scenes, start=1)
+                                     if idx == segment.get("sceneIndex")), {})
                 repair_user = (
                     f"分镜段：{segment_id}；第 {cut_index} 切。画幅：{_doc.get('aspectRatio', aspect)}；"
                     f"H3 提示词语言：{prompt_lang}。\n"
                     f"本切校验错误：{json.dumps(errors, ensure_ascii=False)}\n"
                     f"段级必要上下文：{json.dumps({k: segment.get(k) for k in ('sceneIndex', 'blocking', 'soundscape', 'music')}, ensure_ascii=False)}\n"
-                    f"当前剧本场次可用角色 ID：{json.dumps(scene.get('characters', []) if isinstance(scene, dict) else [], ensure_ascii=False)}；"
-                    f"可用道具 ID：{json.dumps(scene.get('props', []) if isinstance(scene, dict) else [], ensure_ascii=False)}\n"
+                    f"当前剧本场次可用角色 ID：{json.dumps(script_scene.get('characters', []) if isinstance(script_scene, dict) else [], ensure_ascii=False)}；"
+                    f"可用道具 ID：{json.dumps(script_scene.get('props', []) if isinstance(script_scene, dict) else [], ensure_ascii=False)}\n"
                     f"当前 cut：{json.dumps(old_cut, ensure_ascii=False)}\n"
                     f"当前 H3 镜头正文：{json.dumps(old_shot_text, ensure_ascii=False)}\n"
                     "仅返回修复后的当前 cut 字段和当前 H3 镜头正文。不要返回整个 segment 或 episode。"
