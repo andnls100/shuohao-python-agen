@@ -34,7 +34,7 @@ class BuildTest(unittest.TestCase):
                              uploaded=["a.png", "b.png", "c.png"], seed=123, prefix="shuohao/E01-01-C01")
         ins = wf["h3"]["inputs"]
         self.assertEqual([ins[f"reference_{i}.file"] for i in range(3)], ["a.png", "b.png", "c.png"])
-        self.assertEqual((ins["prompt"], ins["seconds"], ins["aspect_ratio"], ins["size_preset"]), ("P", 7.5, "9:16", "360p"))  # 720p = 360p 生成 + 2 倍放大
+        self.assertEqual((ins["prompt"], ins["seconds"], ins["aspect_ratio"], ins["size_preset"]), ("P", 8, "9:16", "360p"))  # 720p = 360p 生成 + 2 倍放大
         self.assertTrue(wf["upscale"]["inputs"]["enabled"])
         self.assertEqual(wf["sample"]["inputs"]["noise_seed"], 123)
         self.assertEqual(wf["save"]["inputs"]["filename_prefix"], "shuohao/E01-01-C01")
@@ -72,6 +72,10 @@ class BuildTest(unittest.TestCase):
             self.assertEqual(planned[5][0], "collage")
             self.assertTrue((td / "collage.png").is_file())
             self.assertEqual(len(vc.plan_references(refs[:6], 6, td / "x.png")), 6)
+
+    def test_whole_seconds(self):
+        self.assertEqual([vc.whole_seconds(x) for x in (5, 5.0, 4.2, 7.5, 0.3, 4.9999999999)], [5, 5, 5, 8, 1, 5])
+        self.assertIsInstance(vc.whole_seconds(5.0), int)
 
     def test_header(self):
         h = vc.reference_header(["character", "character", "scene", "prop", "collage"])
@@ -170,7 +174,8 @@ class GenerateTest(unittest.TestCase):
             ins = _Handler.state["prompt"]["h3"]["inputs"]
             self.assertTrue(ins["prompt"].startswith("Preserve the subject from <Picture 1>"))
             self.assertIn("镜头正文", ins["prompt"])
-            self.assertEqual(ins["seconds"], 8.0)
+            self.assertEqual(ins["seconds"], 8)
+            self.assertIsInstance(ins["seconds"], int)
             self.assertIn("reference_5.file", ins)
             self.assertNotIn("reference_6.file", ins)
             self.assertIn("subfolder=shuohao", _Handler.state["view"])

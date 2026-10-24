@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import random
 import re
 import time
@@ -275,6 +276,11 @@ def _set_seed_and_prefix(wf: Dict[str, Any], seed: int, prefix: str, nodes: Dict
     wf[save_id]["inputs"]["filename_prefix"] = prefix
 
 
+def whole_seconds(seconds: float) -> int:
+    """Ref2VA 工作流的时长控件只收整数秒：向上取整（不截断台词），至少 1 秒。"""
+    return max(1, math.ceil(float(seconds) - 1e-9))
+
+
 def build_ref2va(template: Dict[str, Any], *, prompt: str, seconds: float, aspect: Optional[str], size_preset: Optional[str],
                  uploaded: Sequence[str], seed: int, prefix: str, nodes: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     nodes = nodes or {}
@@ -288,7 +294,7 @@ def build_ref2va(template: Dict[str, Any], *, prompt: str, seconds: float, aspec
         ins[f"reference_{i}"] = ref_kind
         ins[f"reference_{i}.file"] = name
     ins["prompt"] = prompt
-    ins["seconds"] = float(seconds)
+    ins["seconds"] = whole_seconds(seconds)
     if aspect:
         ins["aspect_ratio"] = aspect
     # 默认：360p 生成 + 工作流自带 2 倍潜空间放大 = 720p。
