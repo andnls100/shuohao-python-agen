@@ -7,6 +7,7 @@ from typing import Optional
 from urllib.parse import urlparse
 
 from ..config import models_file_path
+from ..llm import ask_text
 from ..validator import Result
 from ..visual_style import visual_style_instruction
 from .base import Context, read_json, write_json
@@ -20,8 +21,73 @@ def _safe(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._") or "segment"
 
 
-def _duration(segment: dict) -> float:
-    return round(sum(float(c.get("seconds", 0) or 0) for c in segment.get("cuts", [])), 2)
+def _optimize_h3_prompt(prompt: str, settings) -> str:
+    """Translate and tighten an H3 prompt into English without changing reference tags or dialogue."""
+    original = str(prompt or "").strip()
+    if not original:
+        raise ValueError("H3 提示词为空，无法优化")
+
+    original_picture_tags = re.findall(r"<Picture\\s+\\d+>", original)
+    original_dialogues = re.findall(r"<d>.*?</d>", original, flags=re.S)
+    protected = original
+    dialogue_tokens = []
+
+    def protect_dialogue(match):
+        token = f"ZXQDIALOGUEBLOCK{len(dialogue_tokens):04d}QXZ"
+        if token in original:
+            raise ValueError("提示词中出现保留占位符，无法安全优化")
+        dialogue_tokens.append((token, match.group(0)))
+        return token
+
+    protected = re.sub(r"<d>.*?</d>", protect_dialogue, protected, flags=re.S)
+    picture_tokens = []
+
+    def protect_picture(match):
+        token = f"ZXQPICTUREREF{len(picture_tokens):04d}QXZ"
+        if token in original:
+            raise ValueError("提示词中出现保留占位符，无法安全优化")
+        picture_tokens.append((token, match.group(0)))
+        return token
+
+    protected = re.sub(r"<Picture\\s+\\d+>", protect_picture, protected)
+
+    system = (
+        "You are an expert prompt editor for MiniMax H3 reference-to-video (Ref2VA/R2F). "
+        "Rewrite the supplied video prompt into concise, natural English optimized for video generation. "
+        "Preserve the exact story, characters, actions, order, timing, camera movement, framing, lighting, "
+        "visual style, sound effects, ambience, music, and constraints. Keep the prompt compact and concrete; "
+        "prioritize visible motion and clear temporal progression. Do not invent events, objects, characters, "
+        "dialogue, or camera cuts. Do not add explanations, markdown fences, or a heading. "
+        "Every ZXQ...QXZ token is an immutable placeholder: copy it exactly once and do not translate, "
+        "rename, reorder, or remove it. All non-dialogue text must be English. Output only the final prompt."
+    )
+    optimized = ask_text(
+        system,
+        "Rewrite this prompt for MiniMax H3 Ref2VA/R2F. Preserve all placeholder tokens exactly:\\n\\n" + protected,
+        settings,
+    ).strip()
+
+    # Accept a model that wraps the answer in a single markdown fence, but remove only that wrapper.
+    fence = re.fullmatch(r"```(?:text|english)?\\s*(.*?)\\s*```", optimized, flags=re.I | re.S)
+    if fence:
+        optimized = fence.group(1).strip()
+
+    for token, _value in [*picture_tokens, *dialogue_tokens]:
+        if optimized.count(token) != 1:
+            raise ValueError(
+                f"H3 英文提示词优化未能完整保留占位符 {token}；为防止引用或台词损坏，已停止提交。"
+            )
+
+    for token, value in picture_tokens:
+        optimized = optimized.replace(token, value)
+    for token, value in dialogue_tokens:
+        optimized = optimized.replace(token, value)
+
+    if re.findall(r"<Picture\\s+\\d+>", optimized) != original_picture_tags:
+        raise ValueError("H3 英文提示词优化改变了 <Picture N> 标签的数量、顺序或写法；已停止提交。")
+    if re.findall(r"<d>.*?</d>", optimized, flags=re.S) != original_dialogues:
+        raise ValueError("H3 英文提示词优化改变了原始台词块；已停止提交。")
+    return optimized
 
 
 def _prompt(segment: dict, protocol: str) -> str:
@@ -437,7 +503,7 @@ def check(ctx: Context) -> Result:
     return Result(0 if items and not pending else 1, f"{len(items)} 个视频镜头已生成" if not pending and items else f"{len(pending)}/{len(items)} 个视频镜头尚未生成")
 
 
-def _run_comfyui_queue(manifest: dict, providers: list, root: Path, manifest_path: Path, requested: set) -> None:
+def _run_comfyui_queue(manifest: dict, providers: list, root: Path, manifest_path: Path, requested: set, settings) -> None:
     """ComfyUI：每个镜头都按参考生视频（Ref2VA）生成，不使用上一镜最后一帧，所以先把所有镜头排进队列，再依次等结果。"""
     from . import video_comfyui
     provider = providers[0]
@@ -448,7 +514,24 @@ def _run_comfyui_queue(manifest: dict, providers: list, root: Path, manifest_pat
             continue
         item["state"], item["provider"], item["error"] = "submitting", provider["name"], None; write_json(manifest_path, manifest)
         try:
-            handle = video_comfyui.submit(item, manifest, provider["comfyui"], root.parent, root / "work", None, root / "videos" / _safe(item["id"]))
+            submit_item = dict(item)
+            model_label = (str(provider.get("key") or "") + " " + str(provider.get("name") or "") + " " + str(provider.get("VIDEO_API_MODEL") or "")).lower()
+            if provider.get("adapter") == "comfyui" and (
+                str(provider.get("key") or "").lower() == "comfyui_h3"
+                or "minimax_h3" in model_label
+                or "minimax h3" in model_label
+            ):
+                optimized_prompt = _optimize_h3_prompt(str(item.get("prompt") or ""), settings)
+                submit_item["prompt"] = optimized_prompt
+                prompt_dir = root / "prompts"
+                prompt_dir.mkdir(parents=True, exist_ok=True)
+                optimized_path = prompt_dir / (_safe(item["id"]) + ".minimax_h3.en.txt")
+                optimized_path.write_text(optimized_prompt + "\\n", encoding="utf-8")
+                print(
+                    f"[H3 prompt] 已优化为英文并通过 <Picture N> / 台词保护校验：{optimized_path}",
+                    flush=True,
+                )
+            handle = video_comfyui.submit(submit_item, manifest, provider["comfyui"], root.parent, root / "work", None, root / "videos" / _safe(item["id"]))
             item["state"] = "polling"; write_json(manifest_path, manifest)
             pending.append((item, handle))
         except Exception as exc:
@@ -498,7 +581,7 @@ def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: 
         if seg_ids - known: raise ValueError("找不到指定分段 ID：" + "、".join(sorted(seg_ids - known)) + "；分段 ID 形如 E01-01")
         requested |= {x["id"] for x in manifest["items"] if str(x.get("segmentId")) in seg_ids}
     if providers and all(p.get("adapter") == "comfyui" for p in providers):
-        _run_comfyui_queue(manifest, providers, root, path, requested)
+        _run_comfyui_queue(manifest, providers, root, path, requested, ctx.settings)
         return path
     for item in manifest["items"]:
         if requested and item["id"] not in requested: continue
