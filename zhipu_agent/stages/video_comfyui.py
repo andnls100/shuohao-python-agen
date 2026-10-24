@@ -517,7 +517,14 @@ def pick_output(outputs: Dict[str, Any], save_node: Optional[str] = None) -> Dic
 # ---------------------------------------------------------------- 单个镜头
 def generate(item: Dict[str, Any], manifest: Dict[str, Any], cfg: Dict[str, Any], out_root: Path, work_dir: Path,
              previous_last: Optional[Path], target_base: Path, log=print) -> Tuple[Path, str]:
-    """生成一个镜头，返回（下载好的视频路径, 说明）。cfg 是 models.json 里 comfyui 条目整理后的字典。"""
+    """生成一个镜头（提交并等待完成），返回（下载好的视频路径, 说明）。cfg 是 models.json 里 comfyui 条目整理后的字典。"""
+    return finish(submit(item, manifest, cfg, out_root, work_dir, previous_last, target_base, log))
+
+
+def submit(item: Dict[str, Any], manifest: Dict[str, Any], cfg: Dict[str, Any], out_root: Path, work_dir: Path,
+           previous_last: Optional[Path], target_base: Path, log=print) -> Dict[str, Any]:
+    """上传参考图并把工作流排进 ComfyUI 队列，不等结果；返回交给 finish() 的句柄。
+    previous_last 传 None 时一律走 Ref2VA（参考生视频），不依赖上一镜的最后一帧，所以可以连续排队。"""
     client = Client(cfg["base_url"], cfg.get("headers"), cfg.get("timeout", 120))
     client.log = log
     nodes = cfg.get("nodes") or {}
@@ -577,9 +584,16 @@ def generate(item: Dict[str, Any], manifest: Dict[str, Any], cfg: Dict[str, Any]
     # /prompt 只接收 API 格式；画布格式作为生成记录保存。
     prompt_id = client.queue(wf)
     item["task_id"] = prompt_id
-    outputs = client.wait(prompt_id, float(cfg.get("poll", 10)), float(cfg.get("max_wait", 3600)))
-    save_id = find_node(wf, ("SaveVideo", "VHS_VideoCombine", "SaveAnimatedWEBP"), nodes.get("save"))
+    return {"client": client, "wf": wf, "nodes": nodes, "cfg": cfg, "prompt_id": prompt_id, "target_base": target_base,
+            "note": f"{mode}：{note}"}
+
+
+def finish(handle: Dict[str, Any]) -> Tuple[Path, str]:
+    """等待 submit() 排队的任务完成并下载视频，返回（视频路径, 说明）。"""
+    client, cfg, nodes = handle["client"], handle["cfg"], handle["nodes"]
+    outputs = client.wait(handle["prompt_id"], float(cfg.get("poll", 10)), float(cfg.get("max_wait", 3600)))
+    save_id = find_node(handle["wf"], ("SaveVideo", "VHS_VideoCombine", "SaveAnimatedWEBP"), nodes.get("save"))
     info = pick_output(outputs, save_id)
-    target = target_base.with_suffix(Path(info["filename"]).suffix or ".mp4")
+    target = handle["target_base"].with_suffix(Path(info["filename"]).suffix or ".mp4")
     client.download(info, target)
-    return target, f"{mode}：{note}"
+    return target, handle["note"]

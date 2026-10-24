@@ -132,12 +132,14 @@ class _Handler(BaseHTTPRequestHandler):
             st.setdefault("files", {})[name] = body[start:body.rindex(b"\r\n--")]
             self._send(200, json.dumps({"name": name, "subfolder": "", "type": "input"}).encode())
         elif self.path == "/prompt":
+            st.setdefault("events", []).append("queue")
             st["prompt"] = json.loads(body)["prompt"]
             self._send(200, json.dumps({"prompt_id": "p1"}).encode())
 
     def do_GET(self):
         st = self.state
         if self.path.startswith("/history/"):
+            st.setdefault("events", []).append("poll")
             st["polls"] = st.get("polls", 0) + 1
             if st["polls"] < 2:
                 self._send(200, b"{}")
@@ -209,6 +211,29 @@ class GenerateTest(unittest.TestCase):
             self.assertNotEqual(name, "same.png")
             self.assertTrue(name.endswith("_same.png"))
             self.assertEqual(len(_Handler.state["uploads"]), 2)
+
+    def test_queue_all_shots_before_waiting_and_ignore_previous_frame(self):
+        from zhipu_agent.stages import video as vs
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            out = td / "output"
+            (out / "art").mkdir(parents=True)
+            asset = {"kind": "character", "name": "n0", "path": str(_png(out / "art" / "a0.png").relative_to(out))}
+            items = [{"id": f"E01-01-C0{i}", "duration_seconds": 5, "prompt": "p", "reference_assets_all": [asset],
+                      "input_mode": "previous_last_frame" if i > 1 else "scene_or_assets",
+                      "previous_shot_id": f"E01-01-C0{i - 1}" if i > 1 else None, "state": "planned"} for i in (1, 2, 3)]
+            manifest = {"aspect_ratio": "16:9", "items": items}
+            cfg = {"base_url": self.base, "workflow_ref": str(REF_WF), "workflow_i2v": str(UI_WF), "max_refs": 6, "poll": 0.01, "max_wait": 10, "size_preset": "480p"}
+            root = out / "video"
+            root.mkdir()
+            vs._run_comfyui_queue(manifest, [{"name": "c", "adapter": "comfyui", "comfyui": cfg}], root, root / "video-manifest.json", set())
+            events = _Handler.state["events"]
+            self.assertEqual(events[:3], ["queue"] * 3)  # 3 个镜头先全部排队，再开始轮询
+            self.assertIn("poll", events[3:])
+            self.assertEqual([i["state"] for i in items], ["succeeded"] * 3)
+            self.assertTrue(all((root / i["video_path"]).is_file() for i in items))
+            self.assertTrue(all(i["last_frame_path"] is None for i in items))  # 不提取最后一帧
+            self.assertEqual(len(_Handler.state["uploads"]), 1)  # 同一张参考图只上传一次
 
     def test_continuation_uses_i2v_with_previous_frame(self):
         with tempfile.TemporaryDirectory() as td:

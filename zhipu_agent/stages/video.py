@@ -437,6 +437,35 @@ def check(ctx: Context) -> Result:
     return Result(0 if items and not pending else 1, f"{len(items)} 个视频镜头已生成" if not pending and items else f"{len(pending)}/{len(items)} 个视频镜头尚未生成")
 
 
+def _run_comfyui_queue(manifest: dict, providers: list, root: Path, manifest_path: Path, requested: set) -> None:
+    """ComfyUI：每个镜头都按参考生视频（Ref2VA）生成，不使用上一镜最后一帧，所以先把所有镜头排进队列，再依次等结果。"""
+    from . import video_comfyui
+    provider = providers[0]
+    pending, failures = [], []
+    for item in manifest["items"]:
+        if requested and item["id"] not in requested: continue
+        if item.get("state") == "succeeded" and item.get("video_path") and _resolve(root, str(item["video_path"])).is_file():
+            continue
+        item["state"], item["provider"], item["error"] = "submitting", provider["name"], None; write_json(manifest_path, manifest)
+        try:
+            handle = video_comfyui.submit(item, manifest, provider["comfyui"], root.parent, root / "work", None, root / "videos" / _safe(item["id"]))
+            item["state"] = "polling"; write_json(manifest_path, manifest)
+            pending.append((item, handle))
+        except Exception as exc:
+            item["state"], item["error"] = "failed", str(exc); write_json(manifest_path, manifest)
+            failures.append(f"{item['id']}: {exc}")
+    print(f"ComfyUI：已排队 {len(pending)} 个镜头，开始依次等待结果", flush=True)
+    for item, handle in pending:
+        try:
+            target, note = video_comfyui.finish(handle)
+            item.update(state="succeeded", video_url=None, video_path=str(target.relative_to(root)), last_frame_path=None, error=None, comfy_mode=note); write_json(manifest_path, manifest)
+            print(f"视频完成：{item['id']}（ComfyUI {note}）\n视频：{target.resolve()}", flush=True)
+        except Exception as exc:
+            item["state"], item["error"] = "failed", str(exc); write_json(manifest_path, manifest)
+            failures.append(f"{item['id']}: {exc}")
+    if failures: raise RuntimeError("以下镜头生成失败：" + "；".join(failures))
+
+
 def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: bool = False, visual_style: str = "manju",
         visual_style_prompt: str = "", shots: Optional[list] = None, video_model: Optional[str] = None, frames_dir: Optional[Path] = None, flf: bool = False,
         segments: Optional[list] = None, merge_seconds: float = 10, video_size: Optional[str] = None) -> Path:
@@ -468,6 +497,9 @@ def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: 
         known = {str(x.get("segmentId")) for x in manifest["items"]}
         if seg_ids - known: raise ValueError("找不到指定分段 ID：" + "、".join(sorted(seg_ids - known)) + "；分段 ID 形如 E01-01")
         requested |= {x["id"] for x in manifest["items"] if str(x.get("segmentId")) in seg_ids}
+    if providers and all(p.get("adapter") == "comfyui" for p in providers):
+        _run_comfyui_queue(manifest, providers, root, path, requested)
+        return path
     for item in manifest["items"]:
         if requested and item["id"] not in requested: continue
         last_frame = None
