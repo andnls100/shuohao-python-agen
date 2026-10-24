@@ -421,6 +421,14 @@ def _repair_h3_protocol(segment: Dict[str, Any], scene: Optional[Dict[str, Any]]
     body_lines = lines[body_start + 1:sound_start if sound_start is not None else len(lines)] if body_start is not None else []
     sound_lines = lines[sound_start + 1:music_start if music_start is not None else len(lines)] if sound_start is not None else []
     music_lines = lines[music_start + 1:] if music_start is not None else []
+    if sound_start is not None and ":" in lines[sound_start]:
+        inline = lines[sound_start].split(":", 1)[1].strip()
+        if inline:
+            sound_lines.insert(0, inline)
+    if music_start is not None and ":" in lines[music_start]:
+        inline = lines[music_start].split(":", 1)[1].strip()
+        if inline:
+            music_lines.insert(0, inline)
     body = "\n".join(body_lines).strip()
     matches = list(marker_re.finditer(body))
     blocks: Dict[int, str] = {}
