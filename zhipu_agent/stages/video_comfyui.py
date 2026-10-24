@@ -260,18 +260,22 @@ def build_ref2va(template: Dict[str, Any], *, prompt: str, seconds: float, aspec
     ins["seconds"] = float(seconds)
     if aspect:
         ins["aspect_ratio"] = aspect
-    # Produce a 720p result through the workflow’s 2x latent upscaler.
+    # 默认：360p 生成 + 工作流自带 2 倍潜空间放大 = 720p。
+    # 指定 360p/720p 以外的清晰度（如 480p）时，放大器无法产出该尺寸，改为关闭放大、按该清晰度直接生成。
     upscale_id = find_node(wf, ("KaggleH3LatentUpscale2x",), nodes.get("upscale"))
-    if upscale_id:
+    direct = bool(size_preset) and str(size_preset).lower() not in ("360p", "720p")
+    if upscale_id and not direct:
         upscale_inputs = wf[upscale_id]["inputs"]
         upscale_inputs["enabled"] = True
         upscale_inputs["source_size_preset"] = "360p"
         if aspect:
             upscale_inputs["aspect_ratio"] = aspect
-        # The upscaler expects 360p latent input and doubles it to 720p.
         ins["size_preset"] = "360p"
-    elif size_preset:
-        ins["size_preset"] = size_preset
+    else:
+        if upscale_id:
+            wf[upscale_id]["inputs"]["enabled"] = False
+        if size_preset:
+            ins["size_preset"] = size_preset
     _set_seed_and_prefix(wf, seed, prefix, nodes)
     return wf
 

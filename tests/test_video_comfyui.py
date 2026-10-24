@@ -34,12 +34,20 @@ class BuildTest(unittest.TestCase):
                              uploaded=["a.png", "b.png", "c.png"], seed=123, prefix="shuohao/E01-01-C01")
         ins = wf["h3"]["inputs"]
         self.assertEqual([ins[f"reference_{i}.file"] for i in range(3)], ["a.png", "b.png", "c.png"])
-        self.assertEqual((ins["prompt"], ins["seconds"], ins["aspect_ratio"], ins["size_preset"]), ("P", 7.5, "9:16", "720p"))
+        self.assertEqual((ins["prompt"], ins["seconds"], ins["aspect_ratio"], ins["size_preset"]), ("P", 7.5, "9:16", "360p"))  # 720p = 360p 生成 + 2 倍放大
+        self.assertTrue(wf["upscale"]["inputs"]["enabled"])
         self.assertEqual(wf["sample"]["inputs"]["noise_seed"], 123)
         self.assertEqual(wf["save"]["inputs"]["filename_prefix"], "shuohao/E01-01-C01")
         self.assertEqual(tpl["h3"]["inputs"]["reference_0.file"], "CHARACTER_REFERENCE.png")  # 模板不被改动
         one = vc.build_ref2va(tpl, prompt="P", seconds=5, aspect=None, size_preset=None, uploaded=["a.png"], seed=1, prefix="p")
         self.assertNotIn("reference_1.file", one["h3"]["inputs"])
+
+    def test_ref2va_480p_disables_upscale(self):
+        tpl = vc.load_workflow(REF_WF)
+        wf = vc.build_ref2va(tpl, prompt="P", seconds=5, aspect="16:9", size_preset="480p", uploaded=["a.png"], seed=1, prefix="p")
+        self.assertEqual(wf["h3"]["inputs"]["size_preset"], "480p")
+        self.assertFalse(wf["upscale"]["inputs"]["enabled"])
+        self.assertTrue(tpl["upscale"]["inputs"]["enabled"])  # 模板不被改动
 
     def test_ui_format_is_rejected_with_clear_message(self):
         with self.assertRaises(vc.ComfyError) as cm:
