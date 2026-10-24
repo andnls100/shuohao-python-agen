@@ -500,12 +500,24 @@ def run(
                         seen_refs.add(stable_id)
                         refs.append({"id": stable_id, "kind": kind, "name": name})
 
-                    for name in cut.get("characters") or []:
-                        bind_asset("character", _char_id_by_name.get(str(name), str(name)), name)
+                    _character_names = list(cut.get("characters") or [])
+                    _prop_names = list(cut.get("props") or [])
+                    # The validator and downstream stages require canonical C/P IDs in the JSON arrays;
+                    # preserve display names separately in assetRefs for reference-image lookup.
+                    cut["characters"] = [
+                        _char_id_by_name.get(str(name).strip(), str(name).strip())
+                        for name in _character_names
+                    ]
+                    cut["props"] = [
+                        _prop_id_by_name.get(str(name).strip(), str(name).strip())
+                        for name in _prop_names
+                    ]
+                    for name in _character_names:
+                        bind_asset("character", _char_id_by_name.get(str(name).strip(), str(name).strip()), name)
                     if scene_id:
                         bind_asset("scene", scene_id, scene_id)
-                    for name in cut.get("props") or []:
-                        bind_asset("prop", _prop_id_by_name.get(str(name), str(name)), name)
+                    for name in _prop_names:
+                        bind_asset("prop", _prop_id_by_name.get(str(name).strip(), str(name).strip()), name)
                     cut["assetRefs"] = refs
             _doc["episodes"] = sorted(
                 [e for e in _doc["episodes"] if e["ep"] != ep] + [episode], key=lambda e: e["ep"])
