@@ -127,7 +127,7 @@ def _repair_existing_h3(ctx: Context, doc: Dict[str, Any], path: Path,
     sb_dir = ctx.dir("storyboard")
 
     # These fixes are deterministic and safe to apply to every existing segment.
-    fixes = repair_deterministic_storyboard(doc, prompt_lang)
+    fixes = repair_deterministic_storyboard(doc, prompt_lang, read_json(ctx.artifact("script")))
     fixes += repair_minor_cut_durations(doc, prompt_lang)
     fixes += repair_dialogue_fit(doc, read_json(ctx.artifact("script")), prompt_lang)
     # Do not rebalance episode totals here: existing artifacts may still carry an old
@@ -526,7 +526,7 @@ def run(
         def validate_batch(_p=batch_path, _doc=batch_doc) -> Result:
             # Deterministic repairs: missing size terms, stale H3 timing, tiny cut overruns,
             # and episode overruns that can be trimmed from action-only cuts without touching dialogue.
-            basic_fixes = repair_deterministic_storyboard(_doc, prompt_lang)
+            basic_fixes = repair_deterministic_storyboard(_doc, prompt_lang, script)
             timing_fixes = repair_minor_cut_durations(_doc, prompt_lang)
             fit_fixes = repair_dialogue_fit(_doc, script, prompt_lang)
             duration_fixes = balance_episode_durations(_doc, script)
