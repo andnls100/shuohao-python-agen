@@ -526,7 +526,7 @@ def _run_comfyui_queue(manifest: dict, providers: list, root: Path, manifest_pat
                 prompt_dir = root / "prompts"
                 prompt_dir.mkdir(parents=True, exist_ok=True)
                 optimized_path = prompt_dir / (_safe(item["id"]) + ".minimax_h3.en.txt")
-                optimized_path.write_text(optimized_prompt + "\\n", encoding="utf-8")
+                optimized_path.write_text(optimized_prompt + "\n", encoding="utf-8")
                 print(
                     f"[H3 prompt] 已优化为英文并通过 <Picture N> / 台词保护校验：{optimized_path}",
                     flush=True,
