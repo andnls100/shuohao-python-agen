@@ -676,7 +676,9 @@ def run(
                 old_shot_text = extract_h3_cut_text(segment, cut_index, prompt_lang)
                 repair_system = (
                     "你是分镜 JSON 的局部修复器。只能修复提供的一个 cut 和它对应的一段 H3 镜头正文，"
-                    "绝不能重写整集、其他分镜或剧情。保留 beats、characters、props 原样；"
+                    "绝不能重写整集、其他分镜或剧情。beats、sceneIndex、id 必须原样保留；"
+                    "characters 只能使用当前剧本场次给出的角色 ID，props 只能使用该场次给出的道具 ID；"
+                    "可把错误的显示名称纠正为唯一对应的 ID，不得新增或猜测 ID。cut.shot 始终使用简体中文。"
                     "不要新增剧情或台词。只输出 JSON："
                     "{\"cut\":{...需要修改的字段...},\"h3ShotText\":\"该镜完整的 [Shot k]/[镜头 k] 正文\"}。"
                     "若不需要修改 h3ShotText，原样返回它。"
@@ -686,6 +688,8 @@ def run(
                     f"H3 提示词语言：{prompt_lang}。\n"
                     f"本切校验错误：{json.dumps(errors, ensure_ascii=False)}\n"
                     f"段级必要上下文：{json.dumps({k: segment.get(k) for k in ('sceneIndex', 'blocking', 'soundscape', 'music')}, ensure_ascii=False)}\n"
+                    f"当前剧本场次可用角色 ID：{json.dumps(scene.get('characters', []) if isinstance(scene, dict) else [], ensure_ascii=False)}；"
+                    f"可用道具 ID：{json.dumps(scene.get('props', []) if isinstance(scene, dict) else [], ensure_ascii=False)}\n"
                     f"当前 cut：{json.dumps(old_cut, ensure_ascii=False)}\n"
                     f"当前 H3 镜头正文：{json.dumps(old_shot_text, ensure_ascii=False)}\n"
                     "仅返回修复后的当前 cut 字段和当前 H3 镜头正文。不要返回整个 segment 或 episode。"
@@ -700,7 +704,7 @@ def run(
                 patch_cut = patch.get("cut")
                 if isinstance(patch_cut, dict):
                     # Structural/script ownership stays immutable; only cut-level presentation fields can change.
-                    forbidden = {"beats", "characters", "props", "sceneIndex", "id"}
+                    forbidden = {"beats", "sceneIndex", "id"}
                     allowed = set(cut) | {
                         "seconds", "size", "camera", "stability", "lens", "cameraPosition",
                         "composition", "eyeline", "focus", "lighting", "frame", "shot", "sfx",
