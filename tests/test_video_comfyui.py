@@ -2,6 +2,7 @@ import json
 import tempfile
 import threading
 import unittest
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -127,6 +128,8 @@ class _Handler(BaseHTTPRequestHandler):
             i = body.index(marker) + len(marker)
             name = body[i:body.index(b'"', i)].decode()
             st.setdefault("uploads", []).append(name)
+            start = body.index(b"\r\n\r\n", i) + 4
+            st.setdefault("files", {})[name] = body[start:body.rindex(b"\r\n--")]
             self._send(200, json.dumps({"name": name, "subfolder": "", "type": "input"}).encode())
         elif self.path == "/prompt":
             st["prompt"] = json.loads(body)["prompt"]
@@ -142,6 +145,12 @@ class _Handler(BaseHTTPRequestHandler):
                 out = {"p1": {"status": {"status_str": "success", "completed": True},
                               "outputs": {"save": {"images": [{"filename": "r.mp4", "subfolder": "shuohao", "type": "output"}], "animated": [True]}}}}
                 self._send(200, json.dumps(out).encode())
+        elif self.path.startswith("/view") and "type=input" in self.path:
+            name = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)["filename"][0]
+            if name in st.get("files", {}):
+                self._send(200, st["files"][name], "image/png")
+            else:
+                self._send(404, b"not found", "text/plain")
         elif self.path.startswith("/view"):
             st["view"] = self.path
             self._send(200, b"VIDEOBYTES", "video/mp4")
@@ -181,20 +190,24 @@ class GenerateTest(unittest.TestCase):
             self.assertIn("subfolder=shuohao", _Handler.state["view"])
             self.assertIn("含拼图", note)
 
-    def test_upload_is_deterministic_and_not_repeated(self):
+    def test_upload_keeps_name_and_skips_duplicates(self):
         with tempfile.TemporaryDirectory() as td:
             td = Path(td)
             a = _png(td / "same.png", (1, 2, 3))
-            client = vc.Client(self.base)
-            client.log = lambda *_a, **_k: None
-            first = client.upload_image(a)
-            second = vc.Client(self.base).upload_image(a)  # 新客户端（下一镜）也不重复提交
-            self.assertEqual(first, second)
-            self.assertEqual(len(_Handler.state["uploads"]), 1)
-            self.assertTrue(first.endswith("_same.png"))
-            # 同名但内容不同 → 文件名不同，不会互相覆盖
-            other = _png(td / "other" / "same.png", (9, 9, 9)) if (td / "other").mkdir() is None else None
-            self.assertNotEqual(vc.Client(self.base).upload_image(other), first)
+            self.assertEqual(vc.Client(self.base).upload_image(a), "same.png")  # 不加任何前缀
+            self.assertEqual(vc.Client(self.base).upload_image(a), "same.png")  # 本次运行内重复：不再上传
+            self.assertEqual(_Handler.state["uploads"], ["same.png"])
+            # 换一次运行（清掉进程内缓存）：服务器上已有相同内容的同名文件，也不重复上传
+            vc._UPLOADED.clear()
+            vc._UPLOAD_NAMES.clear()
+            self.assertEqual(vc.Client(self.base).upload_image(a), "same.png")
+            self.assertEqual(_Handler.state["uploads"], ["same.png"])
+            # 同名但内容不同：不覆盖已有文件
+            (td / "other").mkdir()
+            other = _png(td / "other" / "same.png", (9, 9, 9))
+            name = vc.Client(self.base).upload_image(other)
+            self.assertNotEqual(name, "same.png")
+            self.assertTrue(name.endswith("_same.png"))
             self.assertEqual(len(_Handler.state["uploads"]), 2)
 
     def test_continuation_uses_i2v_with_previous_frame(self):

@@ -33,8 +33,9 @@ UA = "Mozilla/5.0 (compatible; shuohao-agent/1.0)"  # Cloudflare 隧道会拦 Py
 VIDEO_EXTS = (".mp4", ".webm", ".mov", ".mkv", ".gif")
 
 
-# 本次运行里已上传的图片：(服务器地址, 内容哈希, 文件名) -> 服务器上的文件名
+# 本次运行里已上传的图片：(服务器地址, 服务器文件名, 内容哈希) -> 服务器上的文件名
 _UPLOADED: Dict[Tuple[str, str, str], str] = {}
+_UPLOAD_NAMES: Dict[Tuple[str, str], str] = {}  # (服务器地址, 文件名) -> 第一次用这个名字上传的内容哈希
 
 
 class ComfyError(RuntimeError):
@@ -394,18 +395,35 @@ class Client:
             return load_workflow(path)
         return load_workflow(path, self.object_info() if is_ui_format(raw) else None)
 
+    def _server_has_same(self, filename: str, digest: str) -> bool:
+        """服务器 input 目录里是否已有同名且内容完全相同的文件（下载比对哈希；任何失败都当作没有，照常上传）。"""
+        q = urllib.parse.urlencode({"filename": filename, "subfolder": "", "type": "input"})
+        try:
+            with urllib.request.urlopen(urllib.request.Request(self.base + "/view?" + q, headers=self.headers), timeout=self.timeout) as resp:
+                return hashlib.sha1(resp.read()).hexdigest() == digest
+        except Exception:  # noqa: BLE001 - 404/网络问题都意味着需要上传
+            return False
+
     def upload_image(self, path: Path) -> str:
         path = Path(path)
         data = path.read_bytes()
-        # 前缀取文件内容的哈希：内容相同 → 文件名相同，不再每次随机；内容不同仍不会同名互相覆盖。
-        digest = hashlib.sha1(data).hexdigest()[:8]
-        cache_key = (self.base, digest, path.name)
+        digest = hashlib.sha1(data).hexdigest()
+        # 服务器上的文件名就是原文件名，不加前缀。同一次运行里若有「同名但内容不同」的两张图，
+        # 后者才在名字前加内容哈希，避免互相覆盖。
+        filename = path.name
+        owner = _UPLOAD_NAMES.setdefault((self.base, filename), digest)
+        if owner != digest:
+            filename = f"{digest[:8]}_{path.name}"
+        cache_key = (self.base, filename, digest)
         cached = _UPLOADED.get(cache_key)
         if cached:
-            self.log(f"[ComfyUI] 跳过上传 {path.name}（本次运行已上传过相同内容）→ {cached}")
+            self.log(f"[ComfyUI] 跳过上传 {path.name}（本次运行已上传过相同内容）")
             return cached
+        if self._server_has_same(filename, digest):
+            self.log(f"[ComfyUI] 跳过上传 {path.name}（服务器 input 目录里已有相同内容的同名文件）")
+            _UPLOADED[cache_key] = filename
+            return filename
         boundary = "----shuohao" + uuid.uuid4().hex
-        filename = f"{digest}_{path.name}"
         chunks: List[bytes] = []
 
         def field(name: str, value: str) -> None:
