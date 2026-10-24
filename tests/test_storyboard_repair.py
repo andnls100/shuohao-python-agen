@@ -60,6 +60,39 @@ class DialogueFitRepairTest(unittest.TestCase):
 
 
 class StoryboardRepairTest(unittest.TestCase):
+    def test_deterministic_h3_repair_restores_missing_shot_camera_and_dialogue(self):
+        doc = {"episodes": [{"ep": 1, "segments": [{
+            "id": "E01-01", "sceneIndex": 1,
+            "cuts": [
+                {"seconds": 5.0, "camera": "Static Shot", "beats": [1, 1], "frame": "中景", "shot": "人物停下"},
+                {"seconds": 5.0, "camera": "Pan Left/Right", "beats": [2, 2],
+                 "frame": "中景", "shot": "镜头向右摇动跟随人物"},
+            ],
+            "h3Prompt": (
+                "How the reference pictures align with the target video — stale\\n"
+                "integrated_multimodal_description:\\n"
+                "[Shot 1] The subject waits.\\n"
+                "overall_soundscape: quiet room tone\\n"
+                "non_diegetic_music: N/A"
+            ),
+        }]}]}
+        script = {"episodes": [{"ep": 1, "scenes": [{"flow": [
+            {"line": "先等等。"}, {"line": "往右走。"}
+        ]}]}]}
+
+        fixes = repair_deterministic_storyboard(doc, "en", script)
+        segment = doc["episodes"][0]["segments"][0]
+        prompt = segment["h3Prompt"]
+
+        self.assertEqual(segment["cuts"][1]["camera"], "Pan Right")
+        self.assertIn("[Shot 2] At 00:05.000,", prompt)
+        self.assertIn("pan right", prompt.lower())
+        self.assertIn("<d>[Chinese] 先等等。</d>", prompt)
+        self.assertIn("<d>[Chinese] 往右走。</d>", prompt)
+        self.assertIn("quiet room tone", prompt)
+        self.assertTrue(fixes)
+
+
     def _segment(self):
         return {
             "id": "E01-10",
