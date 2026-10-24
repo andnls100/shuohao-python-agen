@@ -80,6 +80,26 @@ class BuildTest(unittest.TestCase):
         self.assertIn("<Picture 4>", h)
         self.assertIn("<Picture 5> is a collage", h)
 
+    def _canvas_refs(self, count):
+        tpl = {"h3": {"class_type": "KaggleH3Conditioning", "inputs": {"prompt": "x", "reference_0": "image", "reference_0.file": "a.png", "seconds": 5}},
+               "save": {"class_type": "SaveVideo", "inputs": {"filename_prefix": "p"}}}
+        names = [f"u{i}.png" for i in range(count)]
+        wf = vc.build_ref2va(tpl, prompt="p", seconds=5, aspect="16:9", size_preset="360p", uploaded=names, seed=1, prefix="x")
+        node = next(n for n in vc.canvas_from_api(wf)["nodes"] if n["id"] == "h3")
+        named = node["widgets_values_named"]
+        files = [named[k] for k in named if k.startswith("reference_") and k.endswith(".file")]
+        return node, named, files, names
+
+    def test_canvas_has_only_uploaded_references(self):
+        # 4 张参考图时，画布工作流里不能残留模板里的第 5 张旧图
+        for count in (1, 4, 5, 6):
+            node, named, files, names = self._canvas_refs(count)
+            self.assertEqual(files, names)
+            used = [k for k in named if k.startswith("reference_") and not k.endswith(".file") and named[k] != "none"]
+            self.assertEqual(len(used), count)
+            self.assertEqual(len(node["widgets_values"]), len(named))
+            self.assertEqual(node["widgets_values"], list(named.values()))
+
 
 class _Handler(BaseHTTPRequestHandler):
     state: dict = {}
