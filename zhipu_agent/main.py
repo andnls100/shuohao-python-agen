@@ -51,7 +51,7 @@ def _build_parser() -> argparse.ArgumentParser:
             s.add_argument("--video-protocol", default="h3", choices=["h3", "seedance"], help="视频提示词协议；视频输入由连续性规则决定")
             s.add_argument("--video-submit", action="store_true", help="提交云端视频任务；不加只生成清单")
             s.add_argument("--video-model", help="选择 models.json 中 video[].key")
-            s.add_argument("--video-size", help="ComfyUI 视频清晰度，例如 480p；不指定时沿用 models.json 的 size_preset（默认 360p 经 2 倍放大输出 720p）")
+            s.add_argument("--video-size", default="480p", help="ComfyUI 视频清晰度（默认 480p）；传 720p 则用 360p 生成后 2 倍放大输出 720p")
             s.add_argument("--video-merge-seconds", type=float, default=10, help="同段内连续镜头合并为一次视频调用，总时长上限秒数（默认 10；0 = 不合并，逐镜头调用）")
             s.add_argument("--segments", help="只处理指定分段 ID，逗号分隔，例如 E01-01,E01-02；seedance/i2v 下会展开为该段全部镜头")
             s.add_argument("--shots", help="只处理指定分镜头 ID，逗号分隔，例如 E01-01-C01,E01-01-C02")

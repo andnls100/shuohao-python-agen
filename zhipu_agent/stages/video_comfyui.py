@@ -260,10 +260,11 @@ def build_ref2va(template: Dict[str, Any], *, prompt: str, seconds: float, aspec
     ins["seconds"] = float(seconds)
     if aspect:
         ins["aspect_ratio"] = aspect
-    # 默认：360p 生成 + 工作流自带 2 倍潜空间放大 = 720p。
+    # 默认 480p 直接生成；720p = 360p 生成 + 工作流自带 2 倍潜空间放大。
     # 指定 360p/720p 以外的清晰度（如 480p）时，放大器无法产出该尺寸，改为关闭放大、按该清晰度直接生成。
     upscale_id = find_node(wf, ("KaggleH3LatentUpscale2x",), nodes.get("upscale"))
-    direct = bool(size_preset) and str(size_preset).lower() not in ("360p", "720p")
+    size_preset = str(size_preset or "480p").lower()  # 默认 480p
+    direct = size_preset not in ("360p", "720p")
     if upscale_id and not direct:
         upscale_inputs = wf[upscale_id]["inputs"]
         upscale_inputs["enabled"] = True

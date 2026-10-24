@@ -439,7 +439,7 @@ def check(ctx: Context) -> Result:
 
 def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: bool = False, visual_style: str = "manju",
         visual_style_prompt: str = "", shots: Optional[list] = None, video_model: Optional[str] = None, frames_dir: Optional[Path] = None, flf: bool = False,
-        segments: Optional[list] = None, merge_seconds: float = 10, video_size: Optional[str] = None) -> Path:
+        segments: Optional[list] = None, merge_seconds: float = 10, video_size: Optional[str] = "480p") -> Path:
     if protocol == "i2v": raise ValueError("旧的 --video-protocol i2v 已取消：视频阶段现在直接按连续镜头规则生成")
     root = ctx.out / "video"; root.mkdir(parents=True, exist_ok=True); path = artifact(ctx); manifest = _collect(ctx, eps, protocol, visual_style, shots, visual_style_prompt, merge_seconds)
     previous = {}
@@ -458,7 +458,8 @@ def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: 
     ctx.log(f"视频阶段：已生成 {len(manifest['items'])} 个镜头清单：{path}")
     if not submit: return path
     providers = _config(video_model)
-    if video_size:  # 命令行 --video-size 覆盖 ComfyUI 的 size_preset
+    video_size = video_size or "480p"
+    if video_size:  # 默认 480p；命令行 --video-size 覆盖 models.json 里的 size_preset
         for p in providers:
             if p.get("comfyui"): p["comfyui"]["size_preset"] = str(video_size).strip().lower()
     requested = {str(v).strip() for v in shots or [] if str(v).strip()}

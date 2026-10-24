@@ -40,6 +40,7 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(wf["save"]["inputs"]["filename_prefix"], "shuohao/E01-01-C01")
         self.assertEqual(tpl["h3"]["inputs"]["reference_0.file"], "CHARACTER_REFERENCE.png")  # 模板不被改动
         one = vc.build_ref2va(tpl, prompt="P", seconds=5, aspect=None, size_preset=None, uploaded=["a.png"], seed=1, prefix="p")
+        self.assertEqual(one["h3"]["inputs"]["size_preset"], "480p")  # 不指定即 480p
         self.assertNotIn("reference_1.file", one["h3"]["inputs"])
 
     def test_ref2va_480p_disables_upscale(self):

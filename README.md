@@ -156,7 +156,7 @@ Add a `video` entry with `"adapter": "comfyui"` (see `comfyui_h3` in `models.exa
 python run_agent.py run --stages video --eps 1 --segments E01-01,E01-02 --video-model comfyui_h3 --video-submit
 ```
 
-To render at 480p instead of the default 720p (360p + 2x latent upscale), append `--video-size 480p`; the upscaler is then disabled and the video is generated natively at 480p.
+Videos render at 480p by default (2x upscaler disabled). Append `--video-size 720p` for 720p (360p + 2x latent upscale).
 
 New-scene first shots use the Ref2VA workflow (scene + characters + props, max 6 images; extras are tiled into one collage without AI), continuation shots use the I2V workflow with the previous shot's last frame as the start frame. Workflows must be exported in ComfyUI **API format**.
 
