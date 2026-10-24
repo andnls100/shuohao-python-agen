@@ -418,21 +418,21 @@ def _repair_h3_protocol(segment: Dict[str, Any], scene: Optional[Dict[str, Any]]
     body_start = next((i for i, line in enumerate(lines) if line.strip().startswith(fields[0])), None)
     sound_start = next((i for i, line in enumerate(lines) if line.strip().startswith(sound_label)), None)
     music_start = next((i for i, line in enumerate(lines) if line.strip().startswith(music_label)), None)
-    body_lines = lines[body_start + 1:sound_start if sound_start is not None else len(lines)] if body_start is not None else []
-    if body_start is not None and ":" in lines[body_start]:
-        inline = lines[body_start].split(":", 1)[1].strip()
+    field_starts = [
+        (body_start, fields[0]), (sound_start, sound_label), (music_start, music_label)
+    ]
+    field_starts = sorted((pos, label) for pos, label in field_starts if pos is not None)
+    field_content: Dict[str, List[str]] = {}
+    for field_index, (pos, label) in enumerate(field_starts):
+        end = field_starts[field_index + 1][0] if field_index + 1 < len(field_starts) else len(lines)
+        values = lines[pos + 1:end]
+        inline = lines[pos].split(":", 1)[1].strip() if ":" in lines[pos] else ""
         if inline:
-            body_lines.insert(0, inline)
-    sound_lines = lines[sound_start + 1:music_start if music_start is not None else len(lines)] if sound_start is not None else []
-    music_lines = lines[music_start + 1:] if music_start is not None else []
-    if sound_start is not None and ":" in lines[sound_start]:
-        inline = lines[sound_start].split(":", 1)[1].strip()
-        if inline:
-            sound_lines.insert(0, inline)
-    if music_start is not None and ":" in lines[music_start]:
-        inline = lines[music_start].split(":", 1)[1].strip()
-        if inline:
-            music_lines.insert(0, inline)
+            values.insert(0, inline)
+        field_content[label] = values
+    body_lines = field_content.get(fields[0], [])
+    sound_lines = field_content.get(sound_label, [])
+    music_lines = field_content.get(music_label, [])
     body = "\n".join(body_lines).strip()
     matches = list(marker_re.finditer(body))
     blocks: Dict[int, str] = {}
