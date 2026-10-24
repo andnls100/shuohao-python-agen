@@ -69,10 +69,10 @@ class StoryboardRepairTest(unittest.TestCase):
                  "frame": "中景", "shot": "镜头向右摇动跟随人物"},
             ],
             "h3Prompt": (
-                "How the reference pictures align with the target video — stale\\n"
-                "integrated_multimodal_description:\\n"
-                "[Shot 1] The subject waits.\\n"
-                "overall_soundscape: quiet room tone\\n"
+                "How the reference pictures align with the target video — stale\n"
+                "integrated_multimodal_description:\n"
+                "[Shot 1] The subject waits.\n"
+                "overall_soundscape: quiet room tone\n"
                 "non_diegetic_music: N/A"
             ),
         }]}]}
