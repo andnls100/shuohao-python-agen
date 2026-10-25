@@ -436,7 +436,7 @@ def run(
             existing_cache = next((p for p in _episode_cache_candidates(work, ep) if p.is_file()), None)
             cache_path = existing_cache or (work / f"ep{ep:03d}.json")
             try:
-                storyboard_max_tokens = max(1000, int(os.environ.get("AGENT_STORYBOARD_MAX_TOKENS", "10000")))
+                storyboard_max_tokens = max(1000, int(os.environ.get("AGENT_STORYBOARD_MAX_TOKENS", "200000")))
             except ValueError as exc:
                 raise ValueError("AGENT_STORYBOARD_MAX_TOKENS 必须是整数") from exc
             items.append(Item(
