@@ -118,7 +118,7 @@ def chat(
     kind: str = "text",
     temperature: Optional[float] = None,
     json_mode: Optional[bool] = None,
-    purpose: str = "unspecified",
+    purpose: str = "direct-chat",
     reasoning_effort: Optional[str] = None,
     max_tokens: Optional[int] = None,
 ) -> str:
@@ -156,7 +156,7 @@ def chat(
 
 def _call_endpoint(
     ep: Endpoint, messages, s: Settings, temperature, json_mode, *, retries: int,
-    purpose: str = "unspecified", reasoning_effort: Optional[str] = None,
+    purpose: str = "direct-conversation", reasoning_effort: Optional[str] = None,
     max_tokens: Optional[int] = None,
 ) -> str:
     if _BACKEND is not None:
@@ -359,7 +359,7 @@ class Conversation:
 
     def __init__(
         self, system: str, settings: Optional[Settings] = None, *,
-        purpose: str = "unspecified", reasoning_effort: Optional[str] = None,
+        purpose: str = "direct-ask-text", reasoning_effort: Optional[str] = None,
         max_tokens: Optional[int] = None,
     ):
         self.settings = settings or load_settings()
