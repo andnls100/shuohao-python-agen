@@ -63,20 +63,29 @@ def optimize_episode(
     )
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    # 使用技能包原有规范作为优化依据，不覆盖源文件。
+    # 使用分镜正文规则和当前模型的 Ref2V Skill 优化；不加载旧 I2VA/T2V 提示词规范。
+    video_model = source.get("videoModel") or "comfyui_h3"
+    skill_root = Path(__file__).resolve().parents[1] / "skills"
+    ref2v_path = (skill_root / "h3-prompt-writing" / "SKILL.md"
+                  if video_model == "comfyui_h3"
+                  else skill_root / "wan-3-0-ref2v-prompt-writing" / "SKILL.md")
+    if not ref2v_path.is_file():
+        raise FileNotFoundError(f"缺少 Ref2V 提示词 Skill：{ref2v_path}")
+    ref2v_rules = ref2v_path.read_text(encoding="utf-8")
     system = build_system(
         skill,
         ["shot-writing.md", "frame.md", "fight-enhancement.md"],
         schema=True,
         extra=(
-            "## 本次任务：优化现有分镜提示词，不重新创作分镜\n"
+            "## 当前模型 Ref2V Skill（最终视频提示词必须遵守）\\n" + ref2v_rules + "\\n\\n"
+            "## 本次任务：优化现有分镜提示词，不重新创作分镜\\n"
             "输入是一段已经存在的 segment。只优化文字提示词，让动作更可执行、画面构图更明确、"
-            "角色/场景/道具连续性更强，声音与画面动作一致。\n"
+            "角色/场景/道具连续性更强，声音与画面动作一致。\\n"
             "硬性不变量：段 id、sceneIndex、cuts 数量和顺序、每个 cut 的 beats/seconds/size/camera/"
             "characters/props 及所有非提示词字段不得改变；不得增加或删除角色、道具、动作、对白或剧情事实。"
             "cut.frame 仍用中文并直呼角色名；cut.shot 按技能规则使用通用身份、不写角色名。"
-            "所有台词必须逐字保留。H3 提示词必须与原 cuts 数量、顺序、时长、切点、运镜和台词严格一致，"
-            "不能改时间戳或协议骨架。\n"
+            "所有台词必须逐字保留。最终视频提示词必须保持为所选 Ref2V 模型可直接提交的格式，"
+            "不得改成 I2V/T2V 中间格式。\\n"
             "只返回 JSON 对象，至少包含 h3Prompt、cuts；cuts 中每项只需返回 frame 和 shot。"
             "可以返回 blocking、soundscape、music；不得返回解释或 Markdown。"
         ),
