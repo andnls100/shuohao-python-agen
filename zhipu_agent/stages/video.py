@@ -524,25 +524,6 @@ def _run_comfyui_queue(manifest: dict, providers: list, root: Path, manifest_pat
         item["state"], item["provider"], item["error"] = "submitting", provider["name"], None; write_json(manifest_path, manifest)
         try:
             submit_item = dict(item)
-            model_label = (str(provider.get("key") or "") + " " + str(provider.get("name") or "") + " " + str(provider.get("VIDEO_API_MODEL") or "")).lower()
-            from .. import video_prompt_optimizer as vpo
-            from ..video_prompt_strategies import strategy_for
-            strategy = strategy_for(provider)
-            optimized_prompt = vpo.load_optimized(root, item, strategy)  # 之前用 --video-optimize 优化过、且原提示词没变：直接读
-            if optimized_prompt:
-                print(f"[H3 prompt] 使用已优化的英文提示词（策略 {strategy}）：{vpo.optimized_path(root, item['id'], strategy)}", flush=True)
-            elif provider.get("adapter") == "comfyui" and (
-                str(provider.get("key") or "").lower() == "comfyui_h3"
-                or "minimax_h3" in model_label
-                or "minimax h3" in model_label
-            ):
-                # 没有可用的优化结果：现场优化一次并存档；没通过检查就停止提交（不带着可能丢了 <Picture N> 的提示词去生成）
-                vpo.optimize_items(root, [item], force=True, strategy=strategy, rewrite_fn=lambda p: _optimize_h3_prompt(p, settings), log=print)
-                optimized_prompt = vpo.load_optimized(root, item, strategy)
-                if not optimized_prompt:
-                    raise ValueError("H3 英文提示词优化没通过检查（原因见上面的 [优化] 日志）；为防止 <Picture N> 或台词损坏，已停止提交。")
-            if optimized_prompt:
-                submit_item["prompt"] = optimized_prompt
             handle = video_comfyui.submit(submit_item, manifest, provider["comfyui"], root.parent, root / "work", None, root / "videos" / _safe(item["id"]))
             item["state"] = "polling"; write_json(manifest_path, manifest)
             pending.append((item, handle))
