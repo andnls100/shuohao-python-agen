@@ -119,7 +119,7 @@ def _repair_ref2v_prompts(ctx: Context, doc: Dict[str, Any], result: Result,
     """Only repair prompts explicitly named by the Ref2V validation gate; never regenerate cuts/segments."""
     if result.ok or "所选 Ref2V 提示词结构、参考图编号、台词原文与顺序" not in result.text:
         return False
-    segment_ids = set(__import__("re").findall(r"\\bE\\d{2}-\\d{2}\\b", result.text))
+    segment_ids = set(__import__("re").findall(r"\bE\d{2}-\d{2}\b", result.text))
     if not segment_ids:
         return False
     skill_root = Path(__file__).resolve().parents[2] / "skills"
@@ -133,7 +133,7 @@ def _repair_ref2v_prompts(ctx: Context, doc: Dict[str, Any], result: Result,
         "Correct only the listed validation errors, preserve every supplied dialogue verbatim, and preserve the "
         "existing reference-image numbers except where the validator explicitly reports a numbering error. "
         "Return only the corrected final video prompt, without JSON, headings outside the required model format, "
-        "or explanation.\\n\\n## Selected model skill\\n" + skill_text
+        "or explanation.\n\n## Selected model skill\n" + skill_text
     )
     repaired = False
     for episode in doc.get("episodes", []):
