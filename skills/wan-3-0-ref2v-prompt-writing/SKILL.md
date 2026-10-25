@@ -31,5 +31,5 @@ Write one coherent, concrete instruction for the target clip:
 - Prefer concrete observable actions over abstract mood words or lists of cinematic adjectives.
 - Do not write a generic negative-prompt list unless the workflow explicitly expects one.
 - Do not add Markdown headings, explanations, or wrapper text to the final prompt.
-- Preserve any dialogue block `<d>...</d>` exactly if one is present in the source data.
+- Preserve dialogue wording exactly, but express it as natural dialogue in the prompt; do not carry over MiniMax-only `<d>...</d>` markup.
 - Output only the final prompt text.
