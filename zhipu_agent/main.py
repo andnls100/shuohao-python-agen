@@ -168,7 +168,6 @@ def cmd_run(args: argparse.Namespace) -> int:
         "frames_gen": args.frames_gen,
         "frames_only": [n.strip() for n in args.frames_only.split(",") if n.strip()] if args.frames_only else None,
         "video_merge_seconds": args.video_merge_seconds, "video_size": args.video_size,
-        "video_optimize": args.video_optimize, "video_optimize_force": args.video_optimize_force,
         "video_segments": [n.strip() for n in args.segments.split(",") if n.strip()] if args.segments else None,
         "video_shots": [n.strip() for n in args.shots.split(",") if n.strip()] if args.shots else None,
         "audio_submit": args.audio_submit,
