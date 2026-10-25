@@ -611,11 +611,11 @@ export function gateReport(board, ctx = {}) {
           for (const section of ['subject_definitions', 'summary', 'retention_analysis', 'detailed_description', 'overall_soundscape', 'non_diegetic_music']) {
             if (!h3.includes(section)) bad.ref2v.push(`${sid} H3 Ref2VA 缺少章节 ${section}`);
           }
-          if (/@Image\\s*\\d+/i.test(h3)) bad.ref2v.push(`${sid} H3 提示词误用了 Wan 的 @ImageN 标记`);
-        } else if (/<(?:Subject|Picture|Video|Audio)\\s+\\d+>/i.test(h3)) {
+          if (/@Image\s*\d+/i.test(h3)) bad.ref2v.push(`${sid} H3 提示词误用了 Wan 的 @ImageN 标记`);
+        } else if (/<(?:Subject|Picture|Video|Audio)\s+\d+>/i.test(h3)) {
           bad.ref2v.push(`${sid} Wan Ref2V 提示词包含 MiniMax 专用标签`);
         }
-        const pattern = isH3Ref2V ? /<Picture\\s+(\\d+)>/g : /@Image(\\d+)\\b/g;
+        const pattern = isH3Ref2V ? /<Picture\s+(\d+)>/g : /@Image(\d+)\b/g;
         const refs = [...h3.matchAll(pattern)].map(m => ({ n: Number(m[1]), at: m.index ?? 0 }));
         const numbers = [...new Set(refs.map(r => r.n))].sort((a, b) => a - b);
         const expected = Array.from({ length: cuts.length }, (_, i) => i + 1);
@@ -640,7 +640,7 @@ export function gateReport(board, ctx = {}) {
           }
         }
         let dialogueCursor = 0;
-        const dialogueBlocks = isH3Ref2V ? [...h3.matchAll(/<d>[\\s\\S]*?<\\/d>/g)].map(m => m[0]) : [];
+        const dialogueBlocks = isH3Ref2V ? [...h3.matchAll(/<d>[\s\S]*?<\/d>/g)].map(m => m[0]) : [];
         for (const line of expectedLines) {
           const at = h3.indexOf(line, dialogueCursor);
           if (at < 0) {
