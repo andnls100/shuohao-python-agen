@@ -7,7 +7,6 @@ from typing import Optional
 from urllib.parse import urlparse
 
 from ..config import models_file_path
-from ..llm import ask_text
 from ..validator import Result
 from ..visual_style import visual_style_instruction
 from .base import Context, read_json, write_json
@@ -19,83 +18,6 @@ def artifact(ctx: Context) -> Path:
 
 def _safe(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._") or "segment"
-
-
-def _optimize_h3_prompt(prompt: str, settings) -> str:
-    """Translate and tighten an H3 prompt into English without changing reference tags or dialogue."""
-    original = str(prompt or "").strip()
-    if not original:
-        raise ValueError("H3 提示词为空，无法优化")
-
-    original_picture_tags = re.findall(r"<Picture\s+\d+>", original)
-    original_dialogues = re.findall(r"<d>.*?</d>", original, flags=re.S)
-    protected = original
-    dialogue_tokens = []
-
-    def protect_dialogue(match):
-        token = f"ZXQDIALOGUEBLOCK{len(dialogue_tokens):04d}QXZ"
-        if token in original:
-            raise ValueError("提示词中出现保留占位符，无法安全优化")
-        dialogue_tokens.append((token, match.group(0)))
-        return token
-
-    protected = re.sub(r"<d>.*?</d>", protect_dialogue, protected, flags=re.S)
-    picture_tokens = []
-
-    def protect_picture(match):
-        token = f"ZXQPICTUREREF{len(picture_tokens):04d}QXZ"
-        if token in original:
-            raise ValueError("提示词中出现保留占位符，无法安全优化")
-        picture_tokens.append((token, match.group(0)))
-        return token
-
-    protected = re.sub(r"<Picture\s+\d+>", protect_picture, protected)
-
-    from ..video_middleware import skill_instructions
-    placeholder_rule = (
-        "\n\n## Placeholder tokens (machine-enforced)\n"
-        "Every ZXQ...QXZ token in the user message stands for an immutable <Picture N> reference tag or a <d> dialogue block. "
-        "Copy each token exactly once, in the same order; do not translate, rename, reorder, or remove it. "
-        "All non-dialogue text must be English. Output only the final prompt, with no markdown fences or heading."
-    )
-    skill_rules = skill_instructions("comfyui")  # skills/video-minimax-h3
-    if skill_rules:
-        system = "You are an expert prompt editor for MiniMax H3 reference-to-video. Follow this skill:\n\n" + skill_rules + placeholder_rule
-    else:  # 技能包缺失时的兜底
-        system = (
-            "You are an expert prompt editor for MiniMax H3 reference-to-video (Ref2VA/R2F). "
-            "Rewrite the supplied video prompt into concise, natural English optimized for video generation. "
-            "Preserve the exact story, characters, actions, order, timing, camera movement, framing, lighting, "
-            "visual style, sound effects, ambience, music, and constraints. Do not invent events, objects, characters, "
-            "dialogue, or camera cuts." + placeholder_rule
-        )
-    optimized = ask_text(
-        system,
-        "Rewrite this prompt for MiniMax H3 Ref2VA/R2F. Preserve all placeholder tokens exactly:\n\n" + protected,
-        settings,
-    ).strip()
-
-    # Accept a model that wraps the answer in a single markdown fence, but remove only that wrapper.
-    fence = re.fullmatch(r"```(?:text|english)?\s*(.*?)\s*```", optimized, flags=re.I | re.S)
-    if fence:
-        optimized = fence.group(1).strip()
-
-    for token, _value in [*picture_tokens, *dialogue_tokens]:
-        if optimized.count(token) != 1:
-            raise ValueError(
-                f"H3 英文提示词优化未能完整保留占位符 {token}；为防止引用或台词损坏，已停止提交。"
-            )
-
-    for token, value in picture_tokens:
-        optimized = optimized.replace(token, value)
-    for token, value in dialogue_tokens:
-        optimized = optimized.replace(token, value)
-
-    if re.findall(r"<Picture\s+\d+>", optimized) != original_picture_tags:
-        raise ValueError("H3 英文提示词优化改变了 <Picture N> 标签的数量、顺序或写法；已停止提交。")
-    if re.findall(r"<d>.*?</d>", optimized, flags=re.S) != original_dialogues:
-        raise ValueError("H3 英文提示词优化改变了原始台词块；已停止提交。")
-    return optimized
 
 
 def _prompt(segment: dict, protocol: str) -> str:
@@ -544,8 +466,7 @@ def _run_comfyui_queue(manifest: dict, providers: list, root: Path, manifest_pat
 
 def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: bool = False, visual_style: str = "manju",
         visual_style_prompt: str = "", shots: Optional[list] = None, video_model: Optional[str] = None, frames_dir: Optional[Path] = None, flf: bool = False,
-        segments: Optional[list] = None, merge_seconds: float = 10, video_size: Optional[str] = None,
-        optimize: bool = False, optimize_force: bool = False) -> Path:
+        segments: Optional[list] = None, merge_seconds: float = 10, video_size: Optional[str] = None) -> Path:
     if protocol == "i2v": raise ValueError("旧的 --video-protocol i2v 已取消：视频阶段现在直接按连续镜头规则生成")
     root = ctx.out / "video"; root.mkdir(parents=True, exist_ok=True); path = artifact(ctx); manifest = _collect(ctx, eps, protocol, visual_style, shots, visual_style_prompt, merge_seconds)
     previous = {}
