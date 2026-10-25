@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from ..skill_loader import build_system
 from ..visual_style import visual_style_instruction
+from ..llm import ask_text
 from ..validator import Result
 from .base import (
     Context, Item, batches, compact, ep_tokens, read_json, run_items, write_json,
@@ -111,6 +112,60 @@ def _repair_existing_h3(ctx: Context, doc: Dict[str, Any], path: Path,
             ctx.log(f"[storyboard] 已有分镜自动修正：{fix}")
         write_json(path, doc)
     return ctx.run(sk, ["validate", path, *_refs(ctx)], cwd=ctx.dir("storyboard"))
+
+
+def _repair_ref2v_prompts(ctx: Context, doc: Dict[str, Any], result: Result,
+                         video_model: str) -> bool:
+    """Only repair prompts explicitly named by the Ref2V validation gate; never regenerate cuts/segments."""
+    if result.ok or "所选 Ref2V 提示词结构、参考图编号、台词原文与顺序" not in result.text:
+        return False
+    segment_ids = set(__import__("re").findall(r"\\bE\\d{2}-\\d{2}\\b", result.text))
+    if not segment_ids:
+        return False
+    skill_root = Path(__file__).resolve().parents[2] / "skills"
+    skill_path = (skill_root / "h3-prompt-writing" / "SKILL.md"
+                  if video_model == "comfyui_h3"
+                  else skill_root / "wan-3-0-ref2v-prompt-writing" / "SKILL.md")
+    skill_text = skill_path.read_text(encoding="utf-8")
+    system = (
+        "Repair only the final Ref2V video prompt for one existing segment. Follow the model skill below. "
+        "Do not rewrite the storyboard, cuts, timing, action order, character/prop assignments, or story facts. "
+        "Correct only the listed validation errors, preserve every supplied dialogue verbatim, and preserve the "
+        "existing reference-image numbers except where the validator explicitly reports a numbering error. "
+        "Return only the corrected final video prompt, without JSON, headings outside the required model format, "
+        "or explanation.\\n\\n## Selected model skill\\n" + skill_text
+    )
+    repaired = False
+    for episode in doc.get("episodes", []):
+        for segment in episode.get("segments", []):
+            sid = str(segment.get("id") or "")
+            if sid not in segment_ids:
+                continue
+            errors = [line for line in result.text.splitlines() if sid in line]
+            user = json.dumps({
+                "videoModel": video_model,
+                "segmentId": sid,
+                "validationErrors": errors,
+                "currentFinalPrompt": segment.get("h3Prompt", ""),
+                "cuts": segment.get("cuts", []),
+                "soundscape": segment.get("soundscape", ""),
+                "music": segment.get("music", ""),
+            }, ensure_ascii=False, indent=2)
+            fixed = ask_text(
+                system, user, ctx.settings,
+                purpose=f"ref2v-prompt-repair:{sid}", max_tokens=5000,
+            ).strip()
+            if not fixed:
+                raise ValueError(f"{sid} Ref2V 局部修复返回空提示词")
+            if video_model == "comfyui_h3" and len(fixed) > 7000:
+                raise ValueError(f"{sid} H3 Ref2VA 修复后提示词超过 7000 字符")
+            segment["h3Prompt"] = fixed
+            segment.pop("videoPrompt", None)
+            repaired = True
+            ctx.log(f"[storyboard] {sid}：仅按校验错误修复 Ref2V 提示词；未重写分镜")
+    if repaired:
+        write_json(artifact(ctx), doc)
+    return repaired
 
 
 def _blocking_lines(ctx: Context) -> List[str]:
@@ -479,15 +534,9 @@ def run(
                 write_json(_p, _doc)
 
             result = ctx.run(sk, ["validate", _p, *_refs(ctx)], cwd=sb_dir)
-            if result.ok:
-                return result
-            if not h3_gates:
-                # Legacy H3/I2VA local-rewrite passes are retired. Keep the validation report
-                # and deterministic repairs, but never rewrite a Ref2V prompt into the old format.
-                return result
-
-            # Ref2V prompts are final model-specific text. Do not run legacy H3/I2VA
-            # prompt-rewrite or cut-text repair logic against them.
+            if not result.ok and _repair_ref2v_prompts(ctx, _doc, result, video_model):
+                result = ctx.run(sk, ["validate", _p, *_refs(ctx)], cwd=sb_dir)
+            # One targeted prompt-only repair at most. Never regenerate an episode or rewrite cuts.
             return result
 
         run_items(
