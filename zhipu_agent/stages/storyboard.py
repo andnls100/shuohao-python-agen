@@ -291,7 +291,7 @@ def run(
         seed = ctx.node_json(sk, ["seed", script_path, "--eps", f"{group[0]}-{group[-1]}", "--aspect", aspect])
         seed_eps = {e["ep"]: e for e in seed["episodes"]}
         batch_doc: Dict[str, Any] = {"source": ctx.title, "aspectRatio": aspect,
-                                     "promptLang": prompt_lang, "episodes": []}
+                                     "promptLang": prompt_lang, "videoModel": video_model, "episodes": []}
         if _params_override(h3_gates):
             batch_doc["params"] = _params_override(h3_gates)
         batch_path = work / "storyboard-batch.json"
