@@ -175,12 +175,8 @@ def _call_endpoint(
         "temperature": temperature if temperature is not None
         else (ep.temperature if ep.temperature is not None else s.temperature),
     }
-    configured_max = ep.max_tokens if ep.max_tokens is not None else s.max_tokens
-    token_cap = max_tokens if max_tokens is not None else configured_max
-    if max_tokens is not None and configured_max is not None:
-        token_cap = min(max_tokens, configured_max)
-    if token_cap:
-        params["max_tokens"] = token_cap
+    # Deliberately omit max_tokens/max_completion_tokens: let the provider/model
+    # apply its native output limit instead of imposing an application-side cap.
     effort = reasoning_effort if reasoning_effort is not None else (
         ep.reasoning_effort if ep.reasoning_effort is not None else s.reasoning_effort
     )
@@ -240,8 +236,8 @@ def _call_endpoint(
              f"finish_reason={finish}")
         if finish == "length":
             raise LLMTruncated(
-                "模型输出被长度上限截断。可以设置环境变量 ZHIPU_MAX_TOKENS（或 models.json 里该项的 max_tokens）"
-                "调大上限，或减小每批处理的集数后重试。"
+                "模型输出达到服务商或模型自身的原生长度上限。应用不会设置 max_tokens；"
+                "可更换原生输出上限更高的模型，或减小每批处理的集数后重试。"
             )
         if not text.strip():
             if attempt < retries:

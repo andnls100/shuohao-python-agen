@@ -447,14 +447,14 @@
       },
       "widgets_values": [
         false,
-        "360p",
+        "480p",
         "16:9",
         "bicubic"
       ],
       "title": "Regular Video Workflow | Optional 2x Latent Upscale (360p to 720p)",
       "widgets_values_named": {
         "enabled": false,
-        "source_size_preset": "360p",
+        "source_size_preset": "480p",
         "aspect_ratio": "16:9",
         "method": "bicubic"
       }

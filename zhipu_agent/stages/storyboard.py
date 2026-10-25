@@ -154,7 +154,11 @@ def _repair_ref2v_prompts(ctx: Context, doc: Dict[str, Any], path: Path, result:
             }, ensure_ascii=False, indent=2)
             fixed = ask_text(
                 system, user, ctx.settings,
+<<<<<<< HEAD
                 purpose=f"ref2v-prompt-repair:{sid}", max_tokens=200000,
+=======
+                purpose=f"ref2v-prompt-repair:{sid}",
+>>>>>>> 078f4e8763a960e6dc3f4b9743e6765f828f74cc
             ).strip()
             if not fixed:
                 raise ValueError(f"{sid} Ref2V 局部修复返回空提示词")
@@ -435,13 +439,9 @@ def run(
             prompt += fight_instruction
             existing_cache = next((p for p in _episode_cache_candidates(work, ep) if p.is_file()), None)
             cache_path = existing_cache or (work / f"ep{ep:03d}.json")
-            try:
-                storyboard_max_tokens = max(1000, int(os.environ.get("AGENT_STORYBOARD_MAX_TOKENS", "200000")))
-            except ValueError as exc:
-                raise ValueError("AGENT_STORYBOARD_MAX_TOKENS 必须是整数") from exc
             items.append(Item(
                 str(ep), system, prompt, tokens=ep_tokens(ep), cache=cache_path,
-                purpose=f"storyboard-generation:E{ep:02d}", max_tokens=storyboard_max_tokens,
+                purpose=f"storyboard-generation:E{ep:02d}",
             ))
 
         def apply(key: str, data: Any, _doc=batch_doc, _path=batch_path) -> None:
