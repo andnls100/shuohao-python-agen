@@ -115,8 +115,12 @@ def _prepare_prompt(provider: dict, item: dict, manifest: dict | None = None) ->
 
     # A failed provider may be followed by a provider with different prompt rules.
     # Never feed the previous provider's optimized prompt into the next optimizer.
+    precomputed = (item.get("prompt_cached_optimized") or {}).get(adapter)  # --video-optimize 存下来的优化结果
     if adapter in cache:
         optimized = str(cache[adapter])
+    elif precomputed:
+        optimized = str(precomputed)
+        cache[adapter] = optimized
     else:
         style_instruction = str((manifest or {}).get("visual_style_instruction") or "").strip()
         optimized = optimize_prompt_with_skill(adapter, original, style_instruction=style_instruction) if style_instruction else optimize_prompt_with_skill(adapter, original)

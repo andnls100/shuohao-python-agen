@@ -283,8 +283,8 @@ def _set_seed_and_prefix(wf: Dict[str, Any], seed: int, prefix: str, nodes: Dict
 
 
 def whole_seconds(seconds: float) -> int:
-    """Ref2VA 工作流的时长控件只收整数秒：向上取整（不截断台词），至少 1 秒。"""
-    return max(1, math.ceil(float(seconds) - 1e-9))
+    """Ref2VA 工作流的时长控件只收整数秒：向上取整（不截断台词）；MiniMax H3 官方时长范围是 4—15 秒，超出就夹到边界。"""
+    return min(15, max(4, math.ceil(float(seconds) - 1e-9)))
 
 
 def build_ref2va(template: Dict[str, Any], *, prompt: str, seconds: float, aspect: Optional[str], size_preset: Optional[str],

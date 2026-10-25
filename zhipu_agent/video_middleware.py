@@ -24,6 +24,7 @@ SKILL_REGISTRY = {
     "cogvideox_zhipu": VideoSkill("cogvideox_zhipu", "video-cogvideox3", 512),
     "aliyun_wan": VideoSkill("aliyun_wan", "video-wan-r2v", None),
     "seedance": VideoSkill("seedance", "video-seedance", None),
+    "comfyui": VideoSkill("comfyui", "video-minimax-h3", None),  # ComfyUI 上的 MiniMax H3（Ref2VA）
 }
 
 

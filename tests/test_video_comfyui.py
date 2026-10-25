@@ -75,7 +75,7 @@ class BuildTest(unittest.TestCase):
             self.assertEqual(len(vc.plan_references(refs[:6], 6, td / "x.png")), 6)
 
     def test_whole_seconds(self):
-        self.assertEqual([vc.whole_seconds(x) for x in (5, 5.0, 4.2, 7.5, 0.3, 4.9999999999)], [5, 5, 5, 8, 1, 5])
+        self.assertEqual([vc.whole_seconds(x) for x in (5, 5.0, 4.2, 7.5, 0.3, 4.9999999999, 3, 20)], [5, 5, 5, 8, 4, 5, 4, 15])  # H3 官方 4—15 秒
         self.assertIsInstance(vc.whole_seconds(5.0), int)
 
     def test_header(self):

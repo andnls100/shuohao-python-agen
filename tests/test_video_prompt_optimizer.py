@@ -90,6 +90,34 @@ class RewriteFnTest(unittest.TestCase):
         self.assertIn("placeholder lost", problems[0])
 
 
+class H3ValidateTest(unittest.TestCase):
+    def test_length_and_timeline(self):
+        item = {"duration_seconds": 8}
+        self.assertEqual(vpo.validate_h3(item, ORIGINAL, GOOD), [])
+        self.assertTrue(any("7000" in p for p in vpo.validate_h3(item, ORIGINAL, GOOD + " x" * 4000)))
+        late = GOOD + " The camera drifts during 6-12 seconds."
+        self.assertTrue(any("时间轴" in p for p in vpo.validate_h3(item, ORIGINAL, late)))
+        self.assertFalse(any("时间轴" in p for p in vpo.validate_h3({"duration_seconds": 12}, ORIGINAL, late)))
+
+
+class StrategyTest(unittest.TestCase):
+    def test_strategy_names_and_isolation(self):
+        from zhipu_agent import video_prompt_strategies as vps
+        self.assertEqual(vps.strategy_for({"adapter": "comfyui"}), "minimax_h3")
+        self.assertEqual(vps.strategy_for({"adapter": "aliyun_wan"}), "aliyun_wan")
+        self.assertIn("--video-model comfyui_h3 --video-submit", vps.next_command({"key": "comfyui_h3"}, [1]))
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            item = {"id": "S1", "prompt": ORIGINAL, "duration_seconds": 8}
+            vpo.optimize_items(root, [item], strategy="minimax_h3", rewrite_fn=lambda p: GOOD, log=lambda *_a: None)
+            # 另一个模型的策略读不到 minimax_h3 的结果；wan 策略只要求非空，不要求保留 <Picture N>
+            self.assertIsNone(vpo.load_optimized(root, item, "aliyun_wan"))
+            vpo.optimize_items(root, [item], strategy="aliyun_wan", rewrite_fn=lambda p: "wan 版提示词", log=lambda *_a: None)
+            self.assertEqual(vpo.load_optimized(root, item, "aliyun_wan"), "wan 版提示词")
+            self.assertEqual(vpo.load_optimized(root, item, "minimax_h3"), GOOD)
+            self.assertTrue(vpo.optimized_path(root, "S1", "aliyun_wan").is_file())
+
+
 class IndexTest(unittest.TestCase):
     def test_cache_invalidates_when_source_changes_and_force(self):
         with tempfile.TemporaryDirectory() as td:

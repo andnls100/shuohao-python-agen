@@ -51,16 +51,24 @@ def _optimize_h3_prompt(prompt: str, settings) -> str:
 
     protected = re.sub(r"<Picture\s+\d+>", protect_picture, protected)
 
-    system = (
-        "You are an expert prompt editor for MiniMax H3 reference-to-video (Ref2VA/R2F). "
-        "Rewrite the supplied video prompt into concise, natural English optimized for video generation. "
-        "Preserve the exact story, characters, actions, order, timing, camera movement, framing, lighting, "
-        "visual style, sound effects, ambience, music, and constraints. Keep the prompt compact and concrete; "
-        "prioritize visible motion and clear temporal progression. Do not invent events, objects, characters, "
-        "dialogue, or camera cuts. Do not add explanations, markdown fences, or a heading. "
-        "Every ZXQ...QXZ token is an immutable placeholder: copy it exactly once and do not translate, "
-        "rename, reorder, or remove it. All non-dialogue text must be English. Output only the final prompt."
+    from ..video_middleware import skill_instructions
+    placeholder_rule = (
+        "\n\n## Placeholder tokens (machine-enforced)\n"
+        "Every ZXQ...QXZ token in the user message stands for an immutable <Picture N> reference tag or a <d> dialogue block. "
+        "Copy each token exactly once, in the same order; do not translate, rename, reorder, or remove it. "
+        "All non-dialogue text must be English. Output only the final prompt, with no markdown fences or heading."
     )
+    skill_rules = skill_instructions("comfyui")  # skills/video-minimax-h3
+    if skill_rules:
+        system = "You are an expert prompt editor for MiniMax H3 reference-to-video. Follow this skill:\n\n" + skill_rules + placeholder_rule
+    else:  # 技能包缺失时的兜底
+        system = (
+            "You are an expert prompt editor for MiniMax H3 reference-to-video (Ref2VA/R2F). "
+            "Rewrite the supplied video prompt into concise, natural English optimized for video generation. "
+            "Preserve the exact story, characters, actions, order, timing, camera movement, framing, lighting, "
+            "visual style, sound effects, ambience, music, and constraints. Do not invent events, objects, characters, "
+            "dialogue, or camera cuts." + placeholder_rule
+        )
     optimized = ask_text(
         system,
         "Rewrite this prompt for MiniMax H3 Ref2VA/R2F. Preserve all placeholder tokens exactly:\n\n" + protected,
@@ -517,17 +525,19 @@ def _run_comfyui_queue(manifest: dict, providers: list, root: Path, manifest_pat
             submit_item = dict(item)
             model_label = (str(provider.get("key") or "") + " " + str(provider.get("name") or "") + " " + str(provider.get("VIDEO_API_MODEL") or "")).lower()
             from .. import video_prompt_optimizer as vpo
-            optimized_prompt = vpo.load_optimized(root, item)  # 之前用 --video-optimize 优化过、且原提示词没变：直接读
+            from ..video_prompt_strategies import strategy_for
+            strategy = strategy_for(provider)
+            optimized_prompt = vpo.load_optimized(root, item, strategy)  # 之前用 --video-optimize 优化过、且原提示词没变：直接读
             if optimized_prompt:
-                print(f"[H3 prompt] 使用已优化的英文提示词：{root / vpo.DIR_NAME / (vpo._safe(item['id']) + '.txt')}", flush=True)
+                print(f"[H3 prompt] 使用已优化的英文提示词（策略 {strategy}）：{vpo.optimized_path(root, item['id'], strategy)}", flush=True)
             elif provider.get("adapter") == "comfyui" and (
                 str(provider.get("key") or "").lower() == "comfyui_h3"
                 or "minimax_h3" in model_label
                 or "minimax h3" in model_label
             ):
                 # 没有可用的优化结果：现场优化一次并存档；没通过检查就停止提交（不带着可能丢了 <Picture N> 的提示词去生成）
-                vpo.optimize_items(root, [item], force=True, rewrite_fn=lambda p: _optimize_h3_prompt(p, settings), log=print)
-                optimized_prompt = vpo.load_optimized(root, item)
+                vpo.optimize_items(root, [item], force=True, strategy=strategy, rewrite_fn=lambda p: _optimize_h3_prompt(p, settings), log=print)
+                optimized_prompt = vpo.load_optimized(root, item, strategy)
                 if not optimized_prompt:
                     raise ValueError("H3 英文提示词优化没通过检查（原因见上面的 [优化] 日志）；为防止 <Picture N> 或台词损坏，已停止提交。")
             if optimized_prompt:
@@ -571,10 +581,18 @@ def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: 
     qc += [f"- [ ] {x['id']}：{x['state']} | {x['input_mode']} | {x['continuity_decision']}" for x in manifest["items"]]; (root / "qc-checklist.md").write_text("\n".join(qc) + "\n", encoding="utf-8")
     ctx.log(f"视频阶段：已生成 {len(manifest['items'])} 个镜头清单：{path}")
     from .. import video_prompt_optimizer as vpo
-    if optimize or optimize_force:  # 只优化提示词（英文，<Picture N> 全部保留），结果存 output/video/prompts-optimized/
+    if optimize or optimize_force:  # 只优化提示词；每个模型用自己的策略，结果按策略名分开存到 output/video/prompts-optimized/
+        from .. import video_prompt_strategies as vps
         picked = [x for x in manifest["items"] if (not shots or x["id"] in {str(s).strip() for s in shots}) and (not segments or str(x.get("segmentId")) in {str(s).strip() for s in segments})]
-        status = vpo.optimize_items(root, picked, force=optimize_force, rewrite_fn=lambda p: _optimize_h3_prompt(p, ctx.settings), log=ctx.log)
-        ctx.log("视频提示词优化：" + "，".join(f"{k}={sum(1 for v in status.values() if v == k)}" for k in ("optimized", "cached", "fallback")) + f"；结果目录：{root / vpo.DIR_NAME}")
+        seen = set()
+        for provider in _config(video_model):
+            strategy = vps.strategy_for(provider)
+            if strategy in seen: continue
+            seen.add(strategy)
+            ctx.log(f"视频提示词优化：模型 {provider.get('key') or provider['name']} → 策略 {strategy}")
+            status = vpo.optimize_items(root, picked, force=optimize_force, strategy=strategy, rewrite_fn=vps.rewrite_fn_for(provider, ctx.settings, manifest), log=ctx.log)
+            ctx.log("视频提示词优化：" + "，".join(f"{k}={sum(1 for v in status.values() if v == k)}" for k in ("optimized", "cached", "fallback")) + f"；结果目录：{root / vpo.DIR_NAME}")
+            ctx.log(f"下一步提交：{vps.next_command(provider, eps)}")
     if not submit: return path
     providers = _config(video_model)
     if video_size:  # 命令行 --video-size 覆盖 ComfyUI 的 size_preset
@@ -590,6 +608,11 @@ def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: 
     if providers and all(p.get("adapter") == "comfyui" for p in providers):
         _run_comfyui_queue(manifest, providers, root, path, requested, ctx.settings)
         return path
+    from .. import video_prompt_optimizer as vpo
+    from ..video_prompt_strategies import strategy_for
+    for item in manifest["items"]:  # 其他模型（Wan、CogVideoX…）：用 --video-optimize 存过的优化结果，没有就仍在提交时现场优化
+        cached = {strategy_for(p): t for p in providers if p.get("adapter") != "comfyui" and (t := vpo.load_optimized(root, item, strategy_for(p)))}
+        if cached: item["prompt_cached_optimized"] = cached
     for item in manifest["items"]:
         if requested and item["id"] not in requested: continue
         last_frame = None

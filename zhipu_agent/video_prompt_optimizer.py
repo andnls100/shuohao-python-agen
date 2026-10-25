@@ -4,13 +4,15 @@
   python run_agent.py run --stages video --eps 1 --video-model comfyui_h3 --video-optimize        # 只优化，不提交
   python run_agent.py run --stages video --eps 1 --video-model comfyui_h3 --video-submit          # 有优化结果就直接用
 
-结果存在 output/video/prompts-optimized/：每个镜头一个 <镜头ID>.txt，加一个 index.json 记录原提示词哈希。
+不同模型用不同的优化策略（见 video_prompt_strategies.py）：结果按「策略名」分开存，换模型不会读到别的模型的结果。
+结果存在 output/video/prompts-optimized/：每个镜头一个 <镜头ID>.<策略名>.txt，加一个 index.json 记录原提示词哈希。
 提交时只有「哈希对得上」才使用优化版；分镜改过、原提示词变了，旧的优化结果自动作废并回退到原提示词。
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from collections import Counter
 from pathlib import Path
@@ -18,6 +20,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 DIR_NAME = "prompts-optimized"
 INDEX_NAME = "index.json"
+
+DEFAULT_STRATEGY = "minimax_h3"
+H3_PROMPT_LIMIT = 7000  # MiniMax H3 官方：提示词不超过 7000 字符
+_TIMELINE = re.compile(r"(?<!\d)(\d+(?:\.\d+)?)\s*(?:-|–|—|至|到)\s*(\d+(?:\.\d+)?)\s*(?:s|秒)", re.I)
 
 _PICTURE = re.compile(r"<\s*Picture\s*(\d+)\s*>", re.I)
 _SHOT = re.compile(r"\[\s*(?:Shot|镜头)\s*(\d+)\s*\]", re.I)
@@ -69,19 +75,42 @@ def validate(original: str, optimized: str) -> List[str]:
     return problems
 
 
+def validate_h3(item: Dict[str, Any], original: str, optimized: str) -> List[str]:
+    """MiniMax H3 策略的校验：validate() + 官方字符上限 + 时间轴不越过目标时长（学习自 minimax-h3-video-prompt 的校验脚本）。"""
+    problems = validate(original, optimized)
+    if len(optimized) > H3_PROMPT_LIMIT:
+        problems.append(f"提示词 {len(optimized)} 字符，超过 MiniMax H3 上限 {H3_PROMPT_LIMIT}")
+    try:
+        target = float(item.get("duration_seconds") or 0)
+    except (TypeError, ValueError):
+        target = 0
+    if target > 0:
+        limit = math.ceil(target - 1e-9)
+        ends = [float(m.group(2)) for m in _TIMELINE.finditer(optimized)]
+        if ends and max(ends) > limit + 1e-9:
+            problems.append(f"时间轴结束于 {max(ends):g} 秒，超过目标时长 {limit} 秒")
+    return problems
+
+
+def validate_nonempty(item: Dict[str, Any], original: str, optimized: str) -> List[str]:
+    return [] if optimized.strip() else ["优化结果为空"]
+
+
 def optimize_one(original: str, chat_fn: Optional[Callable[..., str]] = None, retries: int = 1,
-                 rewrite_fn: Optional[Callable[[str], str]] = None) -> Tuple[str, List[str]]:
+                 rewrite_fn: Optional[Callable[[str], str]] = None,
+                 check: Optional[Callable[[str, str], List[str]]] = None) -> Tuple[str, List[str]]:
     """返回 (提示词, 问题)。问题为空 = 优化版合格；否则返回原提示词，问题说明为什么没用优化版。
 
     rewrite_fn(原提示词) -> 英文提示词：由调用方提供改写实现（视频阶段用带占位符保护的 _optimize_h3_prompt），
     出错就抛异常；这里再做一遍 validate() 兜底。没有 rewrite_fn 时用 chat_fn 直接改写，校验不过会带着问题重试。
     """
+    check = check or validate
     if rewrite_fn is not None:
         try:
             text = rewrite_fn(original).strip()
         except Exception as exc:  # noqa: BLE001
             return original, [f"改写失败：{exc}"]
-        problems = validate(original, text)
+        problems = check(original, text)
         return (text, []) if not problems else (original, problems)
     messages: List[Dict[str, str]] = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": original}]
     problems: List[str] = []
@@ -90,7 +119,7 @@ def optimize_one(original: str, chat_fn: Optional[Callable[..., str]] = None, re
             text = chat_fn(messages, kind="text", temperature=0).strip()
         except Exception as exc:  # noqa: BLE001 - 模型调用失败也回退到原文
             return original, [f"模型调用失败：{exc}"]
-        problems = validate(original, text)
+        problems = check(original, text)
         if not problems:
             return text, []
         messages = messages[:2] + [
@@ -113,9 +142,17 @@ def _read_index(root: Path) -> Dict[str, Any]:
         return {}
 
 
-def load_optimized(root: Path, item: Dict[str, Any]) -> Optional[str]:
-    """提交时调用：有「与当前原提示词对得上」的优化结果就返回它，否则返回 None。"""
-    entry = _read_index(root).get(str(item.get("id")))
+def _key(strategy: str, sid: Any) -> str:
+    return f"{strategy}:{sid}"
+
+
+def optimized_path(root: Path, item_id: str, strategy: str = DEFAULT_STRATEGY) -> Path:
+    return Path(root) / DIR_NAME / f"{_safe(item_id)}.{_safe(strategy)}.txt"
+
+
+def load_optimized(root: Path, item: Dict[str, Any], strategy: str = DEFAULT_STRATEGY) -> Optional[str]:
+    """提交时调用：有「同一策略、且与当前原提示词对得上」的优化结果就返回它，否则返回 None。"""
+    entry = _read_index(root).get(_key(strategy, item.get("id")))
     if not isinstance(entry, dict) or entry.get("source_hash") != prompt_hash(str(item.get("prompt") or "")):
         return None
     if not entry.get("ok"):
@@ -131,6 +168,8 @@ def load_optimized(root: Path, item: Dict[str, Any]) -> Optional[str]:
 
 def optimize_items(root: Path, items: List[Dict[str, Any]], *, force: bool = False,
                    chat_fn: Optional[Callable[..., str]] = None, rewrite_fn: Optional[Callable[[str], str]] = None,
+                   strategy: str = DEFAULT_STRATEGY,
+                   validator: Optional[Callable[[Dict[str, Any], str, str], List[str]]] = None,
                    log: Callable[[str], None] = print, workers: int = 3) -> Dict[str, str]:
     """优化 items 里每个镜头的提示词并落盘；返回 {镜头ID: "optimized" | "cached" | "fallback"}。"""
     if chat_fn is None and rewrite_fn is None:
@@ -138,6 +177,7 @@ def optimize_items(root: Path, items: List[Dict[str, Any]], *, force: bool = Fal
     from .stages.base import parallel_map  # noqa: PLC0415
 
     root = Path(root)
+    validator = validator or (validate_h3 if strategy == DEFAULT_STRATEGY else validate_nonempty)
     out_dir = root / DIR_NAME
     out_dir.mkdir(parents=True, exist_ok=True)
     index = _read_index(root)
@@ -149,33 +189,34 @@ def optimize_items(root: Path, items: List[Dict[str, Any]], *, force: bool = Fal
             status[sid] = "fallback"
             log(f"[优化] {sid}：原提示词为空，跳过")
             continue
-        if not force and load_optimized(root, item) is not None:
+        if not force and load_optimized(root, item, strategy) is not None:
             status[sid] = "cached"
             log(f"[优化] {sid}：已有优化结果，跳过（想重做加 --video-optimize-force）")
             continue
         todo.append(item)
 
     def work(item: Dict[str, Any]) -> Tuple[str, str, List[str]]:
-        text, problems = optimize_one(str(item["prompt"]), chat_fn, rewrite_fn=rewrite_fn)
+        text, problems = optimize_one(str(item["prompt"]), chat_fn, rewrite_fn=rewrite_fn,
+                                      check=lambda o, t, _it=item: validator(_it, o, t))
         return str(item["id"]), text, problems
 
     for result, item in zip(parallel_map(work, todo, workers), todo):
         sid, original = str(item["id"]), str(item["prompt"])
         if isinstance(result, Exception):
             status[sid] = "fallback"
-            index[sid] = {"source_hash": prompt_hash(original), "ok": False, "problems": [str(result)]}
+            index[_key(strategy, sid)] = {"source_hash": prompt_hash(original), "ok": False, "problems": [str(result)]}
             log(f"[优化] {sid}：失败，提交时仍用原提示词：{result}")
             continue
         _sid, text, problems = result
         if problems:
             status[sid] = "fallback"
-            index[sid] = {"source_hash": prompt_hash(original), "ok": False, "problems": problems}
+            index[_key(strategy, sid)] = {"source_hash": prompt_hash(original), "ok": False, "problems": problems}
             log(f"[优化] {sid}：优化结果没通过检查，提交时仍用原提示词：{'；'.join(problems)}")
             continue
-        name = _safe(sid) + ".txt"
+        name = optimized_path(root, sid, strategy).name
         (out_dir / name).write_text(text + "\n", encoding="utf-8")
-        index[sid] = {"source_hash": prompt_hash(original), "optimized_hash": prompt_hash(text), "file": name, "ok": True}
+        index[_key(strategy, sid)] = {"source_hash": prompt_hash(original), "optimized_hash": prompt_hash(text), "file": name, "ok": True, "strategy": strategy}
         status[sid] = "optimized"
-        log(f"[优化] {sid}：完成（{len(original)} → {len(text)} 字，<Picture N> 全部保留）")
+        log(f"[优化:{strategy}] {sid}：完成（{len(original)} → {len(text)} 字）")
     _index_path(root).write_text(json.dumps(index, ensure_ascii=False, indent=1), encoding="utf-8")
     return status
