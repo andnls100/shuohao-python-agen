@@ -226,7 +226,7 @@ class GenerateTest(unittest.TestCase):
             cfg = {"base_url": self.base, "workflow_ref": str(REF_WF), "workflow_i2v": str(UI_WF), "max_refs": 6, "poll": 0.01, "max_wait": 10, "size_preset": "480p"}
             root = out / "video"
             root.mkdir()
-            vs._run_comfyui_queue(manifest, [{"name": "c", "adapter": "comfyui", "comfyui": cfg}], root, root / "video-manifest.json", set())
+            vs._run_comfyui_queue(manifest, [{"name": "c", "adapter": "comfyui", "comfyui": cfg}], root, root / "video-manifest.json", set(), None)
             events = _Handler.state["events"]
             self.assertEqual(events[:3], ["queue"] * 3)  # 3 个镜头先全部排队，再开始轮询
             self.assertIn("poll", events[3:])
@@ -234,6 +234,26 @@ class GenerateTest(unittest.TestCase):
             self.assertTrue(all((root / i["video_path"]).is_file() for i in items))
             self.assertTrue(all(i["last_frame_path"] is None for i in items))  # 不提取最后一帧
             self.assertEqual(len(_Handler.state["uploads"]), 1)  # 同一张参考图只上传一次
+
+    def test_queue_uses_cached_optimized_prompt_without_calling_model(self):
+        from zhipu_agent import video_prompt_optimizer as vpo
+        from zhipu_agent.stages import video as vs
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            out = td / "output"
+            (out / "art").mkdir(parents=True)
+            asset = {"kind": "character", "name": "n0", "path": str(_png(out / "art" / "a0.png").relative_to(out))}
+            item = {"id": "E01-01-C01", "duration_seconds": 5, "prompt": "原提示词 <Picture 1>", "reference_assets_all": [asset],
+                    "input_mode": "scene_or_assets", "state": "planned"}
+            root = out / "video"
+            root.mkdir()
+            vpo.optimize_items(root, [item], chat_fn=lambda m, **k: "English prompt <Picture 1>", log=lambda *_a: None)
+            cfg = {"base_url": self.base, "workflow_ref": str(REF_WF), "max_refs": 6, "poll": 0.01, "max_wait": 10, "size_preset": "480p"}
+            provider = {"name": "c", "key": "comfyui_h3", "adapter": "comfyui", "comfyui": cfg}
+            vs._run_comfyui_queue({"aspect_ratio": "16:9", "items": [item]}, [provider], root, root / "video-manifest.json", set(), None)  # settings=None：真调模型会炸
+            sent = _Handler.state["prompt"]["h3"]["inputs"]["prompt"]
+            self.assertIn("English prompt <Picture 1>", sent)
+            self.assertNotIn("原提示词", sent)
 
     def test_continuation_uses_i2v_with_previous_frame(self):
         with tempfile.TemporaryDirectory() as td:

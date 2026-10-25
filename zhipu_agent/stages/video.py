@@ -516,21 +516,22 @@ def _run_comfyui_queue(manifest: dict, providers: list, root: Path, manifest_pat
         try:
             submit_item = dict(item)
             model_label = (str(provider.get("key") or "") + " " + str(provider.get("name") or "") + " " + str(provider.get("VIDEO_API_MODEL") or "")).lower()
-            if provider.get("adapter") == "comfyui" and (
+            from .. import video_prompt_optimizer as vpo
+            optimized_prompt = vpo.load_optimized(root, item)  # 之前用 --video-optimize 优化过、且原提示词没变：直接读
+            if optimized_prompt:
+                print(f"[H3 prompt] 使用已优化的英文提示词：{root / vpo.DIR_NAME / (vpo._safe(item['id']) + '.txt')}", flush=True)
+            elif provider.get("adapter") == "comfyui" and (
                 str(provider.get("key") or "").lower() == "comfyui_h3"
                 or "minimax_h3" in model_label
                 or "minimax h3" in model_label
             ):
-                optimized_prompt = _optimize_h3_prompt(str(item.get("prompt") or ""), settings)
+                # 没有可用的优化结果：现场优化一次并存档；没通过检查就停止提交（不带着可能丢了 <Picture N> 的提示词去生成）
+                vpo.optimize_items(root, [item], force=True, rewrite_fn=lambda p: _optimize_h3_prompt(p, settings), log=print)
+                optimized_prompt = vpo.load_optimized(root, item)
+                if not optimized_prompt:
+                    raise ValueError("H3 英文提示词优化没通过检查（原因见上面的 [优化] 日志）；为防止 <Picture N> 或台词损坏，已停止提交。")
+            if optimized_prompt:
                 submit_item["prompt"] = optimized_prompt
-                prompt_dir = root / "prompts"
-                prompt_dir.mkdir(parents=True, exist_ok=True)
-                optimized_path = prompt_dir / (_safe(item["id"]) + ".minimax_h3.en.txt")
-                optimized_path.write_text(optimized_prompt + "\n", encoding="utf-8")
-                print(
-                    f"[H3 prompt] 已优化为英文并通过 <Picture N> / 台词保护校验：{optimized_path}",
-                    flush=True,
-                )
             handle = video_comfyui.submit(submit_item, manifest, provider["comfyui"], root.parent, root / "work", None, root / "videos" / _safe(item["id"]))
             item["state"] = "polling"; write_json(manifest_path, manifest)
             pending.append((item, handle))
@@ -551,7 +552,8 @@ def _run_comfyui_queue(manifest: dict, providers: list, root: Path, manifest_pat
 
 def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: bool = False, visual_style: str = "manju",
         visual_style_prompt: str = "", shots: Optional[list] = None, video_model: Optional[str] = None, frames_dir: Optional[Path] = None, flf: bool = False,
-        segments: Optional[list] = None, merge_seconds: float = 10, video_size: Optional[str] = None) -> Path:
+        segments: Optional[list] = None, merge_seconds: float = 10, video_size: Optional[str] = None,
+        optimize: bool = False, optimize_force: bool = False) -> Path:
     if protocol == "i2v": raise ValueError("旧的 --video-protocol i2v 已取消：视频阶段现在直接按连续镜头规则生成")
     root = ctx.out / "video"; root.mkdir(parents=True, exist_ok=True); path = artifact(ctx); manifest = _collect(ctx, eps, protocol, visual_style, shots, visual_style_prompt, merge_seconds)
     previous = {}
@@ -568,6 +570,11 @@ def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: 
     qc = ["# 视频人工质检清单", "", "- [ ] 角色外观、服装与参考图一致", "- [ ] 连续镜头首帧使用上一镜真实最后一帧", "- [ ] 新场景不错误继承上一镜最后一帧", "- [ ] 没有字幕、水印或多余人物", "- [ ] 时长和画幅符合交付要求", "", "## 镜头状态", ""]
     qc += [f"- [ ] {x['id']}：{x['state']} | {x['input_mode']} | {x['continuity_decision']}" for x in manifest["items"]]; (root / "qc-checklist.md").write_text("\n".join(qc) + "\n", encoding="utf-8")
     ctx.log(f"视频阶段：已生成 {len(manifest['items'])} 个镜头清单：{path}")
+    from .. import video_prompt_optimizer as vpo
+    if optimize or optimize_force:  # 只优化提示词（英文，<Picture N> 全部保留），结果存 output/video/prompts-optimized/
+        picked = [x for x in manifest["items"] if (not shots or x["id"] in {str(s).strip() for s in shots}) and (not segments or str(x.get("segmentId")) in {str(s).strip() for s in segments})]
+        status = vpo.optimize_items(root, picked, force=optimize_force, rewrite_fn=lambda p: _optimize_h3_prompt(p, ctx.settings), log=ctx.log)
+        ctx.log("视频提示词优化：" + "，".join(f"{k}={sum(1 for v in status.values() if v == k)}" for k in ("optimized", "cached", "fallback")) + f"；结果目录：{root / vpo.DIR_NAME}")
     if not submit: return path
     providers = _config(video_model)
     if video_size:  # 命令行 --video-size 覆盖 ComfyUI 的 size_preset
