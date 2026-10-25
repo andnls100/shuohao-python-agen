@@ -4,9 +4,7 @@ version: 2.0.0
 description: |
   给 AI 短剧出分镜：三层结构——段（一次视频生成，≤20 秒）→ 分镜（段内 4–8 秒的剪切，认领剧本节拍）
   → 分镜图（每切一张关键帧：主分镜图钉 0.00 秒，子分镜图钉各自切点）。
-  每段自带一条 MiniMax H3 视频提示词（官方口径默认英文、逐镜换行，promptLang 可切中文）：对齐指令和
-  [Shot k] 切点时刻由分镜结构推导、逐字对账，台词逐字进 <d> 块（写法规范已内化为
-  references/h3-prompt.md，不依赖外部 skill）。
+  每段直接生成所选模型的最终 Ref2V 视频提示词：MiniMax H3 使用 h3-prompt-writing（Ref2VA），Wan 3.0 使用 wan-3-0-ref2v-prompt-writing。禁止先生成 I2V/T2V 中间提示词再二次改写。
   产出 storyboard.json + Markdown + 单页评审报告（分镜节奏带 / 分集分镜表 / 生成批次单 /
   配音对齐单，含导出 JSON）。不出图——交付的是每格的画面提示词和它该挂哪些参考图。
   18 道质量门全部由脚本确定性检查（第 18 道 shot-recipe 可选：挂上 shot-recipes 卡库才查，不挂就明说跳过）；
@@ -51,7 +49,7 @@ metadata:
 | 单镜头 ≤ 15 秒 | AI 视频单段生成上限，长对话在这里被强制拆镜（`params.maxShotSeconds` 按模型改） |
 | 台词装得下 | 认领节拍的台词秒数 ≤ 镜头秒数——逐镜检查，不是拍脑袋 |
 | 分镜图提示词 + 镜头正文 | 分镜图提示词（`frame`，中文，直呼角色名）给图像模型配合设定图出图；镜头正文（`shot`，中文，通用身份）写这几秒发生什么。景别是枚举，中文景别词必须写进分镜图提示词 |
-| **H3 视频提示词（每段一条）** | MiniMax H3 的 I2VA 结构：固定对齐指令 + integrated_multimodal_description + overall_soundscape + non_diegetic_music。**认领节拍的台词逐字进 `<d>[Chinese] …</d>` 块**——对白、声景、配乐一段提示词全带上 |
+| **Ref2V 视频提示词（每段一条）** | 直接遵循所选模型的 Ref2V Skill：H3 Ref2VA 或 Wan 3.0 Ref2V；不经过 I2V/T2V 中间格式 |
 | **Seedance 视频提示词（每段一条，程序拼）** | 跟 H3 并列。由脚本按官方结构拼：参考图声明、段级走位、逐镜量化字段、台词 `{}`、音效 `<>`、配乐 `（）`、编号约束。模型只写每切的 `shot`，不写秒数、编号和图片引用 |
 | 构图量化字段 | 每段 `blocking`（谁在左谁在右、间距），每镜焦距／机位／构图／视线落点／焦点／稳定性——不出分镜图时，它们就是构图的全部来源 |
 | 生成批次单 | 同场景 + 同光照的镜头归一批，共用同一张环境参考图——AI 版的顺场表，脚本自动汇总 |
@@ -94,7 +92,7 @@ node {baseDir}/scripts/novel-storyboard.mjs seed <script.json> --eps 1-3 --aspec
 
 **每段的镜头正文照 `{baseDir}/references/shot-writing.md` 写**（协议无关：一切一个运镜、动作要做得完、台词逐字、声音分层、不写画风）。发给哪个视频服务，就再套哪份协议语法：MiniMax H3 见 `{baseDir}/references/h3-prompt.md`，Seedance 见 `{baseDir}/references/seedance-prompt.md`。
 
-**每段写一条 `h3Prompt`**，照 `{baseDir}/references/h3-prompt.md` 写（官方方法论的内化版，**不依赖任何外部 skill**）。官方口径默认英文（`promptLang` 可切中文），**每个镜头独立一行**。要点：首行对齐指令和 `[Shot k]` 切点时刻**由分镜秒数推导，一个字符都不许漂**（validate 逐字对账）；认领台词**逐字**进 `<d>[Chinese] …</d>`；每切的运镜词写进自己那一行；声景与配乐分进后两个字段——**声景也是动作指令，画面改了声景一起改**。
+**每段写一条最终 Ref2V 提示词**，保存在兼容字段 `h3Prompt`，并复制到下游字段 `videoPrompt`。分镜阶段按 `videoModel` 直接加载对应的外部 Skill：`comfyui_h3` 使用 `skills/h3-prompt-writing/SKILL.md`；`comfyui_wan` 使用 `skills/wan-3-0-ref2v-prompt-writing/SKILL.md`。不再加载本目录的旧 H3 提示词规范，不生成 I2V/T2V 中间格式，也不额外调用模型改写。最终提示词的参考图标签、对白格式和结构完全遵循选定 Ref2V Skill。
 
 **Seedance 提示词不用写**：`render` 报告的提示词面板和 `export --protocol seedance` 都会从上面这些字段现拼。视觉风格由调用方提交时附加，全局约束用 `--constraints <文件>` 给。
 
