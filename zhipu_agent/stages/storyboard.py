@@ -162,11 +162,7 @@ def _repair_ref2v_prompts(ctx: Context, doc: Dict[str, Any], path: Path, result:
             }, ensure_ascii=False, indent=2)
             fixed = ask_text(
                 system, user, ctx.settings,
-<<<<<<< HEAD
-                purpose=f"ref2v-prompt-repair:{sid}", max_tokens=200000,
-=======
                 purpose=f"ref2v-prompt-repair:{sid}",
->>>>>>> 078f4e8763a960e6dc3f4b9743e6765f828f74cc
             ).strip()
             if not fixed:
                 raise ValueError(f"{sid} Ref2V 局部修复返回空提示词")
