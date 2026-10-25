@@ -133,8 +133,9 @@ def _write_final_video_prompt(ctx: Context, segment: Dict[str, Any], video_model
                   "Output only the final prompt.")
     else:
         system = ("Write the final ComfyUI Wan 3.0 Reference-to-Video (Ref2V) prompt using this skill. "
-                  "Convert source <Picture N> references to @ImageN with the same number, preserve every <d>...</d> exactly, "
-                  "and describe visible actions, camera movement, lighting, and continuity. Do not invent story details. "
+                  "Convert source <Picture N> references to @ImageN with the same number. Preserve dialogue wording exactly, "
+                  "but remove MiniMax-only <d> markup and express the dialogue naturally in the prompt. "
+                  "Describe visible actions, camera movement, lighting, and continuity. Do not invent story details. "
                   "Output only the final prompt.")
     user = (f"Skill name: {skill_name}\n\nSkill rules:\n{rules}\n\n"
             f"Segment data:\n{json.dumps({k: segment.get(k) for k in ('id','duration','blocking','soundscape','music','cuts')}, ensure_ascii=False)}\n\n"
@@ -142,8 +143,13 @@ def _write_final_video_prompt(ctx: Context, segment: Dict[str, Any], video_model
     result = ask_text(system, user, ctx.settings).strip()
     if not result:
         raise ValueError(f"{segment.get('id', '?')} 的最终视频提示词为空")
-    if re.findall(r"<d>.*?</d>", source, flags=re.S) != re.findall(r"<d>.*?</d>", result, flags=re.S):
-        raise ValueError(f"{segment.get('id', '?')} 的最终提示词修改了 <d> 台词块")
+    source_dialogue = [re.sub(r"^\[[^\]]+\]\s*", "", d.strip()[3:-4]).strip()
+                       for d in re.findall(r"<d>.*?</d>", source, flags=re.S)]
+    if video_model == "comfyui_h3":
+        if re.findall(r"<d>.*?</d>", source, flags=re.S) != re.findall(r"<d>.*?</d>", result, flags=re.S):
+            raise ValueError(f"{segment.get('id', '?')} 的 H3 最终提示词修改了 <d> 台词块")
+    elif any(line and line not in result for line in source_dialogue):
+        raise ValueError(f"{segment.get('id', '?')} 的 Wan 最终提示词丢失或改写了对白原文")
     pics = {int(n) for n in re.findall(r"<Picture\s+(\d+)>", source)}
     if video_model == "comfyui_h3":
         if not pics.issubset({int(n) for n in re.findall(r"<Picture\s+(\d+)>", result)}):
