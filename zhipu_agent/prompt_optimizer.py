@@ -66,7 +66,7 @@ def optimize_episode(
     # 使用技能包原有规范作为优化依据，不覆盖源文件。
     system = build_system(
         skill,
-        ["shot-writing.md", "h3-prompt.md", "frame.md", "fight-enhancement.md"],
+        ["shot-writing.md", "frame.md", "fight-enhancement.md"],
         schema=True,
         extra=(
             "## 本次任务：优化现有分镜提示词，不重新创作分镜\n"
