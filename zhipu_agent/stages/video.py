@@ -101,9 +101,10 @@ def _optimize_h3_prompt(prompt: str, settings) -> str:
 def _prompt(segment: dict, protocol: str) -> str:
     h3 = str(segment.get("h3Prompt") or "").strip()
     if protocol == "h3":
-        if not h3:
-            raise ValueError(f"分段 {segment.get('id', '?')} 缺少 h3Prompt")
-        return h3
+        final_prompt = str(segment.get("videoPrompt") or "").strip()
+        if final_prompt:
+            return final_prompt
+        raise ValueError(f"分段 {segment.get('id', '?')} 缺少 videoPrompt；请重新运行 storyboard 阶段")
     if protocol != "seedance":
         raise ValueError(f"不支持的视频提示词协议：{protocol}")
     parts = []
