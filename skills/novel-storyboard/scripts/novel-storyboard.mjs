@@ -605,8 +605,9 @@ export function gateReport(board, ctx = {}) {
       const videoModel = board?.videoModel ?? seg?.videoModel ?? 'comfyui_h3';
       const isH3Ref2V = videoModel === 'comfyui_h3';
       const isWanRef2V = videoModel === 'comfyui_wan';
+      const useRef2VContract = Boolean(board?.videoPromptFormat === 'ref2v-v1' || board?.videoModel || seg?.videoModel);
       const ref2vScene = sEp ? sEp.scenes[seg?.sceneIndex - 1] : null;
-      if (isH3Ref2V || isWanRef2V) {
+      if (useRef2VContract && (isH3Ref2V || isWanRef2V)) {
         if (isH3Ref2V) {
           for (const section of ['subject_definitions', 'summary', 'retention_analysis', 'detailed_description', 'overall_soundscape', 'non_diegetic_music']) {
             if (!h3.includes(section)) bad.ref2v.push(`${sid} H3 Ref2VA 缺少章节 ${section}`);
