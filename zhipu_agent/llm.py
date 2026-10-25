@@ -118,6 +118,9 @@ def chat(
     kind: str = "text",
     temperature: Optional[float] = None,
     json_mode: Optional[bool] = None,
+    purpose: str = "unspecified",
+    reasoning_effort: Optional[str] = None,
+    max_tokens: Optional[int] = None,
 ) -> str:
     """发一轮对话，返回文本。
 
@@ -134,8 +137,11 @@ def chat(
         last = index == len(order) - 1
         try:
             # 后面还有备用平台时，在当前平台上少试几次就换，别把时间耗在一个坏掉的平台上
-            return _call_endpoint(ep, messages, s, temperature, json_mode,
-                                  retries=s.retries if last else min(s.retries, 1))
+            return _call_endpoint(
+                ep, messages, s, temperature, json_mode,
+                retries=s.retries if last else min(s.retries, 1),
+                purpose=purpose, reasoning_effort=reasoning_effort, max_tokens=max_tokens,
+            )
         except LLMTruncated:
             raise
         except Exception as exc:  # noqa: BLE001 - 换下一个平台
@@ -148,9 +154,19 @@ def chat(
     raise LLMError(f"所有 {len(failures)} 个平台都调用失败：\n  " + "\n  ".join(failures))
 
 
-def _call_endpoint(ep: Endpoint, messages, s: Settings, temperature, json_mode, *, retries: int) -> str:
+def _call_endpoint(
+    ep: Endpoint, messages, s: Settings, temperature, json_mode, *, retries: int,
+    purpose: str = "unspecified", reasoning_effort: Optional[str] = None,
+    max_tokens: Optional[int] = None,
+) -> str:
     if _BACKEND is not None:
-        return _BACKEND(list(messages), model=ep.model)
+        started = time.time()
+        try:
+            return _BACKEND(list(messages), model=ep.model)
+        finally:
+            _say(f"[llm-metrics] purpose={purpose} provider={ep.name} model={ep.model} "
+                 f"input_tokens=n/a output_tokens=n/a reasoning_tokens=n/a "
+                 f"elapsed={time.time() - started:.2f}s source=custom-backend")
 
     use_stream = s.stream if ep.stream is None else ep.stream
     params: dict = {
@@ -159,23 +175,36 @@ def _call_endpoint(ep: Endpoint, messages, s: Settings, temperature, json_mode, 
         "temperature": temperature if temperature is not None
         else (ep.temperature if ep.temperature is not None else s.temperature),
     }
-    max_tokens = ep.max_tokens if ep.max_tokens is not None else s.max_tokens
-    if max_tokens:
-        params["max_tokens"] = max_tokens
+    configured_max = ep.max_tokens if ep.max_tokens is not None else s.max_tokens
+    token_cap = max_tokens if max_tokens is not None else configured_max
+    if max_tokens is not None and configured_max is not None:
+        token_cap = min(max_tokens, configured_max)
+    if token_cap:
+        params["max_tokens"] = token_cap
+    effort = reasoning_effort if reasoning_effort is not None else (
+        ep.reasoning_effort if ep.reasoning_effort is not None else s.reasoning_effort
+    )
+    if effort:
+        # Deliberately opt-in: unsupported providers are unaffected unless configured.
+        params["reasoning_effort"] = effort
     use_json = json_mode if json_mode is not None else (s.json_mode if ep.json_mode is None else ep.json_mode)
+    if use_stream and ep.stream_usage:
+        params["stream_options"] = {"include_usage": True}
     if use_json:
         params["response_format"] = {"type": "json_object"}
 
     for attempt in range(retries + 1):
         started = time.time()
-        _say(f"调用 {ep.label()}（第 {attempt + 1} 次尝试，{'流式' if use_stream else '非流式'}）…")
+        _say(f"调用 {ep.label()}（用途={purpose}，第 {attempt + 1} 次尝试，{'流式' if use_stream else '非流式'}）…")
         try:
+            usage = None
             if use_stream:
-                text, finish = _stream_call(_client(ep, s), params, started)
+                text, finish, usage = _stream_call(_client(ep, s), params, started)
             else:
                 response = _client(ep, s).chat.completions.create(**params)
                 choice = response.choices[0]
                 text, finish = choice.message.content or "", choice.finish_reason
+                usage = getattr(response, "usage", None)
         except Exception as exc:  # noqa: BLE001 - 统一包装
             waited = time.time() - started
             if attempt < retries and _retryable(exc):
@@ -183,9 +212,18 @@ def _call_endpoint(ep: Endpoint, messages, s: Settings, temperature, json_mode, 
                 _say(f"⚠ {type(exc).__name__}（已等 {waited:.0f}s）：{str(exc)[:200]}；{pause}s 后重试")
                 time.sleep(pause)
                 continue
+            _say(f"[llm-metrics] purpose={purpose} provider={ep.name} model={ep.model} "
+                 f"input_tokens=n/a output_tokens=n/a reasoning_tokens=n/a "
+                 f"elapsed={time.time() - started:.2f}s status=error")
             raise LLMError(f"{type(exc).__name__}: {exc}") from exc
 
-        _say(f"返回完毕：{len(text)} 字，用时 {time.time() - started:.0f}s，finish_reason={finish}")
+        elapsed = time.time() - started
+        counts = _usage_counts(usage)
+        _say(f"返回完毕：{len(text)} 字，用时 {elapsed:.0f}s，finish_reason={finish}")
+        _say(f"[llm-metrics] purpose={purpose} provider={ep.name} model={ep.model} "
+             f"input_tokens={counts['input_tokens']} output_tokens={counts['output_tokens']} "
+             f"reasoning_tokens={counts['reasoning_tokens']} elapsed={elapsed:.2f}s "
+             f"finish_reason={finish}")
         if finish == "length":
             raise LLMTruncated(
                 "模型输出被长度上限截断。可以设置环境变量 ZHIPU_MAX_TOKENS（或 models.json 里该项的 max_tokens）"
@@ -219,14 +257,33 @@ def _say(message: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}]   [llm] {message}", file=sys.stderr, flush=True)
 
 
+def _usage_counts(usage) -> dict:
+    """提取 OpenAI 兼容 usage；服务商未返回时明确记录 n/a，不猜测 Token 数。"""
+    if usage is None:
+        return {"input_tokens": "n/a", "output_tokens": "n/a", "reasoning_tokens": "n/a"}
+    prompt = getattr(usage, "prompt_tokens", None)
+    completion = getattr(usage, "completion_tokens", None)
+    details = getattr(usage, "completion_tokens_details", None)
+    reasoning = getattr(details, "reasoning_tokens", None) if details is not None else None
+    return {
+        "input_tokens": prompt if prompt is not None else "n/a",
+        "output_tokens": completion if completion is not None else "n/a",
+        "reasoning_tokens": reasoning if reasoning is not None else "n/a",
+    }
+
+
 def _stream_call(client, params: dict, started: float):
-    """流式调用：边收边累积，每隔约 15 秒报一次进度（思考型模型会先吐一段思考内容，也算进度）。"""
+    """流式调用；支持时读取 usage chunk，同时统计 reasoning_content 的字符数用于进度展示。"""
     stream = client.chat.completions.create(stream=True, **params)
     parts: list = []
     thought = 0
     finish = None
+    usage = None
     last_report = time.time()
     for chunk in stream:
+        chunk_usage = getattr(chunk, "usage", None)
+        if chunk_usage is not None:
+            usage = chunk_usage
         if not getattr(chunk, "choices", None):
             continue
         choice = chunk.choices[0]
@@ -243,7 +300,7 @@ def _stream_call(client, params: dict, started: float):
             got = sum(len(x) for x in parts)
             _say(f"生成中…已 {time.time() - started:.0f}s，已收到 {got} 字" + (f"（另有思考 {thought} 字）" if thought else ""))
             last_report = time.time()
-    return "".join(parts), finish
+    return "".join(parts), finish, usage
 
 
 def extract_json(text: str) -> Any:
@@ -284,8 +341,15 @@ def image_content(text: str, images: Sequence[Path]) -> list:
 class Conversation:
     """带历史的对话。校验失败时，报错作为下一轮 user 消息接在后面。"""
 
-    def __init__(self, system: str, settings: Optional[Settings] = None):
+    def __init__(
+        self, system: str, settings: Optional[Settings] = None, *,
+        purpose: str = "unspecified", reasoning_effort: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+    ):
         self.settings = settings or load_settings()
+        self.purpose = purpose
+        self.reasoning_effort = reasoning_effort
+        self.max_tokens = max_tokens
         self.messages: list = [{"role": "system", "content": system}]
 
     @property
@@ -296,7 +360,10 @@ class Conversation:
         content: Any = image_content(user, images) if images else user
         self.messages.append({"role": "user", "content": content})
         try:
-            reply = chat(self.messages, self.settings, kind=kind)
+            reply = chat(
+                self.messages, self.settings, kind=kind, purpose=self.purpose,
+                reasoning_effort=self.reasoning_effort, max_tokens=self.max_tokens,
+            )
         except Exception:
             self.messages.pop()  # 失败的这一轮不留在历史里
             raise
@@ -325,6 +392,12 @@ class Conversation:
         raise JSONExtractError("unreachable")  # pragma: no cover
 
 
-def ask_text(system: str, user: str, settings: Optional[Settings] = None) -> str:
-    """一问一答，返回纯文本。"""
-    return Conversation(system, settings).ask(user).strip()
+def ask_text(
+    system: str, user: str, settings: Optional[Settings] = None, *,
+    purpose: str = "unspecified", reasoning_effort: Optional[str] = None,
+    max_tokens: Optional[int] = None,
+) -> str:
+    """一问一答，返回纯文本；purpose 会写入每次模型调用的统计日志。"""
+    return Conversation(
+        system, settings, purpose=purpose, reasoning_effort=reasoning_effort, max_tokens=max_tokens,
+    ).ask(user).strip()
