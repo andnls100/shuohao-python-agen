@@ -124,7 +124,6 @@ class Settings:
     direct_chars: int          # 原文不超过这个字数就整本直接喂给模型，跳过分卷摘要
     stream: bool               # 流式调用：边生成边收，能看到进度，也避免长时间无响应被断开
     json_mode: bool            # 是否传 response_format=json_object（部分模型不支持，默认关）
-    reasoning_effort: str = ""  # 可选全局默认；仅明确配置时传参，none/low/medium/high 由服务商决定
     vision_base_url: str = ""  # 视觉模型单独的地址；空 = 和文本模型同一个平台
     vision_api_key: str = ""   # 视觉模型单独的 Key；空 = 和文本模型同一个
     text_pool: Tuple[Endpoint, ...] = ()    # 来自 models.json；空 = 用上面的单平台字段
@@ -132,6 +131,7 @@ class Settings:
     strategy: str = "failover"              # failover：按顺序，前面的出错才用后面的；round_robin：轮流
     cooldown: float = 120.0                 # 出错的平台，这么多秒内排到最后再试
     models_file: str = ""                   # 实际读取的 models.json 路径（没有则空）
+    reasoning_effort: str = ""  # 可选全局默认；仅明确配置时传参，none/low/medium/high 由服务商决定
 
     # -- 号池：统一从这里取，调用方不用关心配置来自哪种方式
     def text_endpoints(self) -> Tuple[Endpoint, ...]:
