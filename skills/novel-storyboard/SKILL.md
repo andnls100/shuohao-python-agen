@@ -8,7 +8,7 @@ description: |
   产出 storyboard.json + Markdown + 单页评审报告（分镜节奏带 / 分集分镜表 / 生成批次单 /
   配音对齐单，含导出 JSON）。不出图——交付的是每格的画面提示词和它该挂哪些参考图。
   18 道质量门全部由脚本确定性检查（第 18 道 shot-recipe 可选：挂上 shot-recipes 卡库才查，不挂就明说跳过）；
-  export 一键导出 H3 投产包（每段提示词 + 按 Picture 序的分镜图清单）。零依赖、零 API key，用当前会话额度。
+  export 一键导出 H3 投产包（每段最终 Ref2V 提示词 + 按模型参考标签排序的分镜图清单）。零依赖、零 API key，用当前会话额度。
   Use when asked to 分镜、出分镜、镜头表、切镜、storyboard for AI short drama。
 allowed-tools:
   - Read
@@ -90,7 +90,7 @@ node {baseDir}/scripts/novel-storyboard.mjs seed <script.json> --eps 1-3 --aspec
 
 流程：**先按剧情单元分段**（每段 9–20 秒、不跨场），**段内切 4–8 秒的分镜**（对话正反打、关键动作插入特写、进场三件套——切镜语法都在 storyboard-pass.md），每切写一条分镜图提示词（中文，直呼角色名）、一段镜头正文 `shot`（中文，通用身份）和六个构图字段；每段写 `blocking`、`soundscape`，有配乐再写 `music`。全部分镜图与下游生成图必须保持顶层 `aspectRatio` 指定的同一画幅。
 
-**每段的镜头正文照 `{baseDir}/references/shot-writing.md` 写**（协议无关：一切一个运镜、动作要做得完、台词逐字、声音分层、不写画风）。发给哪个视频服务，就再套哪份协议语法：MiniMax H3 见 `{baseDir}/references/h3-prompt.md`，Seedance 见 `{baseDir}/references/seedance-prompt.md`。
+**每段的镜头正文照 `{baseDir}/references/shot-writing.md` 写**（协议无关：一切一个运镜、动作要做得完、台词逐字、声音分层、不写画风）。发给哪个视频服务，就再套哪份协议语法：MiniMax H3 uses `skills/h3-prompt-writing/SKILL.md`，Seedance 见 the Seedance protocol instructions。
 
 **每段写一条最终 Ref2V 提示词**，保存在兼容字段 `h3Prompt`，并复制到下游字段 `videoPrompt`。分镜阶段按 `videoModel` 直接加载对应的外部 Skill：`comfyui_h3` 使用 `skills/h3-prompt-writing/SKILL.md`；`comfyui_wan` 使用 `skills/wan-3-0-ref2v-prompt-writing/SKILL.md`。不再加载本目录的旧 H3 提示词规范，不生成 I2V/T2V 中间格式，也不额外调用模型改写。最终提示词的参考图标签、对白格式和结构完全遵循选定 Ref2V Skill。
 
