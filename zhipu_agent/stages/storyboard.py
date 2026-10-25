@@ -345,7 +345,7 @@ def run(
         sk, PASSES,
         extra=(language_contract + "\n\n## Selected Ref2V skill (rules for h3Prompt field only)\n" + ref2v_skill
                + "\n\n## Outer response contract\nThe selected skill output-format instructions apply only to the h3Prompt field. "
-               "Return the complete requested JSON object {\\"ep\\": N, \\"segments\\": [...]}; never return a standalone prompt outside JSON."),
+               "Return the complete requested JSON object {\"ep\": N, \"segments\": [...]}; never return a standalone prompt outside JSON."),
     )
 
     for group in batches(todo, BATCH):
