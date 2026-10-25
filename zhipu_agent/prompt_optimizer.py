@@ -114,7 +114,7 @@ def optimize_episode(
             "aspectRatio": source.get("aspectRatio", "16:9"),
             "segment": segment,
         }
-        response = Conversation(system, settings).ask_json(
+        response = Conversation(system, settings, purpose="video-prompt-optimizer").ask_json(
             json.dumps(prompt, ensure_ascii=False, indent=2)
         )
         if not isinstance(response, dict):
