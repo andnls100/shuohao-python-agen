@@ -73,6 +73,61 @@ def _client(ep: Endpoint, settings: Settings):
     return _clients[key]
 
 
+def _key_hint(api_key: str) -> str:
+    """只给诊断用的 Key 指纹：长度、首尾几位、常见的粘贴问题。绝不输出完整 Key。"""
+    key = api_key or ""
+    if not key:
+        return "（空）"
+    stripped = key.strip()
+    shown = f"{stripped[:4]}…{stripped[-2:]}" if len(stripped) > 8 else "（太短，不显示）"
+    notes = []
+    if key != key.strip():
+        notes.append("首尾有空白或换行")
+    if key.strip() and (key.strip()[0] in "\"'" or key.strip()[-1] in "\"'"):
+        notes.append("首尾带引号")
+    if key.lower().startswith("bearer "):
+        notes.append("以 Bearer 开头")
+    if any(ord(c) > 127 for c in key):
+        notes.append("含非 ASCII 字符")
+    return f"{shown}，共 {len(key)} 位" + (f"，注意：{'、'.join(notes)}" if notes else "")
+
+
+def describe_error(ep: Endpoint, exc: BaseException, limit: int = 4000) -> str:
+    """把一次调用失败的完整信息排成多行：平台、模型、地址、状态码、请求 ID、服务商返回的原始响应体、Key 指纹。"""
+    orig = exc.__cause__ if isinstance(exc, LLMError) and exc.__cause__ is not None else exc
+    response = getattr(orig, "response", None)
+    lines = [
+        f"平台：{ep.name}　模型：{ep.model}",
+        f"地址：{ep.base_url}",
+        f"异常：{type(orig).__module__}.{type(orig).__name__}",
+    ]
+    status = getattr(orig, "status_code", None) or getattr(response, "status_code", None)
+    if status is not None:
+        lines.append(f"HTTP 状态码：{status}")
+    request = getattr(orig, "request", None) or getattr(response, "request", None)
+    if request is not None:
+        lines.append(f"请求：{getattr(request, 'method', '?')} {getattr(request, 'url', '?')}")
+    request_id = getattr(orig, "request_id", None)
+    if not request_id and response is not None:
+        headers = getattr(response, "headers", None) or {}
+        request_id = headers.get("x-request-id") or headers.get("request-id") or headers.get("x-trace-id")
+    if request_id:
+        lines.append(f"请求 ID：{request_id}")
+    body = getattr(orig, "body", None)
+    if body is None and response is not None:
+        try:
+            body = response.text
+        except Exception:  # noqa: BLE001
+            body = None
+    if body is not None:
+        text = body if isinstance(body, str) else json.dumps(body, ensure_ascii=False, default=str)
+        lines.append("服务商返回：" + (text if len(text) <= limit else text[:limit] + f"…（共 {len(text)} 字，已截断）"))
+    lines.append(f"错误信息：{orig}")
+    if status == 401 or "authentication" in type(orig).__name__.lower():
+        lines.append(f"Key 指纹：{_key_hint(ep.api_key)}（401 = Key 无效/过期/填错平台，请核对 models.json 或 .env 里这一项的 Key 与 base_url 是否属于同一平台）")
+    return "\n".join("    " + line for line in lines)
+
+
 def _retryable(exc: Exception) -> bool:
     status = getattr(exc, "status_code", None)
     if status is not None:
@@ -145,10 +200,9 @@ def chat(
         except LLMTruncated:
             raise
         except Exception as exc:  # noqa: BLE001 - 换下一个平台
-            failures.append(f"{ep.label()}：{type(exc).__name__}: {str(exc)[:300]}")
+            failures.append(f"{ep.label()}：{type(exc).__name__}: {str(exc)[:2000]}")
             _cool_down(ep, s, exc)
-            if not last:
-                _say(f"⚠ {ep.label()} 失败，改用下一个平台：{str(exc)[:160]}")
+            _say(f"⚠ {ep.label()} 失败" + ("，改用下一个平台" if not last else "，没有可切换的平台了") + "；详细信息：\n" + describe_error(ep, exc))
     if len(failures) == 1:
         raise LLMError(f"模型调用失败：{failures[0]}")
     raise LLMError(f"所有 {len(failures)} 个平台都调用失败：\n  " + "\n  ".join(failures))
