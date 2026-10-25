@@ -260,7 +260,7 @@ def ping_all(settings: Optional[Settings] = None) -> list:
         for ep in s.endpoints(kind):
             started = time.time()
             try:
-                reply = _call_endpoint(ep, [{"role": "user", "content": "只回复两个字母：OK"}], s, None, None, retries=0)
+                reply = _call_endpoint(ep, [{"role": "user", "content": "只回复两个字母：OK"}], s, None, None, retries=0, purpose="health-check")
                 results.append((kind, ep.label(), True, reply.strip()[:40], time.time() - started))
             except Exception as exc:  # noqa: BLE001
                 results.append((kind, ep.label(), False, f"{type(exc).__name__}: {str(exc)[:200]}", time.time() - started))
