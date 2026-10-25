@@ -613,6 +613,15 @@ export function gateReport(board, ctx = {}) {
           for (const section of ['subject_definitions', 'summary', 'retention_analysis', 'detailed_description', 'overall_soundscape', 'non_diegetic_music']) {
             if (!h3.includes(section)) bad.ref2v.push(`${sid} H3 Ref2VA 缺少章节 ${section}`);
           }
+          const detailStart = h3.indexOf('detailed_description');
+          const soundStart = h3.indexOf('overall_soundscape', detailStart + 1);
+          const detailBody = detailStart >= 0 ? h3.slice(detailStart, soundStart > detailStart ? soundStart : undefined) : '';
+          const detailPositions = Array.from({ length: cuts.length }, (_, i) => detailBody.indexOf(`<Picture ${i + 1}>`));
+          if (detailPositions.some(pos => pos < 0)) {
+            bad.ref2v.push(`${sid} detailed_description 未逐镜引用全部 <Picture N>`);
+          } else if (detailPositions.some((pos, i) => i > 0 && pos <= detailPositions[i - 1])) {
+            bad.ref2v.push(`${sid} detailed_description 中的镜头参考图顺序错乱`);
+          }
           if (/@Image\s*\d+/i.test(h3)) bad.ref2v.push(`${sid} H3 提示词误用了 Wan 的 @ImageN 标记`);
         } else if (/<(?:Subject|Picture|Video|Audio)\s+\d+>/i.test(h3)) {
           bad.ref2v.push(`${sid} Wan Ref2V 提示词包含 MiniMax 专用标签`);
