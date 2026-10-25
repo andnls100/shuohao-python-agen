@@ -341,7 +341,12 @@ def run(
         "prop IDs (for example P01), never display names. sceneIndex and beats must follow the supplied seedScenes "
         "and script exactly. Do not invent or substitute IDs."
     )
-    system = build_system(sk, PASSES, extra=language_contract + "\n\n## Selected Ref2V skill\n" + ref2v_skill)
+    system = build_system(
+        sk, PASSES,
+        extra=(language_contract + "\n\n## Selected Ref2V skill (rules for h3Prompt field only)\n" + ref2v_skill
+               + "\n\n## Outer response contract\nThe selected skill output-format instructions apply only to the h3Prompt field. "
+               "Return the complete requested JSON object {\\"ep\\": N, \\"segments\\": [...]}; never return a standalone prompt outside JSON."),
+    )
 
     for group in batches(todo, BATCH):
         seed = ctx.node_json(sk, ["seed", script_path, "--eps", f"{group[0]}-{group[-1]}", "--aspect", aspect])
