@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from ..skill_loader import build_system
 from ..visual_style import visual_style_instruction
-from ..llm import Conversation
+from ..llm import Conversation, ask_text
 from ..validator import Result
 from .base import (
     Context, Item, batches, compact, ep_tokens, read_json, run_items, write_json,
@@ -105,6 +105,57 @@ def _h3_protocol_needs_repair(h3: str, cuts: List[Any], prompt_lang: str) -> boo
 
 def artifact(ctx: Context) -> Path:
     return ctx.artifact("storyboard")
+
+
+def _write_final_video_prompt(ctx: Context, segment: Dict[str, Any], video_model: str) -> str:
+    """Write the final model-specific Ref2V prompt during storyboard generation."""
+    import re
+    root = Path(__file__).resolve().parents[2] / "skills"
+    if video_model == "comfyui_h3":
+        skill_path = root / "h3-prompt-writing" / "references" / "ref-en.txt"
+        skill_name = "MiniMax H3 official Ref2VA"
+    elif video_model == "comfyui_wan":
+        skill_path = root / "wan-3-0-ref2v-prompt-writing" / "SKILL.md"
+        skill_name = "ComfyUI Wan 3.0 Ref2V"
+    else:
+        raise ValueError(f"不支持的分镜视频模型：{video_model}")
+    if not skill_path.is_file():
+        raise FileNotFoundError(f"缺少提示词 Skill：{skill_path}")
+    rules = skill_path.read_text(encoding="utf-8")
+    source = str(segment.get("h3Prompt") or "").strip()
+    if not source:
+        raise ValueError(f"{segment.get('id', '?')} 缺少 h3Prompt")
+    if video_model == "comfyui_h3":
+        system = ("Write the final MiniMax H3 Full-Reference Ref2VA prompt for ComfyUI using the official skill. "
+                  "Output all six sections in order: subject_definitions, summary, retention_analysis, "
+                  "detailed_description, overall_soundscape, non_diegetic_music. English outside <d> blocks. "
+                  "Preserve each <d>...</d> exactly and keep every <Picture N> reference number. Do not invent story details. "
+                  "Output only the final prompt.")
+    else:
+        system = ("Write the final ComfyUI Wan 3.0 Reference-to-Video (Ref2V) prompt using this skill. "
+                  "Convert source <Picture N> references to @ImageN with the same number, preserve every <d>...</d> exactly, "
+                  "and describe visible actions, camera movement, lighting, and continuity. Do not invent story details. "
+                  "Output only the final prompt.")
+    user = (f"Skill name: {skill_name}\n\nSkill rules:\n{rules}\n\n"
+            f"Segment data:\n{json.dumps({k: segment.get(k) for k in ('id','duration','blocking','soundscape','music','cuts')}, ensure_ascii=False)}\n\n"
+            f"Source prompt:\n{source}")
+    result = ask_text(system, user, ctx.settings).strip()
+    if not result:
+        raise ValueError(f"{segment.get('id', '?')} 的最终视频提示词为空")
+    if re.findall(r"<d>.*?</d>", source, flags=re.S) != re.findall(r"<d>.*?</d>", result, flags=re.S):
+        raise ValueError(f"{segment.get('id', '?')} 的最终提示词修改了 <d> 台词块")
+    pics = {int(n) for n in re.findall(r"<Picture\s+(\d+)>", source)}
+    if video_model == "comfyui_h3":
+        if not pics.issubset({int(n) for n in re.findall(r"<Picture\s+(\d+)>", result)}):
+            raise ValueError(f"{segment.get('id', '?')} 的 H3 提示词缺少参考图标签")
+        if any(k not in result for k in ("subject_definitions", "summary", "retention_analysis", "detailed_description", "overall_soundscape", "non_diegetic_music")):
+            raise ValueError(f"{segment.get('id', '?')} 的 H3 提示词未遵守官方六段结构")
+    else:
+        if not pics.issubset({int(n) for n in re.findall(r"@Image(\d+)", result)}):
+            raise ValueError(f"{segment.get('id', '?')} 的 Wan 提示词缺少 @ImageN 参考标签")
+        if "<Picture " in result:
+            raise ValueError(f"{segment.get('id', '?')} 的 Wan 提示词仍包含 MiniMax 标签")
+    return result
 
 
 def _refs(ctx: Context, *, names: bool = True) -> List[Any]:
@@ -248,7 +299,10 @@ def run(
     visual_style: str = "manju",
     fight_enhancement: str = "auto",
     h3_gates: bool = True,
+    video_model: str = "comfyui_h3",
 ) -> Path:
+    if video_model not in {"comfyui_h3", "comfyui_wan"}:
+        raise ValueError("--video-model 只支持 comfyui_h3 或 comfyui_wan")
     if fight_enhancement not in {"off", "auto", "enhanced"}:
         raise ValueError("fight_enhancement 只能是 off、auto 或 enhanced")
     style_hint = visual_style_instruction(visual_style)
@@ -284,10 +338,11 @@ def run(
         outline_props = {p["id"]: p for p in o.get("props", [])}
     blocking = _blocking_lines(ctx)
 
-    main: Dict[str, Any] = {"source": ctx.title, "aspectRatio": aspect, "promptLang": prompt_lang, "episodes": []}
+    main: Dict[str, Any] = {"source": ctx.title, "aspectRatio": aspect, "promptLang": prompt_lang, "videoModel": video_model, "episodes": []}
     if path.is_file() and not ctx.force:
         main = read_json(path)
         main.setdefault("promptLang", prompt_lang)
+    main["videoModel"] = video_model
     if _params_override(h3_gates):
         main["params"] = {**(main.get("params") or {}), **_params_override(h3_gates)}
     # Existing merged output can also contain stale IDs from older runs. Repair them
@@ -756,6 +811,18 @@ def run(
     result = _repair_existing_h3(ctx, main, path, prompt_lang)
     if not result.ok:
         ctx.log("⚠ 全剧校验未通过：\n" + result.text)
+
+    # Final model-specific prompt is authored here and persisted; video stage must not rewrite it.
+    for episode in main.get("episodes", []):
+        for segment in episode.get("segments", []):
+            if not isinstance(segment, dict):
+                continue
+            if segment.get("videoPrompt") and segment.get("videoModel") == video_model:
+                continue
+            segment["videoPrompt"] = _write_final_video_prompt(ctx, segment, video_model)
+            segment["videoModel"] = video_model
+            ctx.log(f"[storyboard] {segment.get('id')}：已写入 {video_model} 最终 Ref2V 提示词")
+    write_json(path, main)
 
     refs = _refs(ctx)
     ctx.render_to(sk, ["render", path, "--md", *refs], sb_dir / f"{path.stem}.md", cwd=sb_dir)
