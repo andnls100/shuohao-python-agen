@@ -79,7 +79,7 @@
   "step_count": {
     "class_type": "FirstInt",
     "inputs": {
-      "fallback": 4
+      "fallback": 18
     },
     "_meta": {
       "title": "Regular Video Workflow | Shared Turbo Step Count"
