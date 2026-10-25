@@ -809,12 +809,12 @@ export function gateReport(board, ctx = {}) {
   add('crowd', `单个分镜同框 ≤ ${params.maxOnScreen} 人，超了必须带拆解说明`, bad.crowd.length === 0, bad.crowd.join('；'));
   add('segment-id', '段号 E01-01 格式、按顺序连号', bad.id.length === 0, bad.id.join('；'));
   add('size-phrase', '景别中文词写进分镜图提示词', bad.size.length === 0, bad.size.join('；'));
-  add('camera-phrase', '运镜用 H3 官方词表，且出现在自己的 [Shot k] 段落里', bad.camera.length === 0, bad.camera.join('；'));
+  add('camera-phrase', '运镜词与当前视频提示词协议匹配', !h3On || bad.camera.length === 0, h3On ? bad.camera.join('；') : SKIP_H3);
   add('h3-structure', 'H3 首行对齐指令由分镜结构推导逐字对账，切点时刻逐个对', !h3On || (eps.length > 0 && bad.h3s.length === 0), bad.h3s.join('；'));
   add('h3-dialogue', '认领节拍的台词逐字进 H3 提示词的 <d> 块', !h3On || bad.h3d.length === 0, script ? bad.h3d.join('；') : SKIP_SCRIPT);
   add('h3-lang', `H3 提示词语言与设定一致（promptLang=${promptLang}，正文${promptLang === 'en' ? '全英文' : '中文'}、骨架 token 官方英文格式）`, !h3On || bad.h3e.length === 0, bad.h3e.join('；'));
   add('frame-prompt', '分镜图提示词中文且非空', bad.frame.length === 0, bad.frame.join('；'));
-  add('prompt-no-names', '视频提示词不含角色名（H3 正文与 Seedance 镜头正文；分镜图提示词直呼其名放行）', params.nameGate === false || bad.names.length === 0, banned.length ? bad.names.join('；') : SKIP_NAMES);
+  add('prompt-no-names', '视频提示词按当前协议控制角色名', !h3On || params.nameGate === false || bad.names.length === 0, h3On && banned.length ? bad.names.join('；') : SKIP_NAMES);
   add('composition', '构图量化字段齐全（每段 blocking；每镜焦距／机位／构图／视线落点／焦点／稳定性）', eps.length > 0 && bad.comp.length === 0, bad.comp.join('；'));
   add('seedance-shot', 'Seedance 镜头正文中文非空，不写时间、镜头编号、图片引用和协议符号', eps.length > 0 && bad.sd.length === 0, bad.sd.join('；'));
   add('refs', '场次／人物／道具对账剧本', bad.refs.length === 0, script ? bad.refs.join('；') : SKIP_SCRIPT);
