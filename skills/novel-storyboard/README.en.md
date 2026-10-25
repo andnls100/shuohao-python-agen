@@ -14,8 +14,7 @@ segment = one video-generation call, ≤ 15s, never crosses scenes
 ```
 
 - **A dialogue's shot–reverse-shot lives inside one segment, one generation** — wide, close on A, close on B are separate 2–5s cuts, each composition controlled by its own storyboard frame instead of gambling on prose
-- **The alignment instruction is derived, not written** — the multi-picture line (`Picture 2 aligns with the 3.00-second mark…`) and every `[Shot k] At 00:0X.XXX` cut time are computed from cut durations, and validate audits them **character for character**: change a duration without updating the prompt and it blocks
-- **Prompts follow the official spec: English by default, one shot per line** — each shot on its own line with its cut time; dialogue, lyrics and on-screen text keep their original language per the official rules (`<d>[Chinese] …</d>` verbatim). `promptLang: 'zh'` switches the whole prompt to Chinese. The writing spec is internalized as `references/h3-prompt.md` — **this skill is self-contained and depends on no external skill**
+- **Final video prompts use the selected Ref2V skill directly** — H3 uses its Ref2VA skill and Wan 3.0 uses its Ref2V skill; no intermediate I2V/T2V prompt or second LLM rewrite
 - **Frames are asset composition, not invention** — every frame carries a reference manifest: the scene / character / prop sheets it must be built from. **This skill does not generate the images**; the prompt and that manifest are the deliverable
 
 Outputs `storyboard.json`, a Markdown shot list, and a self-contained `storyboard-report.html`:
