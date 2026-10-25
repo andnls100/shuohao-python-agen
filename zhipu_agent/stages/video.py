@@ -581,19 +581,6 @@ def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: 
     qc = ["# 视频人工质检清单", "", "- [ ] 角色外观、服装与参考图一致", "- [ ] 连续镜头首帧使用上一镜真实最后一帧", "- [ ] 新场景不错误继承上一镜最后一帧", "- [ ] 没有字幕、水印或多余人物", "- [ ] 时长和画幅符合交付要求", "", "## 镜头状态", ""]
     qc += [f"- [ ] {x['id']}：{x['state']} | {x['input_mode']} | {x['continuity_decision']}" for x in manifest["items"]]; (root / "qc-checklist.md").write_text("\n".join(qc) + "\n", encoding="utf-8")
     ctx.log(f"视频阶段：已生成 {len(manifest['items'])} 个镜头清单：{path}")
-    from .. import video_prompt_optimizer as vpo
-    if optimize or optimize_force:  # 只优化提示词；每个模型用自己的策略，结果按策略名分开存到 output/video/prompts-optimized/
-        from .. import video_prompt_strategies as vps
-        picked = [x for x in manifest["items"] if (not shots or x["id"] in {str(s).strip() for s in shots}) and (not segments or str(x.get("segmentId")) in {str(s).strip() for s in segments})]
-        seen = set()
-        for provider in _config(video_model):
-            strategy = vps.strategy_for(provider)
-            if strategy in seen: continue
-            seen.add(strategy)
-            ctx.log(f"视频提示词优化：模型 {provider.get('key') or provider['name']} → 策略 {strategy}")
-            status = vpo.optimize_items(root, picked, force=optimize_force, strategy=strategy, rewrite_fn=vps.rewrite_fn_for(provider, ctx.settings, manifest), log=ctx.log)
-            ctx.log("视频提示词优化：" + "，".join(f"{k}={sum(1 for v in status.values() if v == k)}" for k in ("optimized", "cached", "fallback")) + f"；结果目录：{root / vpo.DIR_NAME}")
-            ctx.log(f"下一步提交：{vps.next_command(provider, eps)}")
     if not submit: return path
     providers = _config(video_model)
     if video_size:  # 命令行 --video-size 覆盖 ComfyUI 的 size_preset
