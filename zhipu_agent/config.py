@@ -97,6 +97,8 @@ class Endpoint:
     timeout: Optional[float] = None
     stream: Optional[bool] = None
     json_mode: Optional[bool] = None
+    reasoning_effort: Optional[str] = None  # 仅在该端点明确配置时传给服务商
+    stream_usage: Optional[bool] = None     # 流式接口是否请求 usage chunk
 
     def label(self) -> str:
         return f"{self.name}（{self.model}）"
@@ -122,6 +124,7 @@ class Settings:
     direct_chars: int          # 原文不超过这个字数就整本直接喂给模型，跳过分卷摘要
     stream: bool               # 流式调用：边生成边收，能看到进度，也避免长时间无响应被断开
     json_mode: bool            # 是否传 response_format=json_object（部分模型不支持，默认关）
+    reasoning_effort: str = ""  # 可选全局默认；仅明确配置时传参，none/low/medium/high 由服务商决定
     vision_base_url: str = ""  # 视觉模型单独的地址；空 = 和文本模型同一个平台
     vision_api_key: str = ""   # 视觉模型单独的 Key；空 = 和文本模型同一个
     text_pool: Tuple[Endpoint, ...] = ()    # 来自 models.json；空 = 用上面的单平台字段
@@ -235,6 +238,9 @@ def _endpoints_from(entry: Any, where: str, index: int) -> List[Endpoint]:
         base_url=base_url, model=model,
         temperature=num("temperature", float), max_tokens=num("max_tokens", int),
         timeout=num("timeout", float), stream=num("stream", bool), json_mode=num("json_mode", bool),
+        reasoning_effort=(str(entry.get("reasoning_effort")).strip().lower()
+                          if entry.get("reasoning_effort") is not None else None),
+        stream_usage=num("stream_usage", bool),
     )
     if len(keys) == 1:
         return [Endpoint(name=name, api_key=keys[0], **shared)]
@@ -305,6 +311,7 @@ def load_settings(**overrides) -> Settings:
         direct_chars=_int("AGENT_DIRECT_CHARS", 60000),
         stream=_bool("ZHIPU_STREAM", True),
         json_mode=_bool("ZHIPU_JSON_MODE", False),
+        reasoning_effort=_get("ZHIPU_REASONING_EFFORT", "LLM_REASONING_EFFORT"),
         text_pool=pool["text"] if pool else (),
         vision_pool=pool["vision"] if pool else (),
         strategy=pool["strategy"] if pool else _get("AGENT_POOL_STRATEGY", default="failover"),
