@@ -92,11 +92,16 @@ def run_stage(ctx: Context, name: str, opts: Dict[str, Any]) -> Optional[Path]:
             cached_board = read_json(module.artifact(ctx))
             cached_model = cached_board.get("videoModel")
             cached_segments = [s for ep in cached_board.get("episodes", []) for s in ep.get("segments", [])]
-            model_prompt_stale = cached_model != opts.get("video_model") or any(
-                not s.get("videoPrompt")
-                or s.get("videoModel") != opts.get("video_model")
-                or s.get("videoPromptSourceHash") != hashlib.sha1(str(s.get("h3Prompt") or "").encode("utf-8")).hexdigest()
-                for s in cached_segments if isinstance(s, dict)
+            model_prompt_stale = (
+                cached_board.get("videoPromptFormat") != "ref2v-v1"
+                or cached_model != opts.get("video_model")
+                or any(
+                    not s.get("videoPrompt")
+                    or s.get("videoPromptFormat") != "ref2v-v1"
+                    or s.get("videoModel") != opts.get("video_model")
+                    or s.get("videoPromptSourceHash") != hashlib.sha1(str(s.get("h3Prompt") or "").encode("utf-8")).hexdigest()
+                    for s in cached_segments if isinstance(s, dict)
+                )
             )
         except (OSError, ValueError, TypeError):
             model_prompt_stale = True
