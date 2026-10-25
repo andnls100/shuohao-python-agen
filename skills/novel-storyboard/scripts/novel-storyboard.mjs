@@ -809,7 +809,7 @@ export function gateReport(board, ctx = {}) {
   add('crowd', `单个分镜同框 ≤ ${params.maxOnScreen} 人，超了必须带拆解说明`, bad.crowd.length === 0, bad.crowd.join('；'));
   add('segment-id', '段号 E01-01 格式、按顺序连号', bad.id.length === 0, bad.id.join('；'));
   add('size-phrase', '景别中文词写进分镜图提示词', bad.size.length === 0, bad.size.join('；'));
-  add('camera-phrase', '运镜词与当前视频提示词协议匹配', !h3On || bad.camera.length === 0, h3On ? bad.camera.join('；') : SKIP_H3);
+  add('camera-phrase', '运镜词与当前视频提示词协议匹配', !h3On || bad.camera.length === 0, h3On ? bad.camera.join('；') : '旧 H3 专属检查已停用');
   add('h3-structure', 'H3 首行对齐指令由分镜结构推导逐字对账，切点时刻逐个对', !h3On || (eps.length > 0 && bad.h3s.length === 0), bad.h3s.join('；'));
   add('h3-dialogue', '认领节拍的台词逐字进 H3 提示词的 <d> 块', !h3On || bad.h3d.length === 0, script ? bad.h3d.join('；') : SKIP_SCRIPT);
   add('h3-lang', `H3 提示词语言与设定一致（promptLang=${promptLang}，正文${promptLang === 'en' ? '全英文' : '中文'}、骨架 token 官方英文格式）`, !h3On || bad.h3e.length === 0, bad.h3e.join('；'));
