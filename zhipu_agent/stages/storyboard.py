@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -823,10 +824,13 @@ def run(
         for segment in episode.get("segments", []):
             if not isinstance(segment, dict):
                 continue
-            if segment.get("videoPrompt") and segment.get("videoModel") == video_model:
+            source_hash = hashlib.sha1(str(segment.get("h3Prompt") or "").encode("utf-8")).hexdigest()
+            if (segment.get("videoPrompt") and segment.get("videoModel") == video_model
+                    and segment.get("videoPromptSourceHash") == source_hash):
                 continue
             segment["videoPrompt"] = _write_final_video_prompt(ctx, segment, video_model)
             segment["videoModel"] = video_model
+            segment["videoPromptSourceHash"] = source_hash
             ctx.log(f"[storyboard] {segment.get('id')}：已写入 {video_model} 最终 Ref2V 提示词")
     write_json(path, main)
 
