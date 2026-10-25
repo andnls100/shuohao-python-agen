@@ -609,6 +609,7 @@ export function gateReport(board, ctx = {}) {
       const ref2vScene = sEp ? sEp.scenes[seg?.sceneIndex - 1] : null;
       if (useRef2VContract && (isH3Ref2V || isWanRef2V)) {
         if (isH3Ref2V) {
+          if (h3.length > 7000) bad.ref2v.push(`${sid} H3 Ref2VA 提示词超过 7000 字符`);
           for (const section of ['subject_definitions', 'summary', 'retention_analysis', 'detailed_description', 'overall_soundscape', 'non_diegetic_music']) {
             if (!h3.includes(section)) bad.ref2v.push(`${sid} H3 Ref2VA 缺少章节 ${section}`);
           }
