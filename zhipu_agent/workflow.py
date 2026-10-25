@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from .config import Settings
 from .skill_loader import load_pack
 from .stages import art, audio, characters, continuity, frames, images, optimize, outline, refs, script, staging, storyboard, video
-from .stages.base import Context, guess_title, read_text_auto, safe_name
+from .stages.base import Context, guess_title, read_json, read_text_auto, safe_name
 from .validator import check_node
 
 STAGES = ["outline", "characters", "art", "optimize", "images", "script", "audio", "staging", "storyboard", "frames", "refs", "continuity", "video"]
@@ -85,7 +85,19 @@ def run_stage(ctx: Context, name: str, opts: Dict[str, Any]) -> Optional[Path]:
     for need in REQUIRES.get(name, []):
         if not ctx.artifact(need).is_file() and need not in opts["stages"]:
             raise FileNotFoundError(f"阶段 {name} 需要先有 {need} 的产物：{ctx.artifact(need)}。请先运行它。")
-    if name not in ("refs", "continuity", "frames", "optimize") and not ctx.force and module.artifact(ctx).is_file() and not (eps and name in PARTIAL_OK):
+    model_prompt_stale = False
+    if name == "storyboard" and opts.get("video_model") and module.artifact(ctx).is_file():
+        try:
+            cached_board = read_json(module.artifact(ctx))
+            cached_model = cached_board.get("videoModel")
+            cached_segments = [s for ep in cached_board.get("episodes", []) for s in ep.get("segments", [])]
+            model_prompt_stale = cached_model != opts.get("video_model") or any(
+                not s.get("videoPrompt") or s.get("videoModel") != opts.get("video_model")
+                for s in cached_segments if isinstance(s, dict)
+            )
+        except (OSError, ValueError, TypeError):
+            model_prompt_stale = True
+    if name not in ("refs", "continuity", "frames", "optimize") and not ctx.force and module.artifact(ctx).is_file() and not (eps and name in PARTIAL_OK) and not model_prompt_stale:
         result = module.check(ctx)
         if result.ok:
             ctx.log(f"▶ {name}：已有产物且通过校验，跳过（--force 重做）")
