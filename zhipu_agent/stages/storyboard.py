@@ -17,7 +17,6 @@ from typing import Any, Dict, List, Optional
 
 from ..skill_loader import build_system
 from ..visual_style import visual_style_instruction
-from ..llm import ask_text
 from ..validator import Result
 from .base import (
     Context, Item, batches, compact, ep_tokens, read_json, run_items, write_json,
@@ -347,7 +346,7 @@ def run(
                     "\"seconds\":2.0,\"cutIndexes\":[1]}]}。"
                     "importance 只允许 high 或 medium；cutIndexes 从 1 开始，对应该 segment.cuts 的序号；动作计划覆盖关键攻防节拍，且时间安排与对应镜头相容。"
                     "必须把动作计划落实到 cut.frame、cut.shot、cut.sfx、segment.blocking 和 h3Prompt，不能只写 fightPlan 而不改变镜头内容。"
-                    "每镜明确动作衔接、双方空间位置、攻防反应和动势承接；仍遵守现有时长、台词、画幅、角色名和 H3 协议校验。\n"
+                    "每镜明确动作衔接、双方空间位置、攻防反应和动势承接；仍遵守时长、台词、画幅和所选 Ref2V Skill 的约束。\n"
                     + (
                         "模式=auto：判断打戏对剧情的作用。只有 high 重要程度（决定胜负、揭示主角实力、改变剧情走向或构成高潮）的打戏才写 fightPlan 并强化；普通推搡、短暂冲突、重点在对白/情绪的挥拳不强化，沿用普通分镜。"
                         if fight_enhancement == "auto" else
