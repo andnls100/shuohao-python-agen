@@ -29,7 +29,7 @@ export const DEFAULT_PARAMS = {
   maxCutSeconds: 8,       // 单个分镜上限——5 秒左右对齐视频模型的 5/10 秒档位
   maxOnScreen: 6,        // 单个分镜同框人数上限，超了必须带拆解说明
   tolerance: 1.0,        // 每集总时长对剧本目标的容差 ±100%
-  h3Gates: false,        // Legacy H3/I2VA gates are retired; final prompts follow the selected Ref2V skill
+  h3Gates: true,         // Legacy gate default for old fixtures; the Ref2V pipeline explicitly sets this false
   nameGate: true,        // false = 不检查视频提示词里的角色名（例如靠角色参考图+名字标签出视频时）
   nameAllow: [],         // 视频提示词里允许出现的称呼（如 '九尾狐妖'），不当作角色名拦截
 };
