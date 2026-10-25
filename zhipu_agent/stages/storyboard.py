@@ -187,7 +187,7 @@ def run(
     wanted = eps or [e["ep"] for e in script["episodes"]]
     _eff = _params_override(h3_gates)
     ctx.log(f"[storyboard] 分镜参数来源：{_params_raw()[1]}")
-    ctx.log(f"[storyboard] 分镜参数覆盖：{json.dumps(_eff, ensure_ascii=False) if _eff else '无（使用技能包默认）'}；h3 检查={'开' if h3_gates else '关（seedance）'}")
+    ctx.log(f"[storyboard] 分镜参数覆盖：{json.dumps(_eff, ensure_ascii=False) if _eff else '无（使用技能包默认）'}；Ref2V 专属旧式检查={'开' if h3_gates else '关闭'}")
     ctx.log(f"[storyboard] 打戏增强模式：{fight_enhancement}" + ("（已有分镜需 --force 才会按新模式重做）" if artifact(ctx).is_file() and not ctx.force else ""))
     path = artifact(ctx)
 
@@ -279,7 +279,7 @@ def run(
         "with the same numeric indices and no MiniMax-only markup. Do not invent references or story events."
     )
     language_contract += (
-        "\\n\\nCUT FIELD CONTRACT: every cut.shot is always Simplified Chinese, regardless of promptLang; "
+        "\n\nCUT FIELD CONTRACT: every cut.shot is always Simplified Chinese, regardless of promptLang; "
         "every cut.frame is Simplified Chinese. cut.characters must contain only the canonical character IDs "
         "provided by seedScenes (for example C01), never display names; cut.props must contain only canonical "
         "prop IDs (for example P01), never display names. sceneIndex and beats must follow the supplied seedScenes "
@@ -356,8 +356,8 @@ def run(
                 )
             prompt = (
                 f"## 任务\n给第 {ep} 集切分镜：先按剧情单元分段（每段 9–20 秒、不跨场），段内切 4–8 秒的分镜。\n\n"
-                + f"## 画幅与语言\\naspectRatio = {aspect}；promptLang = {prompt_lang}（仅控制 frame、shot 等分镜字段语言；最终 Ref2V 视频提示词遵循所选 Skill，使用英文并保留对白原文）。\\n\\n"
-                + f"## 视觉风格（frame、shot 和最终 Ref2V 视频提示词必须统一遵守）\\n{style_hint}\\n保持同一风格贯穿所有镜头，不要在漫剧插画与真人摄影之间混用。\\n\\n"
+                + f"## 画幅与语言\naspectRatio = {aspect}；promptLang = {prompt_lang}（仅控制 frame、shot 等分镜字段语言；最终 Ref2V 视频提示词遵循所选 Skill，使用英文并保留对白原文）。\n\n"
+                + f"## 视觉风格（frame、shot 和最终 Ref2V 视频提示词必须统一遵守）\n{style_hint}\n保持同一风格贯穿所有镜头，不要在漫剧插画与真人摄影之间混用。\n\n"
                 + "## 多人同框说明\n单个分镜 characters 超过 3 人时，该分镜必须写非空 note：说明前景主体是谁、其余人物作为背景群像如何站位，以及哪些人物不单独特写。不超过 3 人可不写。\n\n"
                 + "## 连续性状态表（必须落实到 JSON）\n每个 segment 增加 continuityMode：continuous 或 hard_cut；每个 cut 增加 continuity：{mode, stateBefore, stateAfter, referenceFrame}。mode 只允许 inherit 或 cut。stateBefore/stateAfter 用简短中文记录所有可见角色的位置（画面左右/前后、朝向、姿势）、服装、手持道具、伤势，以及关键物件位置；状态要具体可画，不能写“保持一致”。\n同场连续动作默认 inherit：下一切 stateBefore 必须承接上一切 stateAfter，动作按“起始姿态→动作中→结果姿态”推进；referenceFrame 填上一切的帧标识（如 E01-01/f1.png），供下游把前一帧作为构图/姿态参考。只有明确的时间跳跃、换地点或剧情要求重置构图时才用 cut，并写明原因；不要为了继承而强行复制上一镜构图。跨 segment 若同场且动作连续，也要在下一段首切的 stateBefore 承接前段末切 stateAfter，并把 referenceFrame 指向前段末帧。\nframe 只负责当前瞬间的构图、人物位置/姿态和状态；shot 负责几秒内动作过程、镜头运动与动作衔接。角色脸、服装、场景材质以设定图为准。必须在输出 JSON 中提供上述字段，不得只写在说明文字里。\n\n"
                 + scene_rule
@@ -374,7 +374,14 @@ def run(
             prompt += fight_instruction
             existing_cache = next((p for p in _episode_cache_candidates(work, ep) if p.is_file()), None)
             cache_path = existing_cache or (work / f"ep{ep:03d}.json")
-            items.append(Item(str(ep), system, prompt, tokens=ep_tokens(ep), cache=cache_path))
+            try:
+                storyboard_max_tokens = max(1000, int(os.environ.get("AGENT_STORYBOARD_MAX_TOKENS", "10000")))
+            except ValueError as exc:
+                raise ValueError("AGENT_STORYBOARD_MAX_TOKENS 必须是整数") from exc
+            items.append(Item(
+                str(ep), system, prompt, tokens=ep_tokens(ep), cache=cache_path,
+                purpose=f"storyboard-generation:E{ep:02d}", max_tokens=storyboard_max_tokens,
+            ))
 
         def apply(key: str, data: Any, _doc=batch_doc, _path=batch_path) -> None:
             if isinstance(data, dict) and isinstance(data.get("episode"), dict):
