@@ -135,6 +135,26 @@ copy models.example.json models.json   # Windows
 
 The Python agent reads model endpoints from `models.json`; the real file is git-ignored.
 
+### LLM usage and reasoning controls
+
+Each model call logs its purpose, provider/model, input/output/reasoning token counts and elapsed time as `[llm-metrics]`. If a provider does not return usage data, the corresponding value is logged as `n/a` rather than estimated.
+
+For compatible endpoints, set per-entry options in `models.json`:
+
+```json
+{
+  "name": "reasoning-model",
+  "base_url": "https://provider.example/v1",
+  "api_key_env": "PROVIDER_API_KEY",
+  "model": "your-model",
+  "reasoning_effort": "low",
+  "stream_usage": true,
+  "max_tokens": 8192
+}
+```
+
+Only configure `reasoning_effort` when that provider/model supports the parameter; supported values depend on the provider (commonly `none`, `low`, `medium`, `high`). Streaming usage is requested by default, with a fallback for endpoints that reject `stream_options`; set `stream_usage: false` to disable it explicitly. Per-endpoint `max_tokens` remains the hard cap; storyboard generation also uses `AGENT_STORYBOARD_MAX_TOKENS` (default `10000`) and takes the lower configured cap.
+
 ## Common stages
 
 ```bash
