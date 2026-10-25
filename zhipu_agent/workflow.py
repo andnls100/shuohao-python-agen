@@ -1,6 +1,7 @@
 """流水线编排：按技能包的接力顺序依次执行各阶段。"""
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -92,7 +93,9 @@ def run_stage(ctx: Context, name: str, opts: Dict[str, Any]) -> Optional[Path]:
             cached_model = cached_board.get("videoModel")
             cached_segments = [s for ep in cached_board.get("episodes", []) for s in ep.get("segments", [])]
             model_prompt_stale = cached_model != opts.get("video_model") or any(
-                not s.get("videoPrompt") or s.get("videoModel") != opts.get("video_model")
+                not s.get("videoPrompt")
+                or s.get("videoModel") != opts.get("video_model")
+                or s.get("videoPromptSourceHash") != hashlib.sha1(str(s.get("h3Prompt") or "").encode("utf-8")).hexdigest()
                 for s in cached_segments if isinstance(s, dict)
             )
         except (OSError, ValueError, TypeError):
