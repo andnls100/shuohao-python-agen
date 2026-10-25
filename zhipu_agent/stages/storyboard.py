@@ -1,9 +1,9 @@
-"""阶段 6：novel-storyboard —— 剧本 → 分镜（storyboard.json：段 → 分镜 → 分镜图提示词 + H3 视频提示词）。
+"""阶段 6：novel-storyboard —— 剧本 → 分镜（storyboard.json：段 → 分镜 → 分镜图提示词 + 最终 Ref2V 视频提示词）。
 
 流程（对应 skills/novel-storyboard/SKILL.md）：
   seed      每批 ≤3 集，把剧本节拍展开成工作底稿 seedScenes（每拍几秒是算出来的）
-  切镜      批内每集一次模型调用：先按剧情单元分段（≤20 秒），段内切 4–8 秒的分镜，写 frame / shot / h3Prompt
-  校验      先自动修复轻微时长超限并重算 H3 时间；其余可定位错误只修单个分镜
+  切镜      批内每集一次模型调用：直接按所选 Ref2V Skill 生成最终视频提示词，同时写 frame / shot
+  校验      自动修复时长与分镜字段；不再重建旧式 H3/I2VA 对齐文本
             → 不因一个分镜的问题重新生成整集；无法定位或修复失败则保存批次并停止
   输出      md / html 报告 + export 导出投产包（每段一个文件夹）
 """
@@ -82,26 +82,6 @@ def _params_override(h3_gates: bool = True) -> Dict[str, Any]:
     if not h3_gates:
         data = {**data, "h3Gates": False}
     return data
-
-
-def _h3_protocol_needs_repair(h3: str, cuts: List[Any], prompt_lang: str) -> bool:
-    """Catch missing H3 skeleton/shot markers even when no opposite-language token exists."""
-    if prompt_lang == "zh":
-        required = ("参考图与目标视频的对齐", "整体视听描述：", "整体音景：", "非叙事配乐：")
-        markers = [f"[镜头 {i}]" for i in range(1, len(cuts) + 1)]
-        foreign = ("How the reference pictures align", "integrated_multimodal_description:",
-                   "overall_soundscape:", "non_diegetic_music:", "[Shot ")
-    else:
-        required = ("How the reference pictures align", "integrated_multimodal_description:",
-                    "overall_soundscape:", "non_diegetic_music:")
-        markers = [f"[Shot {i}]" for i in range(1, len(cuts) + 1)]
-        foreign = ("参考图与目标视频的对齐", "整体视听描述：", "整体音景：", "非叙事配乐：", "[镜头 ")
-    if any(token not in h3 for token in required):
-        return True
-    if any(token in h3 for token in foreign):
-        return True
-    positions = [h3.find(marker) for marker in markers]
-    return any(pos < 0 for pos in positions) or positions != sorted(positions)
 
 
 def artifact(ctx: Context) -> Path:
