@@ -13,8 +13,7 @@
 ```
 
 - **两人对话的正反打在一段里一次生成**——全景、A 近景、B 近景各是一个 2–5 秒的分镜，每格构图由自己的分镜图控制，不靠文字赌
-- **对齐指令是推导出来的，不是写出来的** — 多图对齐句式（`Picture 2 aligns with the 3.00-second mark…`）和 `[Shot k] At 00:0X.XXX` 切点时刻全部由分镜秒数推导，validate **逐字对账**：改了秒数忘改提示词，当场拦
-- **提示词按官方口径默认英文、逐镜换行** — 每个镜头独立一行、切点时刻开头；台词/歌词/画面文字按官方规定保留原文（`<d>[Chinese] …</d>` 逐字）。`promptLang: 'zh'` 可切整条中文（对齐指令、字段名、镜头标记都有中文版）。写法规范已内化为 `references/h3-prompt.md`——**本 skill 自包含，不依赖任何外部 skill**
+- **最终视频提示词直接使用 Ref2V Skill** — H3 使用 Ref2VA Skill，Wan 3.0 使用 Ref2V Skill；不生成 I2V/T2V 中间格式，不做二次 LLM 改写
 - **分镜图是资产合成，不是凭空画** — 每一格都带一份挂图清单：场景/角色/道具的设定图。novel-art 和 novel-characters 的图在这一步被消费。**本 skill 不出图**，交付的是提示词和这份清单
 
 产出 `storyboard.json` + Markdown + 一个双击就能开的 `storyboard-report.html`：
@@ -132,7 +131,7 @@ scripts/
   selftest.mjs           336 项断言，不调模型
 references/
   schema.md              storyboard.json 结构 + 时长约束链
-  h3-prompt.md           H3 提示词写法规范（官方方法论内化版）
+  （视频提示词规则由 skills/h3-prompt-writing 与 skills/wan-3-0-ref2v-prompt-writing 提供）
   storyboard-pass.md     切镜：分段规则、导演运镜手感、常见病
   frame.md               分镜图的提示词与挂图合同
   report-style.md        报告的设计约定
