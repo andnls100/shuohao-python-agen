@@ -279,6 +279,8 @@ def _usage_counts(usage) -> dict:
     completion = getattr(usage, "completion_tokens", None)
     details = getattr(usage, "completion_tokens_details", None)
     reasoning = getattr(details, "reasoning_tokens", None) if details is not None else None
+    if reasoning is None:
+        reasoning = getattr(usage, "reasoning_tokens", None)
     return {
         "input_tokens": prompt if prompt is not None else "n/a",
         "output_tokens": completion if completion is not None else "n/a",
