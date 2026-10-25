@@ -166,6 +166,18 @@ def load_optimized(root: Path, item: Dict[str, Any], strategy: str = DEFAULT_STR
     return text
 
 
+def save_optimized(root: Path, item_id: str, original: str, text: str, strategy: str) -> None:
+    """把一条优化结果存进缓存（提交时现场优化出来的结果也走这里）。original 必须是分镜里的原提示词。"""
+    out_dir = Path(root) / DIR_NAME
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = optimized_path(root, item_id, strategy)
+    path.write_text(str(text).strip() + "\n", encoding="utf-8")
+    index = _read_index(root)
+    index[_key(strategy, item_id)] = {"source_hash": prompt_hash(original), "optimized_hash": prompt_hash(str(text).strip()),
+                                      "file": path.name, "ok": True, "strategy": strategy}
+    _index_path(root).write_text(json.dumps(index, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
 def optimize_items(root: Path, items: List[Dict[str, Any]], *, force: bool = False,
                    chat_fn: Optional[Callable[..., str]] = None, rewrite_fn: Optional[Callable[[str], str]] = None,
                    strategy: str = DEFAULT_STRATEGY,

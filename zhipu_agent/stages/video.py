@@ -621,5 +621,9 @@ def run(ctx: Context, eps: Optional[list] = None, protocol: str = "h3", submit: 
             if previous_item and previous_item.get("last_frame_path"): last_frame = _resolve(root, previous_item["last_frame_path"])
             if not last_frame or not last_frame.is_file(): raise RuntimeError(f"镜头 {item['id']} 必须先生成上一个连续镜头 {item.get('previous_shot_id')}，才能取得真实最后一帧")
         generated = _submit_one(item, manifest, providers, root, path, last_frame if item["input_mode"] == "previous_last_frame" else None)
+        # 延迟优化：这一镜提交时现场优化出来的结果（算法不变）顺手存下来，下次分镜没改就直接读，不再调用模型
+        for adapter, text in (item.get("prompt_optimized_by_adapter_cache") or {}).items():
+            if text and (item.get("prompt_cached_optimized") or {}).get(adapter) != text:
+                vpo.save_optimized(root, item["id"], str(item.get("prompt_original") or ""), str(text), adapter)
         if item.get("state") != "succeeded": raise RuntimeError(f"镜头 {item['id']} 生成失败：{item.get('error')}")
     return path

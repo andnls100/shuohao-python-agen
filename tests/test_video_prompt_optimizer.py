@@ -118,6 +118,16 @@ class StrategyTest(unittest.TestCase):
             self.assertTrue(vpo.optimized_path(root, "S1", "aliyun_wan").is_file())
 
 
+class LazySaveTest(unittest.TestCase):
+    def test_save_then_load_roundtrip_and_invalidation(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            vpo.save_optimized(root, "S1", "原提示词", "wan 优化结果", "aliyun_wan")
+            self.assertEqual(vpo.load_optimized(root, {"id": "S1", "prompt": "原提示词"}, "aliyun_wan"), "wan 优化结果")
+            self.assertIsNone(vpo.load_optimized(root, {"id": "S1", "prompt": "原提示词改了"}, "aliyun_wan"))
+            self.assertIsNone(vpo.load_optimized(root, {"id": "S1", "prompt": "原提示词"}, "minimax_h3"))
+
+
 class IndexTest(unittest.TestCase):
     def test_cache_invalidates_when_source_changes_and_force(self):
         with tempfile.TemporaryDirectory() as td:
