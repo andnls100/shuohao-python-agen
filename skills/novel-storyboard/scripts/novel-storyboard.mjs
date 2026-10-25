@@ -971,11 +971,12 @@ export function exportPack(
       // prompt.md 头部先说清哪个文件是首帧、每张图钉在第几秒——
       // 分隔线以下是 h3Prompt 原样，整段复制就能用
       const starts = cutStarts(seg.cuts);
+      const refToken = board?.videoModel === 'comfyui_wan' ? '@Image' : 'Picture ';
       const mapping = (seg.cuts ?? [])
-        .map((_, i) => `- Picture ${i + 1} = f${i + 1}.png${i === 0 ? '（**首帧**，钉 0.00 秒）' : `（钉 ${starts[i].toFixed(2)} 秒）`}`)
-        .join('\n');
-      const promptMd = `# ${seg.id} · H3 提示词\n\n首帧 = **f1.png**。图片按 Picture 序号挂载：\n\n${mapping}\n\n---\n\n${seg.h3Prompt ?? ''}\n`;
-      files.push({ path: `${prefix}${seg.id}/prompt.md`, content: promptMd });
+        .map((_, i) => `- ${refToken}${i + 1} = f${i + 1}.png${i === 0 ? '（**首帧**，钉 0.00 秒）' : `（钉 ${starts[i].toFixed(2)} 秒）`}`)
+        .join('\\n');
+      const modelLabel = board?.videoModel === 'comfyui_wan' ? 'Wan 3.0 Ref2V' : 'MiniMax H3 Ref2VA';
+      const promptMd = `# ${seg.id} · ${modelLabel} 提示词\\n\\n首帧 = **f1.png**。图片按 ${refToken.trim()} 序号挂载：\\n\\n${mapping}\\n\\n---\\n\\n${seg.videoPrompt ?? seg.h3Prompt ?? ''}\\n`;
       const pictures = (seg.cuts ?? []).map((_, i) => `${prefix}${seg.id}/f${i + 1}.png`);
       const missing = pictures.filter((rel) => !imageExists(rel));
       missingTotal += missing.length;
