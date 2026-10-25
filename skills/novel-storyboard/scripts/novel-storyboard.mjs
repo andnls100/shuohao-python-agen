@@ -29,7 +29,7 @@ export const DEFAULT_PARAMS = {
   maxCutSeconds: 8,       // 单个分镜上限——5 秒左右对齐视频模型的 5/10 秒档位
   maxOnScreen: 6,        // 单个分镜同框人数上限，超了必须带拆解说明
   tolerance: 1.0,        // 每集总时长对剧本目标的容差 ±100%
-  h3Gates: true,         // false = 只用 Seedance 逐镜头协议，不检查 h3Prompt 结构/运镜词/台词块/语言
+  h3Gates: false,        // Legacy H3/I2VA gates are retired; final prompts follow the selected Ref2V skill
   nameGate: true,        // false = 不检查视频提示词里的角色名（例如靠角色参考图+名字标签出视频时）
   nameAllow: [],         // 视频提示词里允许出现的称呼（如 '九尾狐妖'），不当作角色名拦截
 };
@@ -861,7 +861,7 @@ export function validateStoryboard(board, ctx = {}) {
       const sid = seg?.id ?? '?';
       if (typeof seg?.id !== 'string') p(`${label}有段缺 id`);
       if (!Number.isInteger(seg?.sceneIndex) || seg.sceneIndex < 1) p(`${sid} 缺 sceneIndex（剧本里第几场）`);
-      if (typeof seg?.h3Prompt !== 'string') p(`${sid} 缺 h3Prompt（H3 视频提示词，写法见 references/h3-prompt.md）`);
+      if (typeof seg?.h3Prompt !== 'string') p(`${sid} 缺 h3Prompt（最终 Ref2V 视频提示词，必须遵循所选模型 Skill）`);
       if (!Array.isArray(seg?.cuts) || seg.cuts.length === 0) {
         p(`${sid} 没有分镜`);
         continue;
