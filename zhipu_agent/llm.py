@@ -188,7 +188,8 @@ def _call_endpoint(
         # Deliberately opt-in: unsupported providers are unaffected unless configured.
         params["reasoning_effort"] = effort
     use_json = json_mode if json_mode is not None else (s.json_mode if ep.json_mode is None else ep.json_mode)
-    if use_stream and ep.stream_usage:
+    if use_stream and ep.stream_usage is not False:
+        # Request usage on stream responses by default; endpoint config can opt out.
         params["stream_options"] = {"include_usage": True}
     if use_json:
         params["response_format"] = {"type": "json_object"}
@@ -199,7 +200,20 @@ def _call_endpoint(
         try:
             usage = None
             if use_stream:
-                text, finish, usage = _stream_call(_client(ep, s), params, started)
+                try:
+                    text, finish, usage = _stream_call(_client(ep, s), params, started)
+                except Exception as stream_exc:
+                    message = str(stream_exc).lower()
+                    if "stream_options" in params and any(
+                        marker in message for marker in ("stream_options", "unknown parameter", "unrecognized parameter", "extra inputs are not permitted")
+                    ):
+                        # Some OpenAI-compatible endpoints reject include_usage. Retry the same call
+                        # without this optional field rather than failing the generation.
+                        params.pop("stream_options", None)
+                        _say(f"{ep.label()} 不支持 stream_options，关闭流式 usage 后重试")
+                        text, finish, usage = _stream_call(_client(ep, s), params, started)
+                    else:
+                        raise
             else:
                 response = _client(ep, s).chat.completions.create(**params)
                 choice = response.choices[0]
