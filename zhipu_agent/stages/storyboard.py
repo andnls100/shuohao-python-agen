@@ -30,7 +30,7 @@ from .storyboard_repair import (
 
 SKILL = "novel-storyboard"
 BATCH = 3
-PASSES = ["storyboard-pass.md", "shot-writing.md", "h3-prompt.md", "frame.md"]
+PASSES = ["storyboard-pass.md", "shot-writing.md", "frame.md"]
 
 
 _PARAMS_KEY = "AGENT_STORYBOARD_PARAMS"
@@ -106,63 +106,6 @@ def _h3_protocol_needs_repair(h3: str, cuts: List[Any], prompt_lang: str) -> boo
 
 def artifact(ctx: Context) -> Path:
     return ctx.artifact("storyboard")
-
-
-def _write_final_video_prompt(ctx: Context, segment: Dict[str, Any], video_model: str) -> str:
-    """Write the final model-specific Ref2V prompt during storyboard generation."""
-    import re
-    root = Path(__file__).resolve().parents[2] / "skills"
-    if video_model == "comfyui_h3":
-        skill_path = root / "h3-prompt-writing" / "SKILL.md"
-        skill_name = "MiniMax H3 official Ref2VA"
-    elif video_model == "comfyui_wan":
-        skill_path = root / "wan-3-0-ref2v-prompt-writing" / "SKILL.md"
-        skill_name = "ComfyUI Wan 3.0 Ref2V"
-    else:
-        raise ValueError(f"不支持的分镜视频模型：{video_model}")
-    if not skill_path.is_file():
-        raise FileNotFoundError(f"缺少提示词 Skill：{skill_path}")
-    rules = skill_path.read_text(encoding="utf-8")
-    source = str(segment.get("h3Prompt") or "").strip()
-    if not source:
-        raise ValueError(f"{segment.get('id', '?')} 缺少 h3Prompt")
-    if video_model == "comfyui_h3":
-        system = ("Write the final MiniMax H3 Full-Reference Ref2VA prompt for ComfyUI using the official skill. "
-                  "Output all six sections in order: subject_definitions, summary, retention_analysis, "
-                  "detailed_description, overall_soundscape, non_diegetic_music. English outside <d> blocks. "
-                  "Preserve each <d>...</d> exactly and keep every <Picture N> reference number. Do not invent story details. "
-                  "Output only the final prompt.")
-    else:
-        system = ("Write the final ComfyUI Wan 3.0 Reference-to-Video (Ref2V) prompt using this skill. "
-                  "Convert source <Picture N> references to @ImageN with the same number. Preserve dialogue wording exactly, "
-                  "but remove MiniMax-only <d> markup and express the dialogue naturally in the prompt. "
-                  "Describe visible actions, camera movement, lighting, and continuity. Do not invent story details. "
-                  "Output only the final prompt.")
-    user = (f"Skill name: {skill_name}\n\nSkill rules:\n{rules}\n\n"
-            f"Segment data:\n{json.dumps({k: segment.get(k) for k in ('id','duration','blocking','soundscape','music','cuts')}, ensure_ascii=False)}\n\n"
-            f"Source prompt:\n{source}")
-    result = ask_text(system, user, ctx.settings).strip()
-    if not result:
-        raise ValueError(f"{segment.get('id', '?')} 的最终视频提示词为空")
-    source_dialogue = [re.sub(r"^\[[^\]]+\]\s*", "", d.strip()[3:-4]).strip()
-                       for d in re.findall(r"<d>.*?</d>", source, flags=re.S)]
-    if video_model == "comfyui_h3":
-        if re.findall(r"<d>.*?</d>", source, flags=re.S) != re.findall(r"<d>.*?</d>", result, flags=re.S):
-            raise ValueError(f"{segment.get('id', '?')} 的 H3 最终提示词修改了 <d> 台词块")
-    elif any(line and line not in result for line in source_dialogue):
-        raise ValueError(f"{segment.get('id', '?')} 的 Wan 最终提示词丢失或改写了对白原文")
-    pics = {int(n) for n in re.findall(r"<Picture\s+(\d+)>", source)}
-    if video_model == "comfyui_h3":
-        if not pics.issubset({int(n) for n in re.findall(r"<Picture\s+(\d+)>", result)}):
-            raise ValueError(f"{segment.get('id', '?')} 的 H3 提示词缺少参考图标签")
-        if any(k not in result for k in ("subject_definitions", "summary", "retention_analysis", "detailed_description", "overall_soundscape", "non_diegetic_music")):
-            raise ValueError(f"{segment.get('id', '?')} 的 H3 提示词未遵守官方六段结构")
-    else:
-        if not pics.issubset({int(n) for n in re.findall(r"@Image(\d+)", result)}):
-            raise ValueError(f"{segment.get('id', '?')} 的 Wan 提示词缺少 @ImageN 参考标签")
-        if "<Picture " in result:
-            raise ValueError(f"{segment.get('id', '?')} 的 Wan 提示词仍包含 MiniMax 标签")
-    return result
 
 
 def _refs(ctx: Context, *, names: bool = True) -> List[Any]:
@@ -310,6 +253,8 @@ def run(
 ) -> Path:
     if video_model not in {"comfyui_h3", "comfyui_wan"}:
         raise ValueError("--video-model 只支持 comfyui_h3 或 comfyui_wan")
+    # Retire the old I2VA-style validation contract; the selected Ref2V skill is authoritative.
+    h3_gates = False
     if fight_enhancement not in {"off", "auto", "enhanced"}:
         raise ValueError("fight_enhancement 只能是 off、auto 或 enhanced")
     style_hint = visual_style_instruction(visual_style)
@@ -397,10 +342,22 @@ def run(
     todo = [e for e in wanted if e not in done]
     if not todo:
         ctx.log("所有集都已切好，跳过切镜")
+    # Video prompt text is generated directly in the selected Ref2V skill format.
+    # prompt_lang controls storyboard/frame language only; Ref2V prompt language is English.
+    skill_root = Path(__file__).resolve().parents[2] / "skills"
+    skill_path = (skill_root / "h3-prompt-writing" / "SKILL.md"
+                  if video_model == "comfyui_h3"
+                  else skill_root / "wan-3-0-ref2v-prompt-writing" / "SKILL.md")
+    if not skill_path.is_file():
+        raise FileNotFoundError(f"缺少 Ref2V 提示词 Skill：{skill_path}")
+    ref2v_skill = skill_path.read_text(encoding="utf-8")
     language_contract = (
-        "HARD OUTPUT CONTRACT: promptLang=zh requires Simplified Chinese for frame, shot, h3Prompt, alignment, shot markers, soundscape, and music fields. Preserve dialogue inside <d>, lyrics, and visible in-frame text. Use [镜头 k], 整体视听描述：, 整体音景：, 非叙事配乐：, and the Chinese alignment format from h3-prompt.md. Do not use English field names or [Shot k]."
-        if prompt_lang == "zh" else
-        "HARD OUTPUT CONTRACT: promptLang=en requires English for h3Prompt, alignment, shot markers, soundscape, and music fields. Use [Shot k] and official English field names. Preserve dialogue inside <d>, lyrics, and visible in-frame text in their source language."
+        "HARD OUTPUT CONTRACT: frame and shot are Simplified Chinese. "
+        "The h3Prompt field contains the FINAL video prompt written directly for the selected Ref2V model, "
+        "following the Ref2V skill included below; do not write I2V/T2V prompts or an intermediate prompt. "
+        "Write video prompt text in English, preserving supplied dialogue verbatim in its original language. "
+        "Preserve all supplied <Picture N> reference numbers for MiniMax H3 Ref2VA; for Wan 3.0 Ref2V use @ImageN "
+        "with the same numeric indices and no MiniMax-only markup. Do not invent references or story events."
     )
     language_contract += (
         "\\n\\nCUT FIELD CONTRACT: every cut.shot is always Simplified Chinese, regardless of promptLang; "
@@ -409,7 +366,7 @@ def run(
         "prop IDs (for example P01), never display names. sceneIndex and beats must follow the supplied seedScenes "
         "and script exactly. Do not invent or substitute IDs."
     )
-    system = build_system(sk, PASSES, extra=language_contract)
+    system = build_system(sk, PASSES, extra=language_contract + "\n\n## Selected Ref2V skill\n" + ref2v_skill)
 
     for group in batches(todo, BATCH):
         seed = ctx.node_json(sk, ["seed", script_path, "--eps", f"{group[0]}-{group[-1]}", "--aspect", aspect])
@@ -480,10 +437,8 @@ def run(
                 )
             prompt = (
                 f"## 任务\n给第 {ep} 集切分镜：先按剧情单元分段（每段 9–20 秒、不跨场），段内切 4–8 秒的分镜。\n\n"
-                + f"## 画幅与语言\naspectRatio = {aspect}；promptLang = {prompt_lang}（h3Prompt 正文、对齐行、镜头标记、声景和配乐字段都必须使用该语言；台词在 <d> 里保留原文）。\n\n"
-                + ("## 中文模式硬约束\n除协议固定 token 和台词外，frame、shot、h3Prompt 全部使用简体中文。h3Prompt 使用“参考图与目标视频的对齐——”开头，字段为“整体视听描述：”“整体音景：”“非叙事配乐：”，镜头标记使用连续的 [镜头 1]、[镜头 2]。禁止使用英文版 How the reference pictures align、integrated_multimodal_description、overall_soundscape、non_diegetic_music 或 [Shot k]。\n\n" if prompt_lang == "zh" else "")
-                + ("## 英文模式硬约束\nh3Prompt 正文、对齐行、镜头标记、声景和配乐字段全部使用英文及官方英文骨架，镜头标记使用连续的 [Shot 1]、[Shot 2]。\n\n" if prompt_lang == "en" else "")
-                + f"## 视觉风格（frame、shot 和 h3Prompt 必须统一遵守）\n{style_hint}\n保持同一风格贯穿所有镜头，不要在漫剧插画与真人摄影之间混用。\n\n"
+                + f"## 画幅与语言\\naspectRatio = {aspect}；promptLang = {prompt_lang}（仅控制 frame、shot 等分镜字段语言；最终 Ref2V 视频提示词遵循所选 Skill，使用英文并保留对白原文）。\\n\\n"
+                + f"## 视觉风格（frame、shot 和最终 Ref2V 视频提示词必须统一遵守）\\n{style_hint}\\n保持同一风格贯穿所有镜头，不要在漫剧插画与真人摄影之间混用。\\n\\n"
                 + "## 多人同框说明\n单个分镜 characters 超过 3 人时，该分镜必须写非空 note：说明前景主体是谁、其余人物作为背景群像如何站位，以及哪些人物不单独特写。不超过 3 人可不写。\n\n"
                 + "## 连续性状态表（必须落实到 JSON）\n每个 segment 增加 continuityMode：continuous 或 hard_cut；每个 cut 增加 continuity：{mode, stateBefore, stateAfter, referenceFrame}。mode 只允许 inherit 或 cut。stateBefore/stateAfter 用简短中文记录所有可见角色的位置（画面左右/前后、朝向、姿势）、服装、手持道具、伤势，以及关键物件位置；状态要具体可画，不能写“保持一致”。\n同场连续动作默认 inherit：下一切 stateBefore 必须承接上一切 stateAfter，动作按“起始姿态→动作中→结果姿态”推进；referenceFrame 填上一切的帧标识（如 E01-01/f1.png），供下游把前一帧作为构图/姿态参考。只有明确的时间跳跃、换地点或剧情要求重置构图时才用 cut，并写明原因；不要为了继承而强行复制上一镜构图。跨 segment 若同场且动作连续，也要在下一段首切的 stateBefore 承接前段末切 stateAfter，并把 referenceFrame 指向前段末帧。\nframe 只负责当前瞬间的构图、人物位置/姿态和状态；shot 负责几秒内动作过程、镜头运动与动作衔接。角色脸、服装、场景材质以设定图为准。必须在输出 JSON 中提供上述字段，不得只写在说明文字里。\n\n"
                 + scene_rule
@@ -495,7 +450,7 @@ def run(
                 + (f"## 每场第一段的开场走位句（blocking 请照抄对应那一场的这一句）\n" + "\n".join(first_blocking) + "\n\n"
                    if first_blocking else "")
                 + "## 输出\n只输出这一集的 JSON 对象：{\"ep\": N, \"segments\": [...]}，不要 seedScenes。"
-                  "改秒数必须同步改 h3Prompt（对齐指令和 [Shot k]/[镜头 k] 切点时刻由分镜秒数推导，逐字对账；标记语言必须与 promptLang 一致）。"
+                  "视频提示词是最终 Ref2V 提示词，不得生成 I2V/T2V 中间格式；时长变化时同步检查提示词动作节奏，但不要添加旧式对齐行或镜头标记。"
             )
             prompt += fight_instruction
             existing_cache = next((p for p in _episode_cache_candidates(work, ep) if p.is_file()), None)
@@ -819,19 +774,19 @@ def run(
     if not result.ok:
         ctx.log("⚠ 全剧校验未通过：\n" + result.text)
 
-    # Final model-specific prompt is authored here and persisted; video stage must not rewrite it.
+    # h3Prompt is authored directly as the selected model's final Ref2V prompt.
+    # Keep videoPrompt as the downstream stable field; avoid a second LLM rewrite call.
     for episode in main.get("episodes", []):
         for segment in episode.get("segments", []):
             if not isinstance(segment, dict):
                 continue
-            source_hash = hashlib.sha1(str(segment.get("h3Prompt") or "").encode("utf-8")).hexdigest()
-            if (segment.get("videoPrompt") and segment.get("videoModel") == video_model
-                    and segment.get("videoPromptSourceHash") == source_hash):
-                continue
-            segment["videoPrompt"] = _write_final_video_prompt(ctx, segment, video_model)
+            prompt = str(segment.get("h3Prompt") or "").strip()
+            if not prompt:
+                raise ValueError(f"{segment.get('id', '?')} 缺少最终 Ref2V 视频提示词")
+            source_hash = hashlib.sha1(prompt.encode("utf-8")).hexdigest()
+            segment["videoPrompt"] = prompt
             segment["videoModel"] = video_model
             segment["videoPromptSourceHash"] = source_hash
-            ctx.log(f"[storyboard] {segment.get('id')}：已写入 {video_model} 最终 Ref2V 提示词")
     write_json(path, main)
 
     refs = _refs(ctx)
