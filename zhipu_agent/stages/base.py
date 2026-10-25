@@ -230,6 +230,8 @@ class Item:
     images: List[Path] = field(default_factory=list)
     kind: str = "text"                                 # "vision" = 用视觉模型池（带图的条目）
     cache: Optional[Path] = None                       # 已有缓存就不重新调用模型
+    purpose: str = "unspecified"                       # 写入 LLM 用量日志
+    max_tokens: Optional[int] = None                   # 本条目的输出 Token 上限
 
 
 def fix_prompt(lines: Sequence[str], hint: str = "") -> str:
@@ -277,7 +279,9 @@ def run_items(
                 return read_json(item.cache), True
             conv = convs.get(key)
             if conv is None:
-                conv = convs[key] = Conversation(item.system, settings)
+                conv = convs[key] = Conversation(
+                    item.system, settings, purpose=item.purpose, max_tokens=item.max_tokens,
+                )
             if feedback is None:
                 user, images = item.prompt, item.images
             elif not conv.has_history:
