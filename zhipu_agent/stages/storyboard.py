@@ -113,7 +113,7 @@ def _write_final_video_prompt(ctx: Context, segment: Dict[str, Any], video_model
     import re
     root = Path(__file__).resolve().parents[2] / "skills"
     if video_model == "comfyui_h3":
-        skill_path = root / "h3-prompt-writing" / "references" / "ref-en.txt"
+        skill_path = root / "h3-prompt-writing" / "SKILL.md"
         skill_name = "MiniMax H3 official Ref2VA"
     elif video_model == "comfyui_wan":
         skill_path = root / "wan-3-0-ref2v-prompt-writing" / "SKILL.md"
