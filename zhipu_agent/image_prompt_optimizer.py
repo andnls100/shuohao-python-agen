@@ -122,7 +122,7 @@ def optimize_image(ctx, image: Dict[str, Any], *, kind: str, label: str,
             pass
 
     try:
-        conv = Conversation(_system(ctx, mode), ctx.settings)
+        conv = Conversation(_system(ctx, mode), ctx.settings, purpose=f"image-prompt-optimizer:{mode}")
     except SkillError as exc:
         ctx.log(f"⚠ FLUX 优化跳过（{exc}）")
         return image
