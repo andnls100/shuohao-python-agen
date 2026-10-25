@@ -67,6 +67,10 @@ def sync_segment_timing(segment: Dict[str, Any], lang: str = "en") -> bool:
     prompt = segment.get("h3Prompt")
     if not isinstance(cuts, list) or not cuts or not isinstance(prompt, str) or not prompt.strip():
         return False
+    # Ref2V prompts are free-form model-specific instructions, not the retired I2VA
+    # skeleton. Never rewrite them with legacy alignment lines or [Shot k] markers.
+    if "integrated_multimodal_description:" not in prompt and "整体视听描述：" not in prompt:
+        return False
 
     lines = prompt.splitlines()
     # Models occasionally emit a leading blank line. Replace the first actual
@@ -552,8 +556,10 @@ def repair_deterministic_storyboard(doc: Dict[str, Any], lang: str = "en", scrip
             if canonical and canonical != cut.get("camera"):
                 repaired.append(f"{segment.get('id', '?')}#{index}: 运镜「{cut.get('camera')}」规范化为「{canonical}」")
                 cut["camera"] = canonical
-        scene = _script_scene_for_segment(segment, script)
-        repaired.extend(_repair_h3_protocol(segment, scene, lang))
+        prompt = str(segment.get("h3Prompt") or "")
+        if "integrated_multimodal_description:" in prompt or "整体视听描述：" in prompt:
+            scene = _script_scene_for_segment(segment, script)
+            repaired.extend(_repair_h3_protocol(segment, scene, lang))
         if sync_segment_timing(segment, lang):
             repaired.append(f"{segment.get('id', '?')}: 重建 H3 对齐行与切点时间")
     return repaired
