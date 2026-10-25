@@ -17,15 +17,14 @@ from typing import Any, Dict, List, Optional
 
 from ..skill_loader import build_system
 from ..visual_style import visual_style_instruction
-from ..llm import Conversation, ask_text
+from ..llm import ask_text
 from ..validator import Result
 from .base import (
     Context, Item, batches, compact, ep_tokens, read_json, run_items, write_json,
 )
 from .storyboard_repair import (
-    balance_episode_durations, cut_violation_refs, extract_h3_cut_text,
-    repair_deterministic_storyboard, repair_dialogue_fit, repair_minor_cut_durations,
-    replace_h3_cut_text, segment_h3_violation_refs, sync_segment_timing,
+    balance_episode_durations, repair_deterministic_storyboard,
+    repair_dialogue_fit, repair_minor_cut_durations,
 )
 
 SKILL = "novel-storyboard"
@@ -103,75 +102,16 @@ def check(ctx: Context) -> Result:
 
 def _repair_existing_h3(ctx: Context, doc: Dict[str, Any], path: Path,
                         prompt_lang: str) -> Result:
-    """Repair H3 prompts in the merged artifact too, including episodes reused from cache."""
+    """Apply deterministic storyboard fixes and validate; never rewrite final Ref2V prompts."""
     sk = ctx.skill(SKILL)
-    sb_dir = ctx.dir("storyboard")
-
-    # These fixes are deterministic and safe to apply to every existing segment.
     fixes = repair_deterministic_storyboard(doc, prompt_lang, read_json(ctx.artifact("script")))
     fixes += repair_minor_cut_durations(doc, prompt_lang)
     fixes += repair_dialogue_fit(doc, read_json(ctx.artifact("script")), prompt_lang)
-    # Do not rebalance episode totals here: existing artifacts may still carry an old
-    # explicit tolerance override, and this pass is for fixing prompts, not trimming cuts.
     if fixes:
         for fix in fixes:
             ctx.log(f"[storyboard] 已有分镜自动修正：{fix}")
         write_json(path, doc)
-
-    # Validate/repair up to two rounds. Unlike generation-time repair, this also runs
-    # when all episodes were already present and the generation loop was skipped.
-    for repair_round in range(2):
-        result = ctx.run(sk, ["validate", path, *_refs(ctx)], cwd=sb_dir)
-        if result.ok:
-            return result
-
-        targets = segment_h3_violation_refs(result.violations)
-        if not targets:
-            return result
-
-        repaired = 0
-        for segment_id, errors in targets.items():
-            segment = next((s for ep in doc.get("episodes", [])
-                            for s in ep.get("segments", [])
-                            if s.get("id") == segment_id), None)
-            if not segment:
-                continue
-            old_prompt = str(segment.get("h3Prompt") or "")
-            repair_system = (
-                "你是 H3 视频提示词的局部修复器。只修复一个 segment 的 h3Prompt，"
-                "不许改 cuts、秒数、镜头顺序、beats、台词原文、Seedance shot/frame、音效或配乐字段。"
-                "严格按 promptLang 输出完整 H3 提示词：zh 用简体中文对齐行、[镜头 k]、"
-                "整体视听描述：、整体音景：、非叙事配乐：；en 用英文官方骨架、[Shot k]、"
-                "integrated_multimodal_description:、overall_soundscape:、non_diegetic_music:。"
-                "每个镜头段落必须存在且按顺序；每切运镜词必须与对应 cut.camera 匹配；"
-                "对齐行与每个切点时间必须由 cuts 秒数累计得出。人名不写进正文，"
-                "只允许在 <d> 台词块中保留剧本原文。只输出 JSON：{\"h3Prompt\":\"...\"}。"
-            )
-            repair_user = (
-                f"segment={segment_id}; promptLang={prompt_lang}\n"
-                f"校验错误：{json.dumps(errors, ensure_ascii=False)}\n"
-                f"固定 cuts（只读）：{json.dumps(segment.get('cuts', []), ensure_ascii=False)}\n"
-                f"原始 h3Prompt：{json.dumps(old_prompt, ensure_ascii=False)}\n"
-                "请完整重写 h3Prompt，严格保留每个 <d>...</d> 块的内容和顺序；"
-                "除协议骨架、语言、运镜词和切点时间外，不改剧情语义。"
-            )
-            try:
-                patch = Conversation(repair_system, ctx.settings).ask_json(repair_user)
-            except Exception as exc:  # noqa: BLE001
-                ctx.log(f"[storyboard] {segment_id} H3 修复失败：{exc}")
-                continue
-            new_prompt = patch.get("h3Prompt") if isinstance(patch, dict) else None
-            if isinstance(new_prompt, str) and new_prompt.strip() and new_prompt != old_prompt:
-                segment["h3Prompt"] = new_prompt
-                sync_segment_timing(segment, prompt_lang)
-                repaired += 1
-                ctx.log(f"[storyboard] 已修复已有分镜 {segment_id} 的 H3 语言/结构")
-
-        if not repaired:
-            return result
-        write_json(path, doc)
-
-    return ctx.run(sk, ["validate", path, *_refs(ctx)], cwd=sb_dir)
+    return ctx.run(sk, ["validate", path, *_refs(ctx)], cwd=ctx.dir("storyboard"))
 
 
 def _blocking_lines(ctx: Context) -> List[str]:
@@ -540,208 +480,8 @@ def run(
                 # and deterministic repairs, but never rewrite a Ref2V prompt into the old format.
                 return result
 
-            # Repair H3 at segment scope when its language or protocol skeleton is wrong.
-            # Cuts, timings, dialogue, and Seedance fields are immutable in this pass.
-            segment_targets = segment_h3_violation_refs(result.violations)
-            h3_repaired = 0
-            # Repair every affected segment in this batch. A fixed cap left later
-            # segments untouched, especially when several episodes had H3 failures.
-            for segment_id, errors in segment_targets.items():
-                segment = next((s for e in _doc.get("episodes", [])
-                                for s in e.get("segments", []) if s.get("id") == segment_id), None)
-                if not segment:
-                    continue
-                old_prompt = str(segment.get("h3Prompt") or "")
-                repair_system = (
-                    "你是 H3 视频提示词的局部修复器。只修复一个 segment 的 h3Prompt，"
-                    "不许改 cuts、秒数、镜头顺序、beats、台词原文、Seedance shot/frame、音效或配乐字段。"
-                    "严格按 promptLang 输出完整 H3 提示词：zh 用简体中文对齐行、[镜头 k]、"
-                    "整体视听描述：、整体音景：、非叙事配乐：；en 用英文官方骨架、[Shot k]、"
-                    "integrated_multimodal_description:、overall_soundscape:、non_diegetic_music:。"
-                    "注意：Seedance 的 cut.shot 和分镜图 cut.frame 始终必须是简体中文，与 promptLang 无关。"
-                    "每个镜头段落必须存在且按顺序；运镜词必须与对应 cut.camera 匹配；"
-                    "对齐行与每个切点时间必须由 cuts 秒数累计得出。人名不写进正文，"
-                    "只允许在 <d> 台词块中保留剧本原文。只输出 JSON：{\"h3Prompt\":\"...\"}。"
-                )
-                repair_user = (
-                    f"segment={segment_id}; promptLang={prompt_lang}\n"
-                    f"校验错误：{json.dumps(errors, ensure_ascii=False)}\n"
-                    f"固定 cuts（只读）：{json.dumps(segment.get('cuts', []), ensure_ascii=False)}\n"
-                    f"原始 h3Prompt：{json.dumps(old_prompt, ensure_ascii=False)}\n"
-                    "请完整重写 h3Prompt，严格保留每个 <d>...</d> 块的内容和顺序；"
-                    "除协议骨架/语言/运镜词/切点时间外，不改剧情语义。"
-                )
-                try:
-                    patch = Conversation(repair_system, ctx.settings).ask_json(repair_user)
-                except Exception as exc:  # noqa: BLE001
-                    ctx.log(f"[storyboard] {segment_id} H3 局部修复失败：{exc}")
-                    continue
-                new_prompt = patch.get("h3Prompt") if isinstance(patch, dict) else None
-                if isinstance(new_prompt, str) and new_prompt.strip() and new_prompt != old_prompt:
-                    segment["h3Prompt"] = new_prompt
-                    sync_segment_timing(segment, prompt_lang)
-                    h3_repaired += 1
-                    ctx.log(f"[storyboard] 已修复 {segment_id} 的 H3 语言/结构")
-            if h3_repaired:
-                write_json(_p, _doc)
-                result = ctx.run(sk, ["validate", _p, *_refs(ctx)], cwd=sb_dir)
-                if result.ok:
-                    return result
-
-            # Only route errors that name a precise segment/cut. Never send a whole episode
-            # back to the model for a single bad cut. At most one local repair call per cut.
-            # If the H3 protocol vocabulary contradicts promptLang, repair the complete
-            # prompt for that segment. Language errors are sometimes reported without a cut id.
-            repaired_language = False
-            for episode in _doc.get("episodes", []):
-                for segment in episode.get("segments", []):
-                    h3 = segment.get("h3Prompt")
-                    if not isinstance(h3, str):
-                        continue
-                    mismatch = _h3_protocol_needs_repair(h3, segment.get("cuts", []), prompt_lang)
-                    if not mismatch:
-                        continue
-                    repair_system = (
-                        "只修复给定的 H3 提示词语言与格式，返回 JSON 对象，字段 h3Prompt 为完整修复后的字符串。"
-                        "不得改变剧情、镜头数量和顺序、秒数、画面锚点、声音意图。保留 <d> 内台词原文。"
-                        "promptLang=zh 时使用中文对齐句、整体视听描述、整体音景、非叙事配乐和 [镜头 k]；"
-                        "promptLang=en 时使用官方英文字段和 [Shot k]。"
-                    )
-                    repair_user = json.dumps({
-                        "promptLang": prompt_lang, "segmentId": segment.get("id"),
-                        "cuts": segment.get("cuts", []), "h3Prompt": h3
-                    }, ensure_ascii=False)
-                    try:
-                        patch = Conversation(repair_system, ctx.settings).ask_json(repair_user)
-                    except Exception as exc:  # noqa: BLE001
-                        ctx.log(f"[storyboard] {segment.get('id')} H3 语言修复失败：{exc}")
-                        continue
-                    if isinstance(patch, dict) and isinstance(patch.get("h3Prompt"), str) and patch["h3Prompt"].strip():
-                        segment["h3Prompt"] = patch["h3Prompt"].strip()
-                        sync_segment_timing(segment, prompt_lang)
-                        repaired_language = True
-                        ctx.log(f"[storyboard] 已修复 {segment.get('id')} 的 H3 语言与格式")
-                        write_json(_p, _doc)
-
-            if repaired_language:
-                result = ctx.run(sk, ["validate", _p, *_refs(ctx)], cwd=sb_dir)
-                if result.ok:
-                    return result
-
-            # Repair prompts whose visible H3 protocol tokens contradict promptLang.
-            # These errors may be reported at segment level, without a specific cut reference.
-            language_repairs = 0
-            for episode in _doc.get("episodes", []):
-                for segment in episode.get("segments", []):
-                    h3 = segment.get("h3Prompt")
-                    if not isinstance(h3, str):
-                        continue
-                    mismatch = _h3_protocol_needs_repair(h3, segment.get("cuts", []), prompt_lang)
-                    if not mismatch:
-                        continue
-                    repair_system = (
-                        "只修复给定 H3 提示词的语言和格式，返回 JSON 对象，字段 h3Prompt 为完整字符串。"
-                        "保留剧情、镜头数量与顺序、秒数、画面锚点、声音意图；保留 <d> 内台词原文。"
-                        "promptLang=zh 使用中文对齐句、整体视听描述、整体音景、非叙事配乐及 [镜头 k]；"
-                        "promptLang=en 使用官方英文字段及 [Shot k]。"
-                    )
-                    repair_user = json.dumps({
-                        "promptLang": prompt_lang,
-                        "segmentId": segment.get("id"),
-                        "cuts": segment.get("cuts", []),
-                        "h3Prompt": h3,
-                    }, ensure_ascii=False)
-                    try:
-                        patch = Conversation(repair_system, ctx.settings).ask_json(repair_user)
-                    except Exception as exc:  # noqa: BLE001
-                        ctx.log(f"[storyboard] {segment.get('id')} H3 语言修复失败：{exc}")
-                        continue
-                    if isinstance(patch, dict) and isinstance(patch.get("h3Prompt"), str) and patch["h3Prompt"].strip():
-                        segment["h3Prompt"] = patch["h3Prompt"].strip()
-                        sync_segment_timing(segment, prompt_lang)
-                        language_repairs += 1
-                        ctx.log(f"[storyboard] 已修复 {segment.get('id')} 的 H3 语言与格式")
-                        write_json(_p, _doc)
-
-            if language_repairs:
-                result = ctx.run(sk, ["validate", _p, *_refs(ctx)], cwd=sb_dir)
-                if result.ok:
-                    return result
-
-            targets = cut_violation_refs(result.violations)
-            if not targets:
-                ctx.log("[storyboard] 剩余错误无法定位到具体分镜；停止自动回炉，保留批次文件供检查")
-                return result
-
-            repaired = 0
-            # Do not silently leave later cuts untouched when a batch has many violations.
-            # Every target is a cut-scoped call; no episode-wide regeneration is performed.
-            for (segment_id, cut_index), errors in targets.items():
-                episode = next((e for e in _doc.get("episodes", [])
-                                if any(s.get("id") == segment_id for s in e.get("segments", []))), None)
-                segment = next((s for s in (episode or {}).get("segments", [])
-                                if s.get("id") == segment_id), None)
-                cuts = (segment or {}).get("cuts", [])
-                if not segment or not isinstance(cuts, list) or not (1 <= cut_index <= len(cuts)):
-                    continue
-                cut = cuts[cut_index - 1]
-                old_cut = json.loads(json.dumps(cut, ensure_ascii=False))
-                old_shot_text = extract_h3_cut_text(segment, cut_index, prompt_lang)
-                repair_system = (
-                    "你是分镜 JSON 的局部修复器。只能修复提供的一个 cut 和它对应的一段 H3 镜头正文，"
-                    "绝不能重写整集、其他分镜或剧情。beats、sceneIndex、id 必须原样保留；"
-                    "characters 只能使用当前剧本场次给出的角色 ID，props 只能使用该场次给出的道具 ID；"
-                    "可把错误的显示名称纠正为唯一对应的 ID，不得新增或猜测 ID。cut.shot 始终使用简体中文。"
-                    "不要新增剧情或台词。只输出 JSON："
-                    "{\"cut\":{...需要修改的字段...},\"h3ShotText\":\"该镜完整的 [Shot k]/[镜头 k] 正文\"}。"
-                    "若不需要修改 h3ShotText，原样返回它。"
-                )
-                script_episode = next((e for e in script.get("episodes", [])
-                                       if e.get("ep") == episode.get("ep")), {})
-                script_scenes = script_episode.get("scenes", [])
-                script_scene = next((sc for idx, sc in enumerate(script_scenes, start=1)
-                                     if idx == segment.get("sceneIndex")), {})
-                repair_user = (
-                    f"分镜段：{segment_id}；第 {cut_index} 切。画幅：{_doc.get('aspectRatio', aspect)}；"
-                    f"H3 提示词语言：{prompt_lang}。\n"
-                    f"本切校验错误：{json.dumps(errors, ensure_ascii=False)}\n"
-                    f"段级必要上下文：{json.dumps({k: segment.get(k) for k in ('sceneIndex', 'blocking', 'soundscape', 'music')}, ensure_ascii=False)}\n"
-                    f"当前剧本场次可用角色 ID：{json.dumps(script_scene.get('characters', []) if isinstance(script_scene, dict) else [], ensure_ascii=False)}；"
-                    f"可用道具 ID：{json.dumps(script_scene.get('props', []) if isinstance(script_scene, dict) else [], ensure_ascii=False)}\n"
-                    f"当前 cut：{json.dumps(old_cut, ensure_ascii=False)}\n"
-                    f"当前 H3 镜头正文：{json.dumps(old_shot_text, ensure_ascii=False)}\n"
-                    "仅返回修复后的当前 cut 字段和当前 H3 镜头正文。不要返回整个 segment 或 episode。"
-                )
-                try:
-                    patch = Conversation(repair_system, ctx.settings).ask_json(repair_user)
-                except Exception as exc:  # noqa: BLE001
-                    ctx.log(f"[storyboard] {segment_id}#{cut_index} 局部修复调用失败：{exc}")
-                    continue
-                if not isinstance(patch, dict):
-                    continue
-                patch_cut = patch.get("cut")
-                if isinstance(patch_cut, dict):
-                    # Structural/script ownership stays immutable; only cut-level presentation fields can change.
-                    forbidden = {"beats", "sceneIndex", "id"}
-                    allowed = set(cut) | {
-                        "seconds", "size", "camera", "stability", "lens", "cameraPosition",
-                        "composition", "eyeline", "focus", "lighting", "frame", "shot", "sfx",
-                        "note", "recipe",
-                    }
-                    for key, value in patch_cut.items():
-                        if key in allowed and key not in forbidden:
-                            cut[key] = value
-                shot_text = patch.get("h3ShotText")
-                if isinstance(shot_text, str) and shot_text.strip():
-                    replace_h3_cut_text(segment, cut_index, shot_text, prompt_lang)
-                sync_segment_timing(segment, prompt_lang)
-                if cut != old_cut or extract_h3_cut_text(segment, cut_index, prompt_lang) != old_shot_text:
-                    repaired += 1
-                    ctx.log(f"[storyboard] 已局部修复 {segment_id}#{cut_index}")
-                    write_json(_p, _doc)
-
-            if repaired:
-                result = ctx.run(sk, ["validate", _p, *_refs(ctx)], cwd=sb_dir)
+            # Ref2V prompts are final model-specific text. Do not run legacy H3/I2VA
+            # prompt-rewrite or cut-text repair logic against them.
             return result
 
         run_items(
