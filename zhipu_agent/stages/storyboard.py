@@ -535,6 +535,10 @@ def run(
             result = ctx.run(sk, ["validate", _p, *_refs(ctx)], cwd=sb_dir)
             if result.ok:
                 return result
+            if not h3_gates:
+                # Legacy H3/I2VA local-rewrite passes are retired. Keep the validation report
+                # and deterministic repairs, but never rewrite a Ref2V prompt into the old format.
+                return result
 
             # Repair H3 at segment scope when its language or protocol skeleton is wrong.
             # Cuts, timings, dialogue, and Seedance fields are immutable in this pass.
@@ -756,6 +760,7 @@ def run(
 
     # h3Prompt is authored directly as the selected model's final Ref2V prompt.
     # Keep videoPrompt as the downstream stable field; avoid a second LLM rewrite call.
+    main["videoPromptFormat"] = "ref2v-v1"
     for episode in main.get("episodes", []):
         for segment in episode.get("segments", []):
             if not isinstance(segment, dict):
@@ -766,6 +771,7 @@ def run(
             source_hash = hashlib.sha1(prompt.encode("utf-8")).hexdigest()
             segment["videoPrompt"] = prompt
             segment["videoModel"] = video_model
+            segment["videoPromptFormat"] = "ref2v-v1"
             segment["videoPromptSourceHash"] = source_hash
     write_json(path, main)
 
