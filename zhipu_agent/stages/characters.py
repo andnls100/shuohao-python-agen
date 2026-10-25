@@ -122,7 +122,7 @@ def run(ctx: Context, max_chars: int = 30, visual_style: str = "manju") -> Path:
                            for c in merged["characters"]],
             "mergeCandidates": candidates,
         }
-        decision = Conversation(REVIEW_SYSTEM, ctx.settings).ask_json(json.dumps(review, ensure_ascii=False, indent=1))
+        decision = Conversation(REVIEW_SYSTEM, ctx.settings, purpose="character-merge-review").ask_json(json.dumps(review, ensure_ascii=False, indent=1))
         merges = decision.get("merges", []) if isinstance(decision, dict) else []
         if merges:
             write_json(work / "merges.json", {"merges": merges})
