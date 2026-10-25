@@ -142,7 +142,7 @@ def _repair_ref2v_prompts(ctx: Context, doc: Dict[str, Any], path: Path, result:
             sid = str(segment.get("id") or "")
             if sid not in segment_ids:
                 continue
-            errors = [line for line in result.text.splitlines() if sid in line]
+            errors = [part.strip() for line in result.text.splitlines() for part in line.split("；") if sid in part]
             user = json.dumps({
                 "videoModel": video_model,
                 "segmentId": sid,
