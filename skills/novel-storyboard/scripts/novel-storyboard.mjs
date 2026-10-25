@@ -601,7 +601,7 @@ export function gateReport(board, ctx = {}) {
         bad.segCap.push(`${sid} 共 ${total} 秒`);
       }
 
-      const h3 = String(seg?.videoPrompt ?? seg?.h3Prompt ?? '');
+      const h3 = String(seg?.h3Prompt ?? seg?.videoPrompt ?? '');
       const videoModel = board?.videoModel ?? seg?.videoModel ?? 'comfyui_h3';
       const isH3Ref2V = videoModel === 'comfyui_h3';
       const isWanRef2V = videoModel === 'comfyui_wan';
