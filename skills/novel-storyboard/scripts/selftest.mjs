@@ -421,10 +421,10 @@ const CARDS = loadRecipes(join(here, '../references/test-fixtures/shot-recipes')
 {
   const refs = join(here, '../references');
   const common = readFileSync(join(refs, 'shot-writing.md'), 'utf8');
-  const h3 = readFileSync(join(refs, 'h3-prompt.md'), 'utf8');
+  const h3 = readFileSync(join(here, '../../h3-prompt-writing/SKILL.md'), 'utf8');
   const seedance = readFileSync(join(refs, 'seedance-prompt.md'), 'utf8');
   ok(common.includes('常见动作原则'), '共同层写了常见动作原则');
-  ok(h3.includes('shot-writing.md') && seedance.includes('shot-writing.md'), '两份协议规范都指向共同层');
+  ok(h3.includes('Ref2VA') && seedance.includes('shot-writing.md'), 'H3 uses Ref2VA skill; Seedance retains its shared shot-writing layer');
   // 画风由调用方在出片时附加；写死在结构示例里，模型会照抄
   ok(!/cold gray-green|冷灰绿|Cinematic, live-action/.test(h3), 'H3 规范的示例里不再写死画风');
   // Seedance 的时间轴与编号由程序拼，正文里出现就会重复或错位
