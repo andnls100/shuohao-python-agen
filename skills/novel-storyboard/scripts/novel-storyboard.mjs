@@ -547,7 +547,7 @@ export function gateReport(board, ctx = {}) {
   const bad = {
     coverage: [], segCap: [], cutLen: [], fit: [], duration: [], crowd: [],
     id: [], size: [], camera: [], frame: [], names: [], refs: [],
-    h3s: [], h3d: [], h3e: [], recipe: [], comp: [], sd: [],
+    h3s: [], h3d: [], h3e: [], ref2v: [], recipe: [], comp: [], sd: [],
   };
   // 配方卡库是可选挂载：ctx.recipes 为空就整门跳过（不是「没有 cut 带 recipe」就跳过）
   const recipes = ctx.recipes ?? null;
@@ -601,8 +601,59 @@ export function gateReport(board, ctx = {}) {
         bad.segCap.push(`${sid} 共 ${total} 秒`);
       }
 
-      const h3 = String(seg?.h3Prompt ?? '');
-      // H3 结构：首行对齐指令逐字对账（由分镜结构按 promptLang 推导），三字段按序，切点时刻逐个对
+      const h3 = String(seg?.videoPrompt ?? seg?.h3Prompt ?? '');
+      const videoModel = board?.videoModel ?? seg?.videoModel ?? 'comfyui_h3';
+      const isH3Ref2V = videoModel === 'comfyui_h3';
+      const isWanRef2V = videoModel === 'comfyui_wan';
+      const ref2vScene = sEp ? sEp.scenes[seg?.sceneIndex - 1] : null;
+      if (isH3Ref2V || isWanRef2V) {
+        if (isH3Ref2V) {
+          for (const section of ['subject_definitions', 'summary', 'retention_analysis', 'detailed_description', 'overall_soundscape', 'non_diegetic_music']) {
+            if (!h3.includes(section)) bad.ref2v.push(`${sid} H3 Ref2VA 缺少章节 ${section}`);
+          }
+          if (/@Image\\s*\\d+/i.test(h3)) bad.ref2v.push(`${sid} H3 提示词误用了 Wan 的 @ImageN 标记`);
+        } else if (/<(?:Subject|Picture|Video|Audio)\\s+\\d+>/i.test(h3)) {
+          bad.ref2v.push(`${sid} Wan Ref2V 提示词包含 MiniMax 专用标签`);
+        }
+        const pattern = isH3Ref2V ? /<Picture\\s+(\\d+)>/g : /@Image(\\d+)\\b/g;
+        const refs = [...h3.matchAll(pattern)].map(m => ({ n: Number(m[1]), at: m.index ?? 0 }));
+        const numbers = [...new Set(refs.map(r => r.n))].sort((a, b) => a - b);
+        const expected = Array.from({ length: cuts.length }, (_, i) => i + 1);
+        if (!numbers.length) {
+          bad.ref2v.push(`${sid} 没有 ${isH3Ref2V ? '<Picture N>' : '@ImageN'} 参考图标记`);
+        } else if (numbers.length !== expected.length || numbers.some((n, i) => n !== expected[i])) {
+          bad.ref2v.push(`${sid} 参考图编号应连续对应 1–${cuts.length}，实际为 ${numbers.join(', ')}`);
+        }
+        const firstAt = numbers.map(n => refs.find(r => r.n === n)?.at ?? -1);
+        if (firstAt.some((at, i) => i > 0 && at < firstAt[i - 1])) {
+          bad.ref2v.push(`${sid} 参考图编号出现顺序错乱`);
+        }
+
+        // 台词来自剧本 beats，逐字检查并保证在提示词中按镜头顺序出现。
+        const expectedLines = [];
+        if (ref2vScene) {
+          for (const cut of cuts) {
+            const [from, to] = cut?.beats ?? [];
+            for (const beat of ref2vScene.beats.slice(Math.max(0, (from ?? 1) - 1), Math.max(0, to ?? 0))) {
+              if (beat.kind === 'line' && String(beat.text ?? '').trim()) expectedLines.push(String(beat.text));
+            }
+          }
+        }
+        let dialogueCursor = 0;
+        const dialogueBlocks = isH3Ref2V ? [...h3.matchAll(/<d>[\\s\\S]*?<\\/d>/g)].map(m => m[0]) : [];
+        for (const line of expectedLines) {
+          const at = h3.indexOf(line, dialogueCursor);
+          if (at < 0) {
+            bad.ref2v.push(`${sid} 台词缺失或顺序错误：${line.slice(0, 50)}`);
+          } else {
+            if (isH3Ref2V && !dialogueBlocks.some(block => block.includes(line))) {
+              bad.ref2v.push(`${sid} H3 台词未放入 <d> 块：${line.slice(0, 50)}`);
+            }
+            dialogueCursor = at + line.length;
+          }
+        }
+      }
+      // Legacy I2VA alignment checks are retained only for old fixtures; the Ref2V gate above is model-specific.
       const tk = H3_TOKENS[promptLang] ?? H3_TOKENS.zh;
       const wantLine = h3AlignmentLine(cuts, promptLang);
       if (!h3.trimStart().startsWith(wantLine)) {
@@ -810,6 +861,7 @@ export function gateReport(board, ctx = {}) {
   add('segment-id', '段号 E01-01 格式、按顺序连号', bad.id.length === 0, bad.id.join('；'));
   add('size-phrase', '景别中文词写进分镜图提示词', bad.size.length === 0, bad.size.join('；'));
   add('camera-phrase', '运镜词与当前视频提示词协议匹配', !h3On || bad.camera.length === 0, h3On ? bad.camera.join('；') : '旧 H3 专属检查已停用');
+  add('ref2v-prompt', '所选 Ref2V 提示词结构、参考图编号、台词原文与顺序', bad.ref2v.length === 0, bad.ref2v.join('；'));
   add('h3-structure', 'H3 首行对齐指令由分镜结构推导逐字对账，切点时刻逐个对', !h3On || (eps.length > 0 && bad.h3s.length === 0), bad.h3s.join('；'));
   add('h3-dialogue', '认领节拍的台词逐字进 H3 提示词的 <d> 块', !h3On || bad.h3d.length === 0, script ? bad.h3d.join('；') : SKIP_SCRIPT);
   add('h3-lang', `H3 提示词语言与设定一致（promptLang=${promptLang}，正文${promptLang === 'en' ? '全英文' : '中文'}、骨架 token 官方英文格式）`, !h3On || bad.h3e.length === 0, bad.h3e.join('；'));
