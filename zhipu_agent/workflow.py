@@ -120,7 +120,7 @@ def run_stage(ctx: Context, name: str, opts: Dict[str, Any]) -> Optional[Path]:
         return module.run(ctx, eps=eps, protocol=opts.get("video_protocol", "h3"), submit=opts.get("video_submit", False),
                           visual_style=opts.get("visual_style", "manju"), visual_style_prompt=opts.get("visual_style_prompt", ""), shots=opts.get("video_shots"),
                           video_model=opts.get("video_model"), segments=opts.get("video_segments"), merge_seconds=opts.get("video_merge_seconds", 10), video_size=opts.get("video_size"),
-                          optimize=opts.get("video_optimize", False), optimize_force=opts.get("video_optimize_force", False))
+)
     raise ValueError(name)
 
 
