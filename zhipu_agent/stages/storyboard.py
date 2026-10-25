@@ -132,7 +132,15 @@ def _repair_ref2v_prompts(ctx: Context, doc: Dict[str, Any], path: Path, result:
         "Repair only the final Ref2V video prompt for one existing segment. Follow the model skill below. "
         "Do not rewrite the storyboard, cuts, timing, action order, character/prop assignments, or story facts. "
         "Correct only the listed validation errors, preserve every supplied dialogue verbatim, and preserve the "
-        "existing reference-image numbers except where the validator explicitly reports a numbering error. "
+        "mapping between each reference-image number and its actual image. You MAY move reference tags within "
+        "detailed_description to correct shot order; do not renumber images or change which image a number denotes. "
+        "For an H3 error saying detailed_description shot reference order is wrong, make the FIRST occurrence of "
+        "<Picture 1>, <Picture 2>, ... appear in strictly ascending numeric order inside detailed_description, "
+        "with each tag attached to its corresponding shot. Check the entire detailed_description from beginning to end; "
+        "do not rely on occurrences in subject_definitions, summary, or retention_analysis to satisfy this rule. "
+        "Keep every shot's action and dialogue in its original order, retain all required section headings, and do not "
+        "introduce, omit, duplicate, or renumber reference images. Before returning, self-check the order of the first "
+        "occurrence of each <Picture N> within detailed_description. "
         "Return only the corrected final video prompt, without JSON, headings outside the required model format, "
         "or explanation.\n\n## Selected model skill\n" + skill_text
     )
