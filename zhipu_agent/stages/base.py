@@ -279,8 +279,9 @@ def run_items(
                 return read_json(item.cache), True
             conv = convs.get(key)
             if conv is None:
+                purpose = item.purpose if item.purpose != "unspecified" else f"{label}:{key}"
                 conv = convs[key] = Conversation(
-                    item.system, settings, purpose=item.purpose, max_tokens=item.max_tokens,
+                    item.system, settings, purpose=purpose, max_tokens=item.max_tokens,
                 )
             if feedback is None:
                 user, images = item.prompt, item.images
