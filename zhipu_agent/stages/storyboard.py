@@ -114,7 +114,7 @@ def _repair_existing_h3(ctx: Context, doc: Dict[str, Any], path: Path,
     return ctx.run(sk, ["validate", path, *_refs(ctx)], cwd=ctx.dir("storyboard"))
 
 
-def _repair_ref2v_prompts(ctx: Context, doc: Dict[str, Any], result: Result,
+def _repair_ref2v_prompts(ctx: Context, doc: Dict[str, Any], path: Path, result: Result,
                          video_model: str) -> bool:
     """Only repair prompts explicitly named by the Ref2V validation gate; never regenerate cuts/segments."""
     if result.ok or "所选 Ref2V 提示词结构、参考图编号、台词原文与顺序" not in result.text:
@@ -164,7 +164,7 @@ def _repair_ref2v_prompts(ctx: Context, doc: Dict[str, Any], result: Result,
             repaired = True
             ctx.log(f"[storyboard] {sid}：仅按校验错误修复 Ref2V 提示词；未重写分镜")
     if repaired:
-        write_json(artifact(ctx), doc)
+        write_json(path, doc)
     return repaired
 
 
@@ -534,7 +534,7 @@ def run(
                 write_json(_p, _doc)
 
             result = ctx.run(sk, ["validate", _p, *_refs(ctx)], cwd=sb_dir)
-            if not result.ok and _repair_ref2v_prompts(ctx, _doc, result, video_model):
+            if not result.ok and _repair_ref2v_prompts(ctx, _doc, _p, result, video_model):
                 result = ctx.run(sk, ["validate", _p, *_refs(ctx)], cwd=sb_dir)
             # One targeted prompt-only repair at most. Never regenerate an episode or rewrite cuts.
             return result
