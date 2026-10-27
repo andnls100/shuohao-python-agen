@@ -607,6 +607,8 @@ export function gateReport(board, ctx = {}) {
       const isWanRef2V = videoModel === 'comfyui_wan';
       const useRef2VContract = Boolean(board?.videoPromptFormat === 'ref2v-v1' || board?.videoModel || seg?.videoModel);
       const ref2vScene = sEp ? sEp.scenes[seg?.sceneIndex - 1] : null;
+      // 有 refOrder = 新参考图编号协议（H3）；没有 = 旧分镜，沿用「编号 = 分镜序号」
+      const refOrder = isH3Ref2V && Array.isArray(seg?.refOrder) && seg.refOrder.length ? seg.refOrder : null;
       if (useRef2VContract && (isH3Ref2V || isWanRef2V)) {
         if (isH3Ref2V) {
           if (h3.length > 7000) bad.ref2v.push(`${sid} H3 Ref2VA 提示词超过 7000 字符`);
@@ -616,11 +618,38 @@ export function gateReport(board, ctx = {}) {
           const detailStart = h3.indexOf('detailed_description');
           const soundStart = h3.indexOf('overall_soundscape', detailStart + 1);
           const detailBody = detailStart >= 0 ? h3.slice(detailStart, soundStart > detailStart ? soundStart : undefined) : '';
-          const detailPositions = Array.from({ length: cuts.length }, (_, i) => detailBody.indexOf(`<Picture ${i + 1}>`));
-          if (detailPositions.some(pos => pos < 0)) {
-            bad.ref2v.push(`${sid} detailed_description 未逐镜引用全部 <Picture N>`);
-          } else if (detailPositions.some((pos, i) => i > 0 && pos <= detailPositions[i - 1])) {
-            bad.ref2v.push(`${sid} detailed_description 中的镜头参考图顺序错乱`);
+          if (refOrder) {
+            // 参考图编号协议：<Picture N> 是这一段上传的第 N 张设定图（角色 → 场景 → 道具），
+            // 不再等于「第 N 个分镜」。refOrder 由程序在绑定 assetRefs 后生成，提示词里的素材 ID 占位符已换成编号。
+            const refNos = refOrder.map((r) => Number(r.no));
+            const used = new Set([...h3.matchAll(/<Picture\s+(\d+)>/g)].map((m) => Number(m[1])));
+            const leftovers = [...new Set([...h3.matchAll(/<\s*Picture\s+([^\s>\d][^>]*?)\s*>/gi)].map((m) => m[1]))];
+            if (leftovers.length) {
+              bad.ref2v.push(`${sid} 提示词里的 ${leftovers.map((t) => `<Picture ${t}>`).join('、')} 对不上本段任何参考图（只能写本段分镜 characters/props 里出现过的素材 ID 和本段场景 ID）`);
+            }
+            const outOfRange = [...used].filter((n) => !refNos.includes(n));
+            if (outOfRange.length) {
+              bad.ref2v.push(`${sid} 参考图编号 ${outOfRange.join(', ')} 超出本段参考图范围 1–${refNos.length}`);
+            }
+            const defStart = h3.indexOf('subject_definitions');
+            const defEnd = h3.indexOf('summary', defStart + 1);
+            const defBody = defStart >= 0 ? h3.slice(defStart, defEnd > defStart ? defEnd : undefined) : '';
+            const undefinedNos = refNos.filter((n) => !new RegExp(`<Picture\\s+${n}>`).test(defBody));
+            if (undefinedNos.length) {
+              const table = refOrder.filter((r) => undefinedNos.includes(Number(r.no))).map((r) => `${r.no}=${r.name ?? r.tag}`).join('、');
+              bad.ref2v.push(`${sid} subject_definitions 没有定义参考图 ${table}（本段共 ${refNos.length} 张，每张都要在这里定义一次）`);
+            }
+            if (!/<Picture\s+\d+>/.test(detailBody)) {
+              bad.ref2v.push(`${sid} detailed_description 没有引用任何 <Picture N>`);
+            }
+          } else {
+            // 旧分镜（没有 refOrder）：<Picture N> 对应第 N 个分镜帧，沿用原规则
+            const detailPositions = Array.from({ length: cuts.length }, (_, i) => detailBody.indexOf(`<Picture ${i + 1}>`));
+            if (detailPositions.some(pos => pos < 0)) {
+              bad.ref2v.push(`${sid} detailed_description 未逐镜引用全部 <Picture N>`);
+            } else if (detailPositions.some((pos, i) => i > 0 && pos <= detailPositions[i - 1])) {
+              bad.ref2v.push(`${sid} detailed_description 中的镜头参考图顺序错乱`);
+            }
           }
           if (/@Image\s*\d+/i.test(h3)) bad.ref2v.push(`${sid} H3 提示词误用了 Wan 的 @ImageN 标记`);
         } else if (/<(?:Subject|Picture|Video|Audio)\s+\d+>/i.test(h3)) {
@@ -630,14 +659,19 @@ export function gateReport(board, ctx = {}) {
         const refs = [...h3.matchAll(pattern)].map(m => ({ n: Number(m[1]), at: m.index ?? 0 }));
         const numbers = [...new Set(refs.map(r => r.n))].sort((a, b) => a - b);
         const expected = Array.from({ length: cuts.length }, (_, i) => i + 1);
-        if (!numbers.length) {
-          bad.ref2v.push(`${sid} 没有 ${isH3Ref2V ? '<Picture N>' : '@ImageN'} 参考图标记`);
-        } else if (numbers.length !== expected.length || numbers.some((n, i) => n !== expected[i])) {
-          bad.ref2v.push(`${sid} 参考图编号应连续对应 1–${cuts.length}，实际为 ${numbers.join(', ')}`);
-        }
-        const firstAt = numbers.map(n => refs.find(r => r.n === n)?.at ?? -1);
-        if (firstAt.some((at, i) => i > 0 && at < firstAt[i - 1])) {
-          bad.ref2v.push(`${sid} 参考图编号出现顺序错乱`);
+        if (isH3Ref2V && refOrder) {
+          // 编号范围、逐张定义已在上面按 refOrder 查过；这里只补「一个编号都没有」
+          if (!numbers.length) bad.ref2v.push(`${sid} 没有 <Picture N> 参考图标记`);
+        } else {
+          if (!numbers.length) {
+            bad.ref2v.push(`${sid} 没有 ${isH3Ref2V ? '<Picture N>' : '@ImageN'} 参考图标记`);
+          } else if (numbers.length !== expected.length || numbers.some((n, i) => n !== expected[i])) {
+            bad.ref2v.push(`${sid} 参考图编号应连续对应 1–${cuts.length}，实际为 ${numbers.join(', ')}`);
+          }
+          const firstAt = numbers.map(n => refs.find(r => r.n === n)?.at ?? -1);
+          if (firstAt.some((at, i) => i > 0 && at < firstAt[i - 1])) {
+            bad.ref2v.push(`${sid} 参考图编号出现顺序错乱`);
+          }
         }
 
         // 台词来自剧本 beats，逐字检查并保证在提示词中按镜头顺序出现。
@@ -1037,9 +1071,18 @@ export function exportPack(
       const refToken = board?.videoModel === 'comfyui_wan' ? '@Image' : 'Picture ';
       const mapping = (seg.cuts ?? [])
         .map((_, i) => `- ${refToken}${i + 1} = f${i + 1}.png${i === 0 ? '（**首帧**，钉 0.00 秒）' : `（钉 ${starts[i].toFixed(2)} 秒）`}`)
-        .join('\\n');
+        .join('\n');
       const modelLabel = board?.videoModel === 'comfyui_wan' ? 'Wan 3.0 Ref2V' : 'MiniMax H3 Ref2VA';
-      const promptMd = `# ${seg.id} · ${modelLabel} 提示词\\n\\n首帧 = **f1.png**。图片按 ${refToken.trim()} 序号挂载：\\n\\n${mapping}\\n\\n---\\n\\n${seg.videoPrompt ?? seg.h3Prompt ?? ''}\\n`;
+      // 有 refOrder（H3 新参考图编号协议）：Picture N 是第 N 张角色 / 场景 / 道具设定图，不是分镜帧
+      const refOrder = board?.videoModel !== 'comfyui_wan' && Array.isArray(seg.refOrder) && seg.refOrder.length ? seg.refOrder : null;
+      const kindLabel = { character: '角色', scene: '场景', prop: '道具' };
+      const refMapping = refOrder
+        ? refOrder.map((r) => `- Picture ${r.no} = ${kindLabel[r.kind] ?? r.kind}「${r.name ?? r.tag}」`).join('\n')
+        : '';
+      const promptMd = refOrder
+        ? `# ${seg.id} · ${modelLabel} 提示词\n\n图片按 Picture 序号上传（每张是角色 / 场景 / 道具的设定图，不是分镜图）：\n\n${refMapping}\n\n---\n\n${seg.videoPrompt ?? seg.h3Prompt ?? ''}\n`
+        : `# ${seg.id} · ${modelLabel} 提示词\n\n首帧 = **f1.png**。图片按 ${refToken.trim()} 序号挂载：\n\n${mapping}\n\n---\n\n${seg.videoPrompt ?? seg.h3Prompt ?? ''}\n`;
+      files.push({ path: `${prefix}${seg.id}/prompt.md`, content: promptMd });
       const pictures = (seg.cuts ?? []).map((_, i) => `${prefix}${seg.id}/f${i + 1}.png`);
       const missing = pictures.filter((rel) => !imageExists(rel));
       missingTotal += missing.length;
@@ -1050,6 +1093,7 @@ export function exportPack(
         cutStarts: cutStarts(seg.cuts),
         prompt: `${prefix}${seg.id}/prompt.md`,
         pictures,
+        ...(refOrder ? { references: refOrder.map((r) => ({ no: r.no, kind: r.kind, name: r.name, tag: r.tag })) } : {}),
         missing,
       });
     }

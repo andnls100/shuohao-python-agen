@@ -68,6 +68,32 @@ def _reference_assets(ctx: Context, ep: int, segment: dict, cut: dict, limit: in
     return [dict(ref, no=index) for index, ref in enumerate(refs[:limit], 1)]
 
 
+def _segment_reference_assets(ctx: Context, segment: dict) -> Optional[tuple[list[dict], list[str]]]:
+    """H3 参考图编号协议：按分镜阶段存下的 refOrder 解析这一段的参考图，返回（参考图列表，缺图说明）。
+
+    提示词里的 <Picture N> 就是 refOrder 里的第 N 张，所以这里的 no 直接沿用 refOrder 的编号。
+    某张图缺失时不让后面的图顶上来（否则编号会指错图），只记一条缺图说明，提交时报错。
+    没有 refOrder 的旧分镜返回 None，调用方沿用逐镜头的旧逻辑。
+    """
+    order = segment.get("refOrder")
+    if not isinstance(order, list) or not order:
+        return None
+    from .frames import _asset_index
+    assets = _asset_index(ctx)
+    refs: list[dict] = []
+    missing: list[str] = []
+    for entry in order:
+        kind, no = str(entry.get("kind") or ""), int(entry.get("no") or 0)
+        pool = assets.get(kind, {})
+        found = pool.get(str(entry.get("name") or "")) or pool.get(str(entry.get("tag") or ""))
+        if not found:
+            missing.append(f"<Picture {no}> 的{kind}「{entry.get('name') or entry.get('tag')}」没有参考图（先运行 images 阶段）")
+            continue
+        refs.append({"kind": kind, "name": str(found["name"]), "path": found["path"], "no": no,
+                     "id": entry.get("id"), "tag": entry.get("tag")})
+    return refs, missing
+
+
 def _asset(refs: list[dict], kind: str) -> Optional[dict]:
     return next((r for r in refs if r.get("kind") == kind), None)
 
@@ -139,16 +165,25 @@ def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str
         if wanted and ep not in wanted: continue
         for seg_index, segment in enumerate(episode.get("segments", []), 1):
             sid = str(segment.get("id") or f"E{ep:02d}-{seg_index:02d}"); cuts = segment.get("cuts") or []
+            # H3：整段共用一份参考图顺序（refOrder），和提示词里的 <Picture N> 是同一套编号；旧分镜没有 refOrder，沿用逐镜头逻辑
+            seg_refs = _segment_reference_assets(ctx, segment) if protocol == "h3" else None
             for cut_index, cut in enumerate(cuts, 1):
                 shot_id = f"{sid}-C{cut_index:02d}"
                 try: duration = round(float(cut.get("seconds", 0) or 0), 2)
                 except (TypeError, ValueError): duration = 0
                 if duration <= 0: raise ValueError(f"镜头 {shot_id} 的 seconds 必须大于 0")
-                refs = _reference_assets(ctx, ep, segment, cut)
-                refs_all = _reference_assets(ctx, ep, segment, cut, limit=15)
+                if seg_refs is not None:
+                    found_refs, ref_missing = seg_refs
+                    refs, refs_all = [dict(r) for r in found_refs[:5]], [dict(r) for r in found_refs[:15]]
+                else:
+                    refs = _reference_assets(ctx, ep, segment, cut)
+                    refs_all = _reference_assets(ctx, ep, segment, cut, limit=15)
+                    ref_missing = []
                 current = {"id": shot_id, "ep": ep, "sceneIndex": segment.get("sceneIndex"), "segmentId": sid,
                            "shotIndex": cut_index, "frame_ref": f"{sid}/f{cut_index}.png", "duration_seconds": duration,
-                           "reference_assets": refs, "reference_assets_all": refs_all, "continuity": cut.get("continuity") or {},
+                           "reference_assets": refs, "reference_assets_all": refs_all,
+                           "reference_numbering": "refOrder" if seg_refs is not None else "legacy",
+                           "reference_missing": ref_missing, "continuity": cut.get("continuity") or {},
                            "continuity_mode": str(segment.get("continuityMode") or ""),
                            "prompt": _shot_prompt(segment, cut, cut_index, visual_style, visual_style_prompt) if protocol == "seedance" else _prompt(segment, protocol),
                            "state": "planned", "task_id": None, "video_url": None, "video_path": None, "last_frame_path": None, "error": None}
@@ -447,6 +482,7 @@ def _run_comfyui_queue(manifest: dict, providers: list, root: Path, manifest_pat
         try:
             submit_item = dict(item)
             handle = video_comfyui.submit(submit_item, manifest, provider["comfyui"], root.parent, root / "work", None, root / "videos" / _safe(item["id"]))
+            item["submitted_prompt"] = handle.get("prompt")  # 实际提交的提示词（编号已按上传顺序对齐），出问题时好核对
             item["state"] = "polling"; write_json(manifest_path, manifest)
             pending.append((item, handle))
         except Exception as exc:

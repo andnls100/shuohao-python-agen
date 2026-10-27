@@ -29,7 +29,9 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-UA = "Mozilla/5.0 (compatible; shuohao-agent/1.0)"  # Cloudflare 隧道会拦 Python-urllib 默认 UA
+from ..ref_tags import collage_mapping, picture_numbers, remap_picture_tags
+
+UA ="Mozilla/5.0 (compatible; shuohao-agent/1.0)"  # Cloudflare 隧道会拦 Python-urllib 默认 UA
 VIDEO_EXTS = (".mp4", ".webm", ".mov", ".mkv", ".gif")
 
 
@@ -547,9 +549,14 @@ def submit(item: Dict[str, Any], manifest: Dict[str, Any], cfg: Dict[str, Any], 
         if not cfg.get("workflow_ref"):
             raise ComfyError("models.json 里没有配置 workflow_ref（Ref2VA 工作流路径）")
         template = client.load_workflow(Path(cfg["workflow_ref"]))
+        if item.get("reference_missing"):
+            # 缺的那张图如果直接跳过，后面的图会顶上来，提示词里的 <Picture N> 就指错图了
+            raise ComfyError(f"镜头 {item['id']} 有参考图缺失，提示词里的图片编号会错位：" + "；".join(item["reference_missing"]))
         refs: List[Tuple[str, Path]] = []
+        source_nos: List[Optional[int]] = []  # 与 refs 一一对应：这张图在提示词里原来的 <Picture N> 编号（上一镜帧没有）
         if previous_last:  # 没配 i2v 工作流时，上一镜最后一帧作为第一张参考图
             refs.append(("previous", Path(previous_last)))
+            source_nos.append(None)
         for asset in item.get("reference_assets_all") or item.get("reference_assets") or []:
             if asset.get("kind") == "previous":
                 continue
@@ -558,10 +565,25 @@ def submit(item: Dict[str, Any], manifest: Dict[str, Any], cfg: Dict[str, Any], 
             if not p.is_file():
                 raise FileNotFoundError(f"参考图不存在：{asset.get('path')}")
             refs.append((str(asset.get("kind") or "reference"), p))
+            no = asset.get("no")
+            source_nos.append(int(no) if no else len([n for n in source_nos if n is not None]) + 1)
         if not refs:
             raise ComfyError(f"镜头 {item['id']} 没有参考图（Ref2VA 至少需要一张场景图或角色图）")
         max_refs = int(cfg.get("max_refs", 6))
+        planned_count = len(refs)
         refs = plan_references(refs, max_refs, work_dir / f"collage-{item['id']}.png")
+        # 提示词里的编号是分镜阶段按 refOrder 写的；上传时前面多了上一镜帧、或尾部几张被拼成一张，编号要同步改掉
+        # 旧格式分镜（legacy）的 <Picture N> 是分镜序号，不是素材编号，不能按素材位置去改
+        if item.get("reference_numbering") == "refOrder":
+            front = 1 if previous_last else 0
+            positions = collage_mapping(planned_count - front, max_refs, front=front)
+            renumber = {src: positions[src] for src in source_nos if src is not None and src in positions}
+            if any(old != new for old, new in renumber.items()):
+                prompt = remap_picture_tags(prompt, renumber)
+        have = set(picture_numbers(prompt))
+        if item.get("reference_numbering") == "legacy" and have != set(range(1, len(refs) + 1)):
+            log(f"[ComfyUI] ⚠ 镜头 {item['id']} 的分镜是旧格式（没有 refOrder）：提示词里的 <Picture N> 是分镜序号，"
+                f"和上传的 {len(refs)} 张设定图对不上。请重跑 storyboard 阶段（--force）生成新格式分镜。")
         uploaded_names = [client.upload_image(p) for _k, p in refs]
         # 图片编号按上传顺序生成；只要提示词没有完整引用所有参考图，就补上角色/场景/道具对应关系。
         ref_kinds = [k for k, _p in refs]
@@ -585,7 +607,7 @@ def submit(item: Dict[str, Any], manifest: Dict[str, Any], cfg: Dict[str, Any], 
     prompt_id = client.queue(wf)
     item["task_id"] = prompt_id
     return {"client": client, "wf": wf, "nodes": nodes, "cfg": cfg, "prompt_id": prompt_id, "target_base": target_base,
-            "note": f"{mode}：{note}"}
+            "note": f"{mode}：{note}", "prompt": prompt}
 
 
 def finish(handle: Dict[str, Any]) -> Tuple[Path, str]:

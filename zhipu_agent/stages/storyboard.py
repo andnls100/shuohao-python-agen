@@ -16,6 +16,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..ref_tags import build_ref_order, resolve_placeholders
 from ..skill_loader import build_system
 from ..visual_style import visual_style_instruction
 from ..llm import ask_text
@@ -31,6 +32,22 @@ from .storyboard_repair import (
 SKILL = "novel-storyboard"
 BATCH = 3
 PASSES = ["storyboard-pass.md", "shot-writing.md", "frame.md"]
+
+# MiniMax H3 Ref2VA 的参考图写法。模型写提示词时还不知道视频阶段最终上传哪几张图、按什么顺序，
+# 所以只写素材 ID；程序绑定 cut.assetRefs 之后算出 refOrder（本段参考图顺序），再把 ID 换成最终编号。
+H3_REFERENCE_CONTRACT = (
+    "\n\nREFERENCE TAG CONTRACT (MiniMax H3 Ref2VA, overrides any other statement about <Picture N>): "
+    "the video model is given one reference image per character, per scene and per prop that appears in the segment "
+    "(character/scene/prop design sheets) — it is NOT given the storyboard frames, and <Picture N> is never a shot number. "
+    "You do not know the final image numbers, so refer to every reference image ONLY by the canonical card id inside the tag: "
+    "<Picture C02> for a character card id, <Picture S01> for the id of the scene card that matches the segment's sceneIndex "
+    "(seedScenes[].sceneId), <Picture P03> for a prop card id. Copy ids exactly from the cards. "
+    "NEVER write a digit tag such as <Picture 1> or <Picture 2>; the program replaces ids with the final numbers after it binds assets. "
+    "Define every character, the scene and every prop that appears in any cut of the segment exactly once in subject_definitions, "
+    "each with its own tag (several characters never share one tag), and use the same tags in retention_analysis and detailed_description "
+    "where that subject, the environment or the prop is used. Only use ids that are listed in some cut's characters/props of this segment "
+    "or that are the segment's scene id; do not invent ids."
+)
 
 
 _PARAMS_KEY = "AGENT_STORYBOARD_PARAMS"
@@ -144,14 +161,30 @@ def _repair_ref2v_prompts(ctx: Context, doc: Dict[str, Any], path: Path, result:
         "Return only the corrected final video prompt, without JSON, headings outside the required model format, "
         "or explanation.\n\n## Selected model skill\n" + skill_text
     )
+    # 新参考图编号协议：这一段有固定的参考图表（refOrder），编号 N 就是表里的第 N 张图，和镜头序号无关。
+    ref_system = (
+        "Repair only the final Ref2V video prompt for one existing segment. Follow the model skill below. "
+        "Do not rewrite the storyboard, cuts, timing, action order, character/prop assignments, or story facts. "
+        "Correct only the listed validation errors and preserve every supplied dialogue verbatim. "
+        "This segment has a FIXED reference-image table (referenceImages in the user message): <Picture N> is exactly "
+        "image N of that table. It is never a shot number, so do not reorder tags by shot and do not renumber. "
+        "Write only the final numbers from the table (never card ids, never numbers that are not in the table). "
+        "Define EVERY image of the table once in subject_definitions with its own <Picture N> tag, use the same tags in "
+        "retention_analysis and detailed_description where that subject, the environment or the prop is used, and never let "
+        "two different subjects share one tag. Keep every shot's action and dialogue in its original order and retain all "
+        "required section headings. "
+        "Return only the corrected final video prompt, without JSON, headings outside the required model format, "
+        "or explanation.\n\n## Selected model skill\n" + skill_text
+    )
     repaired = False
     for episode in doc.get("episodes", []):
         for segment in episode.get("segments", []):
             sid = str(segment.get("id") or "")
             if sid not in segment_ids:
                 continue
+            order = segment.get("refOrder") if video_model == "comfyui_h3" else None
             errors = [part.strip() for line in result.text.splitlines() for part in line.split("；") if sid in part]
-            user = json.dumps({
+            payload = {
                 "videoModel": video_model,
                 "segmentId": sid,
                 "validationErrors": errors,
@@ -159,13 +192,20 @@ def _repair_ref2v_prompts(ctx: Context, doc: Dict[str, Any], path: Path, result:
                 "cuts": segment.get("cuts", []),
                 "soundscape": segment.get("soundscape", ""),
                 "music": segment.get("music", ""),
-            }, ensure_ascii=False, indent=2)
+            }
+            if order:
+                payload["referenceImages"] = [
+                    {"number": e["no"], "kind": e["kind"], "cardId": e.get("tag"), "name": e.get("name")} for e in order
+                ]
+            user = json.dumps(payload, ensure_ascii=False, indent=2)
             fixed = ask_text(
-                system, user, ctx.settings,
+                ref_system if order else system, user, ctx.settings,
                 purpose=f"ref2v-prompt-repair:{sid}",
             ).strip()
             if not fixed:
                 raise ValueError(f"{sid} Ref2V 局部修复返回空提示词")
+            if order:  # 模型万一还是写了素材 ID，这里补一次解析
+                fixed, _unresolved = resolve_placeholders(fixed, order)
             if video_model == "comfyui_h3" and len(fixed) > 7000:
                 raise ValueError(f"{sid} H3 Ref2VA 修复后提示词超过 7000 字符")
             segment["h3Prompt"] = fixed
@@ -175,6 +215,24 @@ def _repair_ref2v_prompts(ctx: Context, doc: Dict[str, Any], path: Path, result:
     if repaired:
         write_json(path, doc)
     return repaired
+
+
+def _apply_ref_order(ctx: Context, segment: Dict[str, Any]) -> None:
+    """H3：算出这一段的参考图顺序 refOrder，并把提示词里的素材 ID 占位符（<Picture C02>）换成最终编号。
+
+    refOrder 是视频阶段上传图片的唯一依据，也是校验器检查 <Picture N> 的依据，
+    所以提示词里的编号和上传的图片一定是同一套。对不上的占位符原样保留，由校验器报错并走局部修复。
+    """
+    order = build_ref_order(segment)
+    segment["refOrder"] = order
+    prompt = segment.get("h3Prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        return
+    resolved, unresolved = resolve_placeholders(prompt, order)
+    segment["h3Prompt"] = resolved
+    if unresolved:
+        ctx.log(f"[storyboard] {segment.get('id', '?')}：提示词里的 {'、'.join(f'<Picture {t}>' for t in unresolved)} "
+                f"对不上本段参考图（{', '.join(e['tag'] for e in order) or '本段没有绑定素材'}），交给校验修复")
 
 
 def _blocking_lines(ctx: Context) -> List[str]:
@@ -342,6 +400,8 @@ def run(
         "Preserve all supplied <Picture N> reference numbers for MiniMax H3 Ref2VA; for Wan 3.0 Ref2V use @ImageN "
         "with the same numeric indices and no MiniMax-only markup. Do not invent references or story events."
     )
+    if video_model == "comfyui_h3":
+        language_contract += H3_REFERENCE_CONTRACT
     language_contract += (
         "\n\nCUT FIELD CONTRACT: every cut.shot is always Simplified Chinese, regardless of promptLang; "
         "every cut.frame is Simplified Chinese. cut.characters must contain only the canonical character IDs "
@@ -527,6 +587,8 @@ def run(
                     for name in _prop_names:
                         bind_asset("prop", _prop_id_by_name.get(str(name).strip(), str(name).strip()), name)
                     cut["assetRefs"] = refs
+                if video_model == "comfyui_h3":
+                    _apply_ref_order(ctx, segment)
             _doc["episodes"] = sorted(
                 [e for e in _doc["episodes"] if e["ep"] != ep] + [episode], key=lambda e: e["ep"])
             write_json(_path, _doc)
