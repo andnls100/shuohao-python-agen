@@ -334,6 +334,10 @@ def run_items(
             # 报错无法归属到具体条目：全部带着报错回炉
             pending = {k: list(lines) for k in by_key}
         if rnd == rounds:
+            if structural and result.ok:
+                # 校验本身通过，但有条目 apply 失败（结构不对、没写入）：把原因带进异常，别吞掉
+                text = "\n".join(f"{k}: {'; '.join(v)}" for k, v in structural.items())
+                result = Result(1, stdout="条目未能写入：\n" + text)
             break
 
     raise StageFailed(label, result)

@@ -20,11 +20,11 @@ from ..ref_tags import build_ref_order, resolve_placeholders
 from ..skill_loader import build_system
 from ..visual_style import visual_style_instruction
 from ..llm import ask_text
-from ..validator import Result
+from ..llm import LLMError
+from ..validator import Result, StageFailed
 from .base import (
     Context, Item, batches, compact, ep_tokens, read_json, run_items, write_json,
 )
-from ..validator import StageFailed
 from .storyboard_repair import (
     balance_episode_durations, repair_deterministic_storyboard,
     repair_dialogue_fit, repair_minor_cut_durations,
@@ -117,6 +117,35 @@ def _refs(ctx: Context, *, names: bool = True) -> List[Any]:
 
 def check(ctx: Context) -> Result:
     return ctx.run(ctx.skill(SKILL), ["validate", artifact(ctx), *_refs(ctx)], cwd=ctx.dir("storyboard"))
+
+
+def _write_validation_report(ctx: Context, sb_dir: Path, errors: List[str]) -> None:
+    """Always refresh the report so a successful run never leaves stale failures."""
+    report_path = sb_dir / "storyboard-validation-errors.md"
+    sb_dir.mkdir(parents=True, exist_ok=True)
+    if errors:
+        # 逐集错误与全剧终检常重复同一行，去重后再写
+        seen: set = set()
+        uniq = []
+        for block in errors:
+            kept = []
+            for line in block.splitlines():
+                key = line.strip()
+                if key and not key.startswith("##"):
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                kept.append(line)
+            uniq.append("\n".join(kept))
+        report_path.write_text(
+            "# 分镜人工校验报告\n\n"
+            "本文件记录自动校验未通过的项目。分镜 JSON、Markdown/HTML 报告和投产包仍已输出；"
+            "请人工核对下列问题。\n\n" + "\n\n---\n\n".join(uniq) + "\n", encoding="utf-8")
+        ctx.log(f"[storyboard] ⚠ 自动校验有未通过项；人工检查报告：{report_path}")
+    else:
+        report_path.write_text("# 分镜人工校验报告\n\n本次运行的分镜自动校验通过，未记录错误。\n", encoding="utf-8")
+        ctx.log("[storyboard] 自动校验通过")
+
 
 
 def _repair_existing_h3(ctx: Context, doc: Dict[str, Any], path: Path,
@@ -608,7 +637,12 @@ def run(
                 write_json(_p, _doc)
 
             result = ctx.run(sk, ["validate", _p, *_refs(ctx)], cwd=sb_dir)
-            if not result.ok and _repair_ref2v_prompts(ctx, _doc, _p, result, video_model):
+            try:
+                repaired = (not result.ok) and _repair_ref2v_prompts(ctx, _doc, _p, result, video_model)
+            except LLMError as exc:  # 提示词修复调用失败不应丢掉分镜；错误保留在校验报告里
+                ctx.log(f"[storyboard] ⚠ Ref2V 提示词定向修复调用失败，保留原提示词：{str(exc)[:200]}")
+                repaired = False
+            if repaired:
                 result = ctx.run(sk, ["validate", _p, *_refs(ctx)], cwd=sb_dir)
             # One targeted prompt-only repair at most. Never regenerate an episode or rewrite cuts.
             return result
@@ -645,6 +679,8 @@ def run(
                 continue
             prompt = str(segment.get("h3Prompt") or "").strip()
             if not prompt:
+                validation_errors.append(f"## 缺少提示词\n\n{segment.get('id', '?')} 缺少最终 Ref2V 视频提示词")
+                _write_validation_report(ctx, sb_dir, validation_errors)
                 raise ValueError(f"{segment.get('id', '?')} 缺少最终 Ref2V 视频提示词")
             source_hash = hashlib.sha1(prompt.encode("utf-8")).hexdigest()
             segment["videoPrompt"] = prompt
@@ -660,24 +696,5 @@ def run(
     ctx.log("已导出投产包（每段一个文件夹 + manifest.json）" if export.ok
             else f"⚠ export 失败：{export.text[:200]}")
 
-    # Keep the deliverable and validation diagnostics separate. The report is always
-    # refreshed so a successful run cannot leave stale failures from an older run.
-    report_path = sb_dir / "storyboard-validation-errors.md"
-    if validation_errors:
-        report = (
-            "# 分镜人工校验报告\n\n"
-            "本文件记录自动校验未通过的项目。分镜 JSON、Markdown/HTML 报告和投产包仍已输出；"
-            "请人工核对下列问题，不要把自动校验失败等同于生成结果丢失。\n\n"
-            + "\n\n---\n\n".join(validation_errors)
-            + "\n"
-        )
-        report_path.write_text(report, encoding="utf-8")
-        ctx.log(f"[storyboard] ⚠ 自动校验有未通过项；人工检查报告：{report_path}")
-    else:
-        report_path.write_text(
-            "# 分镜人工校验报告\n\n本次运行的分镜自动校验通过，未记录错误。\n",
-            encoding="utf-8",
-        )
-        ctx.log("[storyboard] 自动校验通过")
-
+    _write_validation_report(ctx, sb_dir, validation_errors)
     return path
