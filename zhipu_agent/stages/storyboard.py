@@ -24,6 +24,7 @@ from ..validator import Result
 from .base import (
     Context, Item, batches, compact, ep_tokens, read_json, run_items, write_json,
 )
+from ..validator import StageFailed
 from .storyboard_repair import (
     balance_episode_durations, repair_deterministic_storyboard,
     repair_dialogue_fit, repair_minor_cut_durations,
@@ -312,6 +313,7 @@ def run(
     ctx.log(f"[storyboard] 分镜参数覆盖：{json.dumps(_eff, ensure_ascii=False) if _eff else '无（使用技能包默认）'}；Ref2V 专属旧式检查={'开' if h3_gates else '关闭'}")
     ctx.log(f"[storyboard] 打戏增强模式：{fight_enhancement}" + ("（已有分镜需 --force 才会按新模式重做）" if artifact(ctx).is_file() and not ctx.force else ""))
     path = artifact(ctx)
+    validation_errors: List[str] = []
 
     art_scenes: Dict[str, Any] = {}
     if ctx.artifact("art").is_file():
@@ -611,11 +613,19 @@ def run(
             # One targeted prompt-only repair at most. Never regenerate an episode or rewrite cuts.
             return result
 
-        run_items(
-            ctx, items, apply=apply, label=f"storyboard-第{group[0]}–{group[-1]}集",
-            validate=validate_batch,
-            rounds=0,  # no episode-wide retries; repairs above are deterministic or cut-scoped
-        )
+        batch_label = f"storyboard-第{group[0]}–{group[-1]}集"
+        try:
+            run_items(
+                ctx, items, apply=apply, label=batch_label,
+                validate=validate_batch,
+                rounds=0,  # no episode-wide retries; repairs above are deterministic or cut-scoped
+            )
+        except StageFailed as exc:
+            # Validation is advisory for this stage: preserve the generated storyboard and
+            # expose failures in a separate report for human review instead of discarding output.
+            detail = exc.result.text or str(exc)
+            validation_errors.append(f"## {batch_label}\n\n{detail}")
+            ctx.log(f"[storyboard] ⚠ {batch_label} 校验未通过；仍保留生成结果，详见 storyboard-validation-errors.md")
         merged = {e["ep"]: e for e in main["episodes"]}
         merged.update({e["ep"]: e for e in batch_doc["episodes"]})
         main["episodes"] = [merged[k] for k in sorted(merged)]
@@ -623,7 +633,8 @@ def run(
 
     result = _repair_existing_h3(ctx, main, path, prompt_lang)
     if not result.ok:
-        ctx.log("⚠ 全剧校验未通过：\n" + result.text)
+        validation_errors.append(f"## 全剧最终校验\n\n{result.text}")
+        ctx.log("⚠ 全剧校验未通过；生成结果仍会输出，错误另存到 storyboard-validation-errors.md")
 
     # h3Prompt is authored directly as the selected model's final Ref2V prompt.
     # Keep videoPrompt as the downstream stable field; avoid a second LLM rewrite call.
@@ -648,4 +659,25 @@ def run(
     export = ctx.run(sk, ["export", path, *refs, "--out", sb_dir], cwd=sb_dir)
     ctx.log("已导出投产包（每段一个文件夹 + manifest.json）" if export.ok
             else f"⚠ export 失败：{export.text[:200]}")
+
+    # Keep the deliverable and validation diagnostics separate. The report is always
+    # refreshed so a successful run cannot leave stale failures from an older run.
+    report_path = sb_dir / "storyboard-validation-errors.md"
+    if validation_errors:
+        report = (
+            "# 分镜人工校验报告\n\n"
+            "本文件记录自动校验未通过的项目。分镜 JSON、Markdown/HTML 报告和投产包仍已输出；"
+            "请人工核对下列问题，不要把自动校验失败等同于生成结果丢失。\n\n"
+            + "\n\n---\n\n".join(validation_errors)
+            + "\n"
+        )
+        report_path.write_text(report, encoding="utf-8")
+        ctx.log(f"[storyboard] ⚠ 自动校验有未通过项；人工检查报告：{report_path}")
+    else:
+        report_path.write_text(
+            "# 分镜人工校验报告\n\n本次运行的分镜自动校验通过，未记录错误。\n",
+            encoding="utf-8",
+        )
+        ctx.log("[storyboard] 自动校验通过")
+
     return path
