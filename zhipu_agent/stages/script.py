@@ -118,6 +118,9 @@ def run(ctx: Context, eps: Optional[List[int]] = None) -> Path:
     done = {e["ep"] for e in main["episodes"] if e.get("scenes")}
     todo = [e for e in wanted if e not in done and e in seed_eps]
     if not todo:
+        if not path.is_file():
+            raise ValueError(
+                f"没有可写的集：--eps {eps} 在大纲里找不到对应集（大纲现有集：{sorted(outline_eps)}）")
         ctx.log("所有集都已写好，跳过写戏")
     system = build_system(sk, ["script-pass.md"])
 
