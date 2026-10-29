@@ -104,6 +104,37 @@ def is_ui_format(data: Any) -> bool:
     return isinstance(data, dict) and isinstance(data.get("nodes"), list)
 
 
+_FRONTEND_ONLY = {"MarkdownNote", "Note", "Reroute", "PrimitiveNode"}
+_WIDGET_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN", "COMBO"}
+
+
+def _widget_values_by_schema(schema: Dict[str, Any], values: List[Any]) -> Dict[str, Any]:
+    """把界面格式的 widgets_values（只有值、没有名字）按服务器登记的输入顺序还原成 {输入名: 值}。
+
+    界面里有些控件会多存一个值：带 control_after_generate 的种子（固定/随机）、LoadImage 的上传按钮；
+    这些额外值要跳过，否则后面的控件会整体错位。"""
+    out: Dict[str, Any] = {}
+    pos = 0
+    spec_all: Dict[str, Any] = {}
+    for section in ("required", "optional"):
+        spec_all.update((schema.get("input") or {}).get(section) or {})
+    for name, spec in spec_all.items():
+        if not isinstance(spec, (list, tuple)) or not spec:
+            continue
+        kind = spec[0]
+        opts = spec[1] if len(spec) > 1 and isinstance(spec[1], dict) else {}
+        is_widget = isinstance(kind, list) or (isinstance(kind, str) and kind in _WIDGET_TYPES)
+        if not is_widget or opts.get("forceInput"):
+            continue
+        if pos >= len(values):
+            break
+        out[name] = values[pos]
+        pos += 1
+        if opts.get("control_after_generate") or opts.get("image_upload") or opts.get("video_upload") or opts.get("audio_upload"):
+            pos += 1
+    return out
+
+
 def _ui_to_api(data: Dict[str, Any], object_info: Dict[str, Any], source: str) -> Dict[str, Any]:
     """Convert a ComfyUI canvas workflow (nodes/links) to /prompt API format."""
     nodes = data.get("nodes")
@@ -116,11 +147,19 @@ def _ui_to_api(data: Dict[str, Any], object_info: Dict[str, Any], source: str) -
             link_id, origin_id, origin_slot, target_id, target_slot = link[:5]
             link_map[str(link_id)] = (str(origin_id), int(origin_slot), str(target_id), int(target_slot))
 
+    skipped = set()
+    for node in nodes:
+        if isinstance(node, dict) and node.get("id") is not None and (
+                node.get("mode") in (2, 4) or str(node.get("type")) in _FRONTEND_ONLY):
+            skipped.add(str(node["id"]))
+
     result: Dict[str, Any] = {}
     for node in nodes:
         if not isinstance(node, dict) or node.get("id") is None or not node.get("type"):
             continue
         node_id = str(node["id"])
+        if node_id in skipped:  # 注释节点、被静音/绕过的节点不参与执行
+            continue
         node_type = str(node["type"])
         resolved_type = node_type
         if resolved_type not in object_info:
@@ -146,6 +185,10 @@ def _ui_to_api(data: Dict[str, Any], object_info: Dict[str, Any], source: str) -
             for key, value in named.items():
                 if key in allowed:
                     inputs[key] = value
+        elif isinstance(node.get("widgets_values"), list):
+            # 标准界面导出没有控件名，只有按顺序排列的值：按服务器登记的输入顺序对号入座
+            for key, value in _widget_values_by_schema(schema, node["widgets_values"]).items():
+                inputs[key] = value
         # Connections are authoritative and override any stale widget values.
         for port in node.get("inputs") or []:
             if not isinstance(port, dict) or port.get("link") is None:
@@ -156,19 +199,21 @@ def _ui_to_api(data: Dict[str, Any], object_info: Dict[str, Any], source: str) -
             origin_id, origin_slot, target_id, _target_slot = link
             if target_id != node_id:
                 raise ComfyError(f"{source} link {port['link']} 的目标节点不匹配")
+            if origin_id in skipped:
+                inputs.pop(str(port.get("name")), None)
+                continue
             inputs[str(port.get("name"))] = [origin_id, origin_slot]
 
         missing = []
         required = (schema.get("input") or {}).get("required") or {}
         for key, spec in required.items():
-            if key not in inputs:
-                # Inputs with a connected socket are filled above; a required unconnected
-                # input must have a named widget value in the canvas JSON.
+            # 动态输入组（如 values.a、ref_images.ref_image_0）在 API 里以「组名.成员」出现
+            if key not in inputs and not any(str(k).startswith(key + ".") for k in inputs):
                 missing.append(key)
         if missing:
             raise ComfyError(
                 f"{source} 节点 {node_id}（{resolved_type}）缺少 API 必需输入：{', '.join(missing)}；"
-                "该节点可能没有 widgets_values_named，需导出包含完整控件值的工作流"
+                "请在 ComfyUI 里用 Save (API Format) 导出该工作流，把导出的文件放到 workflow 目录"
             )
         result[node_id] = {"class_type": resolved_type, "inputs": inputs}
         title = node.get("title") or (node.get("properties") or {}).get("Node name for S&R")
@@ -322,6 +367,87 @@ def build_ref2va(template: Dict[str, Any], *, prompt: str, seconds: float, aspec
         if size_preset:
             ins["size_preset"] = size_preset
     _set_seed_and_prefix(wf, seed, prefix, nodes)
+    return wf
+
+
+MINIMAX_R2V = "MiniMaxH3ReferenceToVideo"
+MINIMAX_MAX_REFS = 9  # 该节点最多 9 张参考图
+
+
+def is_minimax_r2v(template: Dict[str, Any]) -> bool:
+    return any(isinstance(v, dict) and v.get("class_type") == MINIMAX_R2V for v in template.values())
+
+
+def _round32(value: float) -> int:
+    return max(32, int(math.floor(value / 32 + 0.5)) * 32)
+
+
+def dims_for(aspect: Optional[str], size_preset: Optional[str]) -> Optional[Tuple[int, int]]:
+    """按画幅和清晰度算宽高（32 的倍数）：480p+16:9 → 864x480；9:16 → 480x864。"""
+    if not aspect or ":" not in aspect:
+        return None
+    m = re.match(r"\s*(\d+)", str(size_preset or "480p"))
+    short = _round32(int(m.group(1)) if m else 480)
+    a, b = (float(x) for x in aspect.split(":", 1))
+    if a <= 0 or b <= 0:
+        return None
+    if a >= b:
+        return _round32(short * a / b), short
+    return short, _round32(short * b / a)
+
+
+def minimax_frames(seconds: float) -> int:
+    """与工作流里 Math Expression 节点相同的帧数公式（24fps，长度凑成 17 的倍数 + 5）。"""
+    n = max(5, round(seconds * 24))
+    return n + (5 - (n % 17)) % 17
+
+
+def build_minimax_r2v(template: Dict[str, Any], *, prompt: str, seconds: float, aspect: Optional[str], size_preset: Optional[str],
+                      uploaded: Sequence[str], seed: int, prefix: str, nodes: Optional[Dict[str, Any]] = None,
+                      lightning: bool = False) -> Dict[str, Any]:
+    """video_minimax_h3_r2v.json（MiniMaxH3ReferenceToVideo）：参考图按上传顺序接到 ref_images.ref_image_N，
+    提示词里的 <Picture N> 就是第 N 张。"""
+    nodes = nodes or {}
+    wf = copy.deepcopy(template)
+    gen = _need(wf, (MINIMAX_R2V,), nodes.get("r2v"), "", "参考生视频（MiniMaxH3ReferenceToVideo）")
+    ins = wf[gen]["inputs"]
+    if not uploaded:
+        raise ComfyError("MiniMax H3 参考生视频至少需要一张参考图")
+    if len(uploaded) > MINIMAX_MAX_REFS:
+        raise ComfyError(f"MiniMax H3 参考生视频最多 {MINIMAX_MAX_REFS} 张参考图，实际 {len(uploaded)} 张")
+    # 参考图：先清掉模板里的示例图，再按上传顺序接新的 LoadImage
+    for key in [k for k in ins if str(k).startswith("ref_images.")]:
+        del ins[key]
+    for i, name in enumerate(uploaded):
+        node_id = f"ref_image_{i}"
+        wf[node_id] = {"class_type": "LoadImage", "inputs": {"image": name}, "_meta": {"title": f"Reference {i + 1}"}}
+        ins[f"ref_images.ref_image_{i}"] = [node_id, 0]
+    # 提示词：通常经由一个字符串节点接入；也兼容直接填在控件里
+    link = ins.get("prompt")
+    if isinstance(link, list) and link and str(link[0]) in wf and "value" in wf[str(link[0])]["inputs"]:
+        wf[str(link[0])]["inputs"]["value"] = prompt
+    else:
+        ins["prompt"] = prompt
+    # 时长：优先改「Duration」浮点节点（它经表达式节点算出 length）；找不到就直接写 length
+    dur = find_node(wf, ("PrimitiveFloat",), nodes.get("duration"), "duration")
+    secs = whole_seconds(seconds)
+    if dur:
+        wf[dur]["inputs"]["value"] = secs
+    else:
+        ins["length"] = minimax_frames(secs)
+    # 尺寸：按画幅和清晰度直接写宽高，替换分辨率选择器的连线
+    wh = dims_for(aspect, size_preset)
+    if wh:
+        ins["width"], ins["height"] = wh
+    # 蒸馏加速 LoRA（4 步）：默认关闭，models.json 里 "lightning": true 开启
+    boolean = find_node(wf, ("PrimitiveBoolean",), nodes.get("lightning"), "lightning")
+    if boolean:
+        wf[boolean]["inputs"]["value"] = bool(lightning)
+    _set_seed_and_prefix(wf, seed, prefix, nodes)
+    # 去掉没人用的节点（换掉的示例图、不再被引用的分辨率选择器）
+    used = {str(v[0]) for n in wf.values() for v in n.get("inputs", {}).values() if isinstance(v, list) and v}
+    for node_id in [k for k, v in wf.items() if v.get("class_type") in ("LoadImage", "ResolutionSelector") and k not in used]:
+        del wf[node_id]
     return wf
 
 
@@ -540,6 +666,7 @@ def submit(item: Dict[str, Any], manifest: Dict[str, Any], cfg: Dict[str, Any], 
     prompt = str(item["prompt"])
 
     use_i2v = bool(previous_last) and bool(cfg.get("workflow_i2v"))
+    minimax = False
     if use_i2v:
         template = client.load_workflow(Path(cfg["workflow_i2v"]))
         uploaded = client.upload_image(previous_last)
@@ -549,6 +676,7 @@ def submit(item: Dict[str, Any], manifest: Dict[str, Any], cfg: Dict[str, Any], 
         if not cfg.get("workflow_ref"):
             raise ComfyError("models.json 里没有配置 workflow_ref（Ref2VA 工作流路径）")
         template = client.load_workflow(Path(cfg["workflow_ref"]))
+        minimax = is_minimax_r2v(template)
         if item.get("reference_missing"):
             # 缺的那张图如果直接跳过，后面的图会顶上来，提示词里的 <Picture N> 就指错图了
             raise ComfyError(f"镜头 {item['id']} 有参考图缺失，提示词里的图片编号会错位：" + "；".join(item["reference_missing"]))
@@ -570,6 +698,8 @@ def submit(item: Dict[str, Any], manifest: Dict[str, Any], cfg: Dict[str, Any], 
         if not refs:
             raise ComfyError(f"镜头 {item['id']} 没有参考图（Ref2VA 至少需要一张场景图或角色图）")
         max_refs = int(cfg.get("max_refs", 6))
+        if minimax:
+            max_refs = min(max_refs, MINIMAX_MAX_REFS)
         planned_count = len(refs)
         refs = plan_references(refs, max_refs, work_dir / f"collage-{item['id']}.png")
         # 提示词里的编号是分镜阶段按 refOrder 写的；上传时前面多了上一镜帧、或尾部几张被拼成一张，编号要同步改掉
@@ -592,13 +722,17 @@ def submit(item: Dict[str, Any], manifest: Dict[str, Any], cfg: Dict[str, Any], 
         if header and not all(tag in prompt for tag in required_picture_refs):
             prompt = header + "\n" + prompt
 
-        wf = build_ref2va(template, prompt=prompt, seconds=seconds, aspect=aspect, size_preset=cfg.get("size_preset"),
-                          uploaded=uploaded_names, seed=seed, prefix=prefix, nodes=nodes)
+        if minimax:
+            wf = build_minimax_r2v(template, prompt=prompt, seconds=seconds, aspect=aspect, size_preset=cfg.get("size_preset"),
+                                   uploaded=uploaded_names, seed=seed, prefix=prefix, nodes=nodes, lightning=bool(cfg.get("lightning")))
+        else:
+            wf = build_ref2va(template, prompt=prompt, seconds=seconds, aspect=aspect, size_preset=cfg.get("size_preset"),
+                              uploaded=uploaded_names, seed=seed, prefix=prefix, nodes=nodes)
         mode, note = "ref2va", f"{len(refs)} 张参考图" + ("（含拼图）" if any(k == "collage" for k, _p in refs) else "")
     log(f"\n===== ComfyUI 镜头 {item['id']} | 模式={mode}（{note}）| 种子={seed} =====\n{prompt}\n===== 提示词结束 =====\n")
     log(f"[ComfyUI] 服务器：{cfg['base_url']} | 工作流：{cfg.get('workflow_i2v') if mode == 'i2v' else cfg.get('workflow_ref')} | 时长={seconds}s | 画幅={aspect} | 清晰度={cfg.get('size_preset')}")
-    canvas_wf = canvas_from_api(wf)
-    try:  # 保存画布/UI 格式工作流，参数按当前镜头动态填充
+    canvas_wf = wf if (not use_i2v and minimax) else canvas_from_api(wf)
+    try:  # 保存本镜头实际提交的工作流（Kaggle 版存画布格式；MiniMax 版存 API 格式），方便核对参数
         work_dir.mkdir(parents=True, exist_ok=True)
         (work_dir / f"{item['id']}.workflow.json").write_text(json.dumps(canvas_wf, ensure_ascii=False, indent=1), encoding="utf-8")
     except OSError:
