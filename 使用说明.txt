@@ -300,3 +300,17 @@ AGENT_STORYBOARD_PARAMS={"minCutSeconds":4,"maxCutSeconds":10,"maxOnScreen":6,"m
 4) 重要：工作流必须是「API 格式」。ComfyUI 里用 Save (API Format) 导出。
    kaggle_h3_ref2va.json 已经是 API 格式；MiniMax_H3_Fast_I2V.json 目前是界面格式（含 nodes/links），
    需要重新导出为 API 格式并覆盖该文件，否则连续镜头会报错提示。
+
+========== 导出小模型训练数据（JSONL）==========
+把已生成、并通过校验的分镜导出成训练集（只保留通过的样本）：
+  python scripts/export_training_data.py --root output --out training
+常用参数：
+  --task prompt|storyboard    prompt=一段分镜→H3 视频提示词（默认，最适合先训）；storyboard=一集剧本→分镜 JSON
+  --format messages|alpaca    messages=对话格式（LLaMA-Factory/ms-swift/TRL 通用，默认）；alpaca=instruction/input/output
+  --root 目录                 可重复：多部小说各给一个 output 目录，合并成一份训练集
+  --valid-ratio 0.05          切 5% 做验证集，输出 *.train.jsonl 和 *.valid.jsonl
+  --no-validate               不调用技能包校验，只做本地检查（提示词六个章节、<Picture N> 编号、7000 字符、占位符）
+  --system-file 文件          用这个文件当系统提示（如 skills/h3-prompt-writing/SKILL.md）；默认是内置的短指令
+过滤规则：技能包校验报错里点名的段整段排除（storyboard 任务整集排除）；输入相同的去重；
+旧格式分镜（没有 refOrder / 提示词没有六章节）会被本地检查自动丢掉。
+输出文件：training/<task>.<format>.train.jsonl（以及 valid）。屏幕最后打印保留/丢弃统计。
