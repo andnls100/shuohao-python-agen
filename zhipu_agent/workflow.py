@@ -25,6 +25,15 @@ REQUIRES = {
 }
 
 
+
+def prompt_family(video_model):
+    """分镜提示词按模型「家族」写：comfyui_h3_1 这类自定义的 H3 条目沿用 comfyui_h3 的提示词规范（含参考图编号协议）。"""
+    key = str(video_model or "").strip()
+    for family in ("comfyui_h3", "comfyui_wan"):
+        if key == family or key.startswith(family + "_"):
+            return family
+    return key or None
+
 def parse_stages(spec: str) -> List[str]:
     if spec in ("all", "全部"):
         return list(DEFAULT_STAGES)
@@ -87,18 +96,19 @@ def run_stage(ctx: Context, name: str, opts: Dict[str, Any]) -> Optional[Path]:
         if not ctx.artifact(need).is_file() and need not in opts["stages"]:
             raise FileNotFoundError(f"阶段 {name} 需要先有 {need} 的产物：{ctx.artifact(need)}。请先运行它。")
     model_prompt_stale = False
-    if name == "storyboard" and opts.get("video_model") and module.artifact(ctx).is_file():
+    _sb_model = prompt_family(opts.get("video_model"))
+    if name == "storyboard" and _sb_model and module.artifact(ctx).is_file():
         try:
             cached_board = read_json(module.artifact(ctx))
             cached_model = cached_board.get("videoModel")
             cached_segments = [s for ep in cached_board.get("episodes", []) for s in ep.get("segments", [])]
             model_prompt_stale = (
                 cached_board.get("videoPromptFormat") != "ref2v-v1"
-                or cached_model != opts.get("video_model")
+                or cached_model != _sb_model
                 or any(
                     not s.get("videoPrompt")
                     or s.get("videoPromptFormat") != "ref2v-v1"
-                    or s.get("videoModel") != opts.get("video_model")
+                    or s.get("videoModel") != _sb_model
                     or s.get("videoPromptSourceHash") != hashlib.sha1(str(s.get("h3Prompt") or "").encode("utf-8")).hexdigest()
                     for s in cached_segments if isinstance(s, dict)
                 )
@@ -131,7 +141,7 @@ def run_stage(ctx: Context, name: str, opts: Dict[str, Any]) -> Optional[Path]:
         try:
             return module.run(ctx, eps=eps, aspect=opts.get("aspect", "16:9"), prompt_lang=opts.get("prompt_lang", "en"),
                               visual_style=opts.get("visual_style", "manju"), fight_enhancement=opts.get("fight_enhancement", "auto"),
-                              h3_gates=False, video_model=opts.get("video_model") or "comfyui_h3")
+                              h3_gates=False, video_model=_sb_model or "comfyui_h3")
         finally:
             ctx.force = prior_force
     if name == "frames":

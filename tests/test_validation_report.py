@@ -21,5 +21,16 @@ class ReportTest(unittest.TestCase):
             self.assertNotIn("X错", t)
 
 
+
+class FamilyTest(unittest.TestCase):
+    def test_prompt_family(self):
+        from zhipu_agent.workflow import prompt_family
+        self.assertEqual(prompt_family("comfyui_h3_1"), "comfyui_h3")
+        self.assertEqual(prompt_family("comfyui_h3"), "comfyui_h3")
+        self.assertEqual(prompt_family("comfyui_wan_2"), "comfyui_wan")
+        self.assertEqual(prompt_family("wan_r2v"), "wan_r2v")
+        self.assertIsNone(prompt_family(None))
+
+
 if __name__ == "__main__":
     unittest.main()
