@@ -2,7 +2,7 @@
 name: novel-storyboard
 version: 2.0.0
 description: |
-  给 AI 短剧出分镜：三层结构——段（一次视频生成，≤20 秒）→ 分镜（段内 4–8 秒的剪切，认领剧本节拍）
+  给 AI 短剧出分镜：三层结构——段（一次视频生成，遵守 `params.maxSegmentSeconds`）→ 分镜（遵守 `params.minCutSeconds`–`params.maxCutSeconds`，认领剧本节拍）
   → 分镜图（每切一张关键帧：主分镜图钉 0.00 秒，子分镜图钉各自切点）。
   每段直接生成所选模型的最终 Ref2V 视频提示词：MiniMax H3 使用 h3-prompt-writing（Ref2VA），Wan 3.0 使用 wan-3-0-ref2v-prompt-writing。禁止先生成 I2V/T2V 中间提示词再二次改写。
   产出 storyboard.json + Markdown + 单页评审报告（分镜节奏带 / 分集分镜表 / 生成批次单 /
@@ -39,14 +39,14 @@ metadata:
 
 打戏增强是可选模式，由 Python Agent 的 `--fight-enhancement off|auto|enhanced` 控制；默认 `auto`。详细规则见 `{baseDir}/references/fight-enhancement.md`。`off` 完全沿用普通分镜；`auto` 只强化剧情重要的打戏；`enhanced` 强化所有真实打戏。不要为非打戏场景添加战斗，增强动作仍须通过原有分镜质量门。
 
-给 AI 短剧出**分镜**——管线里第一个直接面对视频模型的层。**前提刻在骨子里：镜头是生成出来的，多切一镜的成本几乎为零**，所以这里不心疼镜头数量，上限只有一个：视频模型单段生成的时长（默认 15 秒）。
+给 AI 短剧出**分镜**——管线里第一个直接面对视频模型的层。**前提刻在骨子里：镜头是生成出来的，多切一镜的成本几乎为零**，所以这里不心疼镜头数量。段长与切长以当前 `storyboard.json.params` 为准，不得把其他文档的默认值覆盖当前配置。
 
 **核心机制：镜头认领节拍。** 每个镜头声明它覆盖剧本某场的哪几个连续节拍（`sceneIndex` + `beats: [起, 止]`），镜头不许跨场次——换景必换镜。这让分镜和剧本的关系变成可机械对账的：
 
 | 交付 | 解决什么 |
 | --- | --- |
 | 节拍认领 | 每个节拍被恰好一个镜头认领、顺序不乱——剧本改了重跑 validate，失效的镜头当场点名 |
-| 单镜头 ≤ 15 秒 | AI 视频单段生成上限，长对话在这里被强制拆镜（`params.maxShotSeconds` 按模型改） |
+| 段长与切长由 params 控制 | `maxSegmentSeconds` 限制一次生成总时长，`minCutSeconds` / `maxCutSeconds` 限制段内每个分镜；超限必须拆分或合并镜头 |
 | 台词装得下 | 认领节拍的台词秒数 ≤ 镜头秒数——逐镜检查，不是拍脑袋 |
 | 分镜图提示词 + 镜头正文 | 分镜图提示词（`frame`，中文，直呼角色名）给图像模型配合设定图出图；镜头正文（`shot`，中文，通用身份）写这几秒发生什么。景别是枚举，中文景别词必须写进分镜图提示词 |
 | **Ref2V 视频提示词（每段一条）** | 直接遵循所选模型的 Ref2V Skill：H3 Ref2VA 或 Wan 3.0 Ref2V；不经过 I2V/T2V 中间格式 |
@@ -88,7 +88,7 @@ node {baseDir}/scripts/novel-storyboard.mjs seed <script.json> --eps 1-3 --aspec
 - `{baseDir}/references/storyboard-pass.md` 和 `{baseDir}/references/schema.md`（读它们，照着做）
 - 该集的 seedScenes 底稿 + 场景卡（art.json 的锚点与光照提示词）+ 角色卡（cast.json 的形象要点）
 
-流程：**先按剧情单元分段**（每段 9–20 秒、不跨场），**段内切 4–8 秒的分镜**（对话正反打、关键动作插入特写、进场三件套——切镜语法都在 storyboard-pass.md），每切写一条分镜图提示词（中文，直呼角色名）、一段镜头正文 `shot`（中文，通用身份）和六个构图字段；每段写 `blocking`、`soundscape`，有配乐再写 `music`。全部分镜图与下游生成图必须保持顶层 `aspectRatio` 指定的同一画幅。
+流程：**先按剧情单元分段**（不跨场，段长严格遵守 `params.maxSegmentSeconds`），**段内切分镜**（每切严格遵守 `params.minCutSeconds`–`params.maxCutSeconds`）（对话正反打、关键动作插入特写、进场三件套——切镜语法都在 storyboard-pass.md），每切写一条分镜图提示词（中文，直呼角色名）、一段镜头正文 `shot`（中文，通用身份）和六个构图字段；每段写 `blocking`、`soundscape`，有配乐再写 `music`。全部分镜图与下游生成图必须保持顶层 `aspectRatio` 指定的同一画幅。
 
 **每段的镜头正文照 `{baseDir}/references/shot-writing.md` 写**（协议无关：一切一个运镜、动作要做得完、台词逐字、声音分层、不写画风）。发给哪个视频服务，就再套哪份协议语法：MiniMax H3 uses `skills/h3-prompt-writing/SKILL.md`，Seedance 见 the Seedance protocol instructions。
 
@@ -106,7 +106,7 @@ node {baseDir}/scripts/novel-storyboard.mjs validate <storyboard.json> \
   [--shots </path/to/cards>]
 ```
 
-18 道质量门全是代码：节拍全覆盖（分镜级，恰好一次、按顺序、连续）、段 0 < 总秒 ≤ 15、**每切 4–8 秒**、台词装得进分镜、每集总时长在剧本目标 ±100% 内（可由 `params.tolerance` 覆盖）、同框 ≤ 3 人（超了必须带拆解说明）、段号 E01-01 格式连号、中文景别词在分镜图提示词里、运镜用 H3 词表且在自己的 [Shot k] 段落里、**H3 对齐指令由分镜结构推导逐字对账 + 切点时刻逐个对**、**认领台词逐字进 `<d>` 块**、**提示词语言与 promptLang 一致**（双向查：中文写成英文、英文混进中文都拦）、分镜图提示词中文非空、**视频提示词不含角色名**（H3 正文不分语言、Seedance 镜头正文都查；分镜图提示词直呼其名放行）、**构图量化字段齐全**、**Seedance 镜头正文合规**（中文非空，不写时间、镜头编号、图片引用和协议符号）、场次/人物/道具对账剧本、**镜头配方对账**（可选门，见下）。
+18 道质量门全是代码：节拍全覆盖（分镜级，恰好一次、按顺序、连续）、段 0 < 总秒 ≤ `params.maxSegmentSeconds`、**每切 `params.minCutSeconds`–`params.maxCutSeconds` 秒**、台词装得进分镜、每集总时长在剧本目标 ±100% 内（可由 `params.tolerance` 覆盖）、同框 ≤ 3 人（超了必须带拆解说明）、段号 E01-01 格式连号、中文景别词在分镜图提示词里、运镜用 H3 词表且在自己的 [Shot k] 段落里、**H3 对齐指令由分镜结构推导逐字对账 + 切点时刻逐个对**、**认领台词逐字进 `<d>` 块**、**提示词语言与 promptLang 一致**（双向查：中文写成英文、英文混进中文都拦）、分镜图提示词中文非空、**视频提示词不含角色名**（H3 正文不分语言、Seedance 镜头正文都查；分镜图提示词直呼其名放行）、**构图量化字段齐全**、**Seedance 镜头正文合规**（中文非空，不写时间、镜头编号、图片引用和协议符号）、场次/人物/道具对账剧本、**镜头配方对账**（可选门，见下）。
 
 结构检查还会校验可选的 `aspectRatio`：只接受 `16:9` 或 `9:16`。它属于 storyboard.json 合同检查，不另算质量门。
 
