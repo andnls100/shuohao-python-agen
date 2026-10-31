@@ -207,7 +207,10 @@ def _repair_ref2v_prompts(ctx: Context, doc: Dict[str, Any], path: Path, result:
         "Write only the final numbers from the table (never card ids, never numbers that are not in the table). "
         "Define EVERY image of the table once in subject_definitions with its own <Picture N> tag, use the same tags in "
         "retention_analysis and detailed_description where that subject, the environment or the prop is used, and never let "
-        "two different subjects share one tag. Keep every shot's action and dialogue in its original order and retain all "
+        "two different subjects share one tag. In detailed_description, every shot paragraph MUST include all numbered "
+        "picture tags corresponding to that cut's assetRefs; global definitions alone do not count. Preserve every dialogue "
+        "line from the supplied cuts exactly once, in original order, each in its own <d>...</d> block. Keep every shot's "
+        "action and dialogue in its original order and retain all "
         "required section headings. "
         "Return only the corrected final video prompt, without JSON, headings outside the required model format, "
         "or explanation.\n\n## Selected model skill\n" + skill_text
