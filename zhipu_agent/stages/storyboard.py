@@ -29,6 +29,7 @@ from .base import (
 from .storyboard_repair import (
     balance_episode_durations, repair_deterministic_storyboard,
     repair_dialogue_fit, repair_minor_cut_durations, split_overlong_segments,
+    _script_scene_for_segment,
 )
 
 SKILL = "novel-storyboard"
