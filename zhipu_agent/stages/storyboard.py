@@ -831,12 +831,12 @@ def run(
             # and episode overruns that can be trimmed from action-only cuts without touching dialogue.
             basic_fixes = repair_deterministic_storyboard(_doc, prompt_lang, script)
             timing_fixes = repair_minor_cut_durations(_doc, prompt_lang)
-            fit_fixes = repair_dialogue_fit(_doc, script, prompt_lang)
+            # Dialogue timing is fixed before grouping; never extend cuts after segment boundaries are fixed.
             duration_fixes = balance_episode_durations(_doc, script)
             split_fixes = []  # Never split/regroup shots after the scene-first grouping pass.
-            for fix in [*basic_fixes, *timing_fixes, *fit_fixes, *duration_fixes]:
+            for fix in [*basic_fixes, *timing_fixes, *duration_fixes]:
                 ctx.log(f"[storyboard] 自动修正：{fix}")
-            if basic_fixes or timing_fixes or fit_fixes or duration_fixes or split_fixes:
+            if basic_fixes or timing_fixes or duration_fixes or split_fixes:
                 write_json(_p, _doc)
 
             result = ctx.run(sk, ["validate", _p, *_refs(ctx)], cwd=sb_dir)
