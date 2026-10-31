@@ -43,6 +43,9 @@ _POOL_LOCK = threading.Lock()
 _rr_counter: dict = {}
 _cooling: dict = {}
 
+# 所有文本与视觉模型调用统一请求的最大输出 Token 数（512 Ki tokens）。
+DEFAULT_MAX_OUTPUT_TOKENS = 512 * 1024
+
 
 def set_backend(fn: Optional[Backend]) -> None:
     """替换底层调用。fn(messages, *, model) -> str，model 是被选中的那一项的模型名。传 None 恢复。"""
@@ -175,7 +178,7 @@ def chat(
     json_mode: Optional[bool] = None,
     purpose: str = "direct-chat",
     reasoning_effort: Optional[str] = None,
-    max_tokens: Optional[int] = None,
+    max_tokens: Optional[int] = DEFAULT_MAX_OUTPUT_TOKENS,
 ) -> str:
     """发一轮对话，返回文本。
 
@@ -211,7 +214,7 @@ def chat(
 def _call_endpoint(
     ep: Endpoint, messages, s: Settings, temperature, json_mode, *, retries: int,
     purpose: str = "direct-conversation", reasoning_effort: Optional[str] = None,
-    max_tokens: Optional[int] = None,
+    max_tokens: Optional[int] = DEFAULT_MAX_OUTPUT_TOKENS,
 ) -> str:
     if _BACKEND is not None:
         started = time.time()
@@ -229,10 +232,8 @@ def _call_endpoint(
         "temperature": temperature if temperature is not None
         else (ep.temperature if ep.temperature is not None else s.temperature),
     }
-    # Only send an output cap when the caller explicitly requests one.
-    # Most stages leave this unset and use the provider/model native limit.
-    if max_tokens is not None:
-        params["max_tokens"] = max_tokens
+    # Every model request uses the same 512K output cap unless a caller supplies an explicit override.
+    params["max_tokens"] = max_tokens if max_tokens is not None else DEFAULT_MAX_OUTPUT_TOKENS
     effort = reasoning_effort if reasoning_effort is not None else (
         ep.reasoning_effort if ep.reasoning_effort is not None else s.reasoning_effort
     )
@@ -292,7 +293,7 @@ def _call_endpoint(
              f"finish_reason={finish}")
         if finish == "length":
             raise LLMTruncated(
-                "模型输出达到服务商或模型自身的原生长度上限。应用不会设置 max_tokens；"
+                "模型输出达到服务商或模型自身的原生长度上限（应用请求上限为 512K Token）；"
                 "可更换原生输出上限更高的模型，或减小每批处理的集数后重试。"
             )
         if not text.strip():
@@ -412,7 +413,7 @@ class Conversation:
     def __init__(
         self, system: str, settings: Optional[Settings] = None, *,
         purpose: str = "direct-ask-text", reasoning_effort: Optional[str] = None,
-        max_tokens: Optional[int] = None,
+        max_tokens: Optional[int] = DEFAULT_MAX_OUTPUT_TOKENS,
     ):
         self.settings = settings or load_settings()
         self.purpose = purpose
@@ -463,7 +464,7 @@ class Conversation:
 def ask_text(
     system: str, user: str, settings: Optional[Settings] = None, *,
     purpose: str = "unspecified", reasoning_effort: Optional[str] = None,
-    max_tokens: Optional[int] = None,
+    max_tokens: Optional[int] = DEFAULT_MAX_OUTPUT_TOKENS,
 ) -> str:
     """一问一答，返回纯文本；purpose 会写入每次模型调用的统计日志。"""
     return Conversation(
