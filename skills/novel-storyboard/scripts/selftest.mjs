@@ -166,7 +166,7 @@ eq(gateReport(FIXTURE, CTX).length, 18, '十八道门');
 {
   const doc = clone(FIXTURE);
   doc.episodes[0].segments[0].cuts[0].seconds = 1;
-  ok(!gate(doc, 'cut-length').ok, '分镜短于 2 秒被拦');
+  ok(!gate(doc, 'cut-length').ok, '分镜短于 4 秒被拦');
 }
 {
   const doc = clone(FIXTURE);
@@ -544,7 +544,7 @@ const withRecipe = () => {
   const gates = [
     { id: 'cut-length', label: '每个分镜 4–10 秒', ok: false, detail: 'E01-01#1 11 秒' },
     { id: 'coverage', label: '节拍全覆盖', ok: true, detail: '' },
-    { id: 'segment-cap', label: '每段 ≤ 30 秒', ok: false, detail: 'E01-01 共 21 秒' },
+    { id: 'segment-cap', label: '每段 ≤ 30 秒', ok: false, detail: 'E01-01 共 31 秒' },
   ];
   const rows = gateLogEntries(gates, { doc: 'x.json', at: 'T0' });
   eq(rows.length, 3, '一次运行记一条 run + 每条失败一行');
