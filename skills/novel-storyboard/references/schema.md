@@ -2,8 +2,8 @@
 
 三层：**集 → 段（segment）→ 分镜（cut）**。
 
-- **段** = 一次视频生成调用，总时长 ≤ `maxSegmentSeconds`（默认 20 秒），不跨场次——换景必开新段
-- **分镜** = 段内的一次剪切，`minCutSeconds`–`maxCutSeconds`（默认 4–8 秒），各自认领剧本节拍、带景别运镜和一张分镜图
+- **段** = 一次视频生成调用，总时长 ≤ `params.maxSegmentSeconds`（未设置时采用脚本默认值），不跨场次——换景必开新段
+- **分镜** = 段内的一次剪切，`params.minCutSeconds`–`params.maxCutSeconds`（未设置时采用脚本默认值），各自认领剧本节拍、带景别运镜和一张分镜图
 - **分镜图** = 每个分镜一张关键帧：第 1 切的是**主分镜图**（钉在 0.00 秒），其余是**子分镜图**（各钉在自己的切点时刻）。**每段一个文件夹**：`<段号>/f<切序>.png` + `prompt.md`（export 生成，内容就是 h3Prompt）
 
 ```json
@@ -53,7 +53,7 @@ segment 可带 `continuityMode`：`continuous` 表示承接前段状态，`hard_
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `beats` | [int, int] | 认领该场第几拍到第几拍（含两端）。**每个节拍必须被恰好一个分镜认领**，按顺序、连续 |
-| `seconds` | number | 分镜时长，4–8 秒——短剧的注意力节奏是硬门。认领节拍的台词秒数必须装得下 |
+| `seconds` | number | 分镜时长必须在 `params.minCutSeconds`–`params.maxCutSeconds` 内。认领节拍的台词秒数必须装得下 |
 | `size` | enum | 景别：`extreme-wide` 大远景 / `wide` 全景 / `medium` 中景 / `close` 特写 / `extreme-close` 大特写 |
 | `camera` | enum | 运镜，**直接用 H3 官方词表**（原样字符串）：`Static Shot` `Push In` `Pull Out` `Zoom In/Out` `Pan Left/Right` `Truck Left/Right` `Tilt Up/Down` `Pedestal Up/Down` `Arc Shot` `Tracking Shot` `Shake Slightly/Strongly` `POV` `Roll Clockwise/Counterclockwise` |
 | `characters` | string[] | 画内人物（C 编号），必须 ⊆ 剧本该场人物；空镜给空数组。> `maxOnScreen` 时必须带 `note` |
@@ -79,4 +79,4 @@ segment 可带 `continuityMode`：`continuous` 表示承接前段状态，`hard_
 
 ## 时长约束链
 
-台词秒数（按剧本语速折算）≤ 分镜 `seconds` ≤ 10 秒；段 Σ分镜 ≤ 15 秒；集 Σ段 落在剧本 `targetSeconds` ±100%（默认；`params.tolerance` 可覆盖）。全部由 validate 逐级对账。
+台词秒数（按剧本语速折算）≤ 分镜 `seconds`；分镜时长由 `params.minCutSeconds` / `params.maxCutSeconds` 限制；段 Σ分镜 ≤ `params.maxSegmentSeconds`；集 Σ段 落在剧本 `targetSeconds` ±100%（默认；`params.tolerance` 可覆盖）。全部由 validate 逐级对账。
