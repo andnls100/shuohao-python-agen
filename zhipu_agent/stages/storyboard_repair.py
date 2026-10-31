@@ -796,12 +796,16 @@ def split_overlong_segments(doc: Dict[str, Any], max_segment_seconds: float = 30
                 part = copy.deepcopy(segment)
                 part["cuts"] = copy.deepcopy(group)
                 if part_index > 1:
-                    # Later pieces continue the same scene; the original segment's
-                    # initial hard_cut must not sever continuity at an artificial split.
-                    part["continuityMode"] = "continuous"
+                    # Artificial boundaries continue by default, but preserve an explicit
+                    # hard cut requested by the storyboard on the first cut of this piece.
                     first_cut = group[0] if group else {}
-                    first_state = ((first_cut.get("continuity") or {}).get("stateBefore")
-                                   if isinstance(first_cut, dict) else None)
+                    first_continuity = first_cut.get("continuity") if isinstance(first_cut, dict) else {}
+                    part["continuityMode"] = (
+                        "hard_cut" if isinstance(first_continuity, dict)
+                        and first_continuity.get("mode") == "cut" else "continuous"
+                    )
+                    first_state = ((first_continuity or {}).get("stateBefore")
+                                   if isinstance(first_continuity, dict) else None)
                     if isinstance(first_state, str) and first_state.strip():
                         part["blocking"] = first_state.strip()
                 part["h3Prompt"] = ""
