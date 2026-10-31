@@ -565,6 +565,14 @@ def run(
                 for index, row in enumerate(_script_ep.get("scenes", []), start=1)
                 if row.get("sceneId")
             }
+            # The seed's per-scene prop list is the source of truth for cut-level
+            # references. A model may hallucinate a prop or assign a real prop to
+            # the wrong scene; remove those references before building assetRefs.
+            _seed_scene_by_index = {
+                int(row.get("sceneIndex") or 0): row
+                for row in seed_ep.get("seedScenes", [])
+                if isinstance(row, dict) and row.get("sceneIndex") is not None
+            }
             _char_id_by_name = {}
             for _cid, _card in outline_chars.items():
                 _name = str(_card.get("name") or "").strip()
@@ -610,16 +618,45 @@ def run(
                         _char_id_by_name.get(str(name).strip(), str(name).strip())
                         for name in _character_names
                     ]
-                    cut["props"] = [
+                    _prop_ids = [
                         _prop_id_by_name.get(str(name).strip(), str(name).strip())
                         for name in _prop_names
                     ]
+                    _seed_scene = _seed_scene_by_index.get(int(segment.get("sceneIndex") or 0))
+                    if _seed_scene is not None:
+                        _scene_prop_ids = {
+                            str(prop_id) for prop_id in (_seed_scene.get("props") or [])
+                        }
+                        _valid_prop_ids = [
+                            prop_id for prop_id in _prop_ids if prop_id in _scene_prop_ids
+                        ]
+                    else:
+                        # If scene-level seed data is unavailable, retain only IDs
+                        # declared in the outline when that catalog is available.
+                        _known_prop_ids = set(outline_props)
+                        _valid_prop_ids = [
+                            prop_id for prop_id in _prop_ids
+                            if not _known_prop_ids or prop_id in _known_prop_ids
+                        ]
+                    _removed_prop_ids = [
+                        prop_id for prop_id in _prop_ids if prop_id not in set(_valid_prop_ids)
+                    ]
+                    cut["props"] = _valid_prop_ids
                     for name in _character_names:
                         bind_asset("character", _char_id_by_name.get(str(name).strip(), str(name).strip()), name)
                     if scene_id:
                         bind_asset("scene", scene_id, scene_id)
-                    for name in _prop_names:
-                        bind_asset("prop", _prop_id_by_name.get(str(name).strip(), str(name).strip()), name)
+                    # Only surviving prop references are bound to assets. This keeps
+                    # cut.props and assetRefs consistent and prevents phantom images
+                    # from entering the segment's Ref2V reference order.
+                    for name, prop_id in zip(_prop_names, _prop_ids):
+                        if prop_id in _valid_prop_ids:
+                            bind_asset("prop", prop_id, name)
+                    if _removed_prop_ids:
+                        ctx.log(
+                            f"[storyboard] {segment['id']}#{cut_index}: "
+                            f"移除该场不存在的道具引用：{', '.join(_removed_prop_ids)}"
+                        )
                     cut["assetRefs"] = refs
                 if video_model == "comfyui_h3":
                     _apply_ref_order(ctx, segment)
