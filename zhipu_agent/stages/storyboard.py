@@ -368,7 +368,7 @@ def _regenerate_split_segment_prompt(ctx: Context, segment: Dict[str, Any],
         system += H3_REFERENCE_CONTRACT
     else:
         system += (
-            "\\n\\nWAN REFERENCE CONTRACT: the supplied referenceImages array is the reference inventory for "
+            "\n\nWAN REFERENCE CONTRACT: the supplied referenceImages array is the reference inventory for "
             "this segment. Use only the exact @ImageN indices listed there when referencing connected images; "
             "never emit MiniMax <Picture> tags or invent image indices."
         )
