@@ -223,12 +223,26 @@ def _repair_ref2v_prompts(ctx: Context, doc: Dict[str, Any], path: Path, result:
                 continue
             order = segment.get("refOrder") if video_model == "comfyui_h3" else None
             errors = [part.strip() for line in result.text.splitlines() for part in line.split("；") if sid in part]
+            repair_cuts = copy.deepcopy(segment.get("cuts", []))
+            if order:
+                number_by_asset_id = {
+                    str(entry.get("id") or ""): int(entry["no"]) for entry in order
+                }
+                for cut in repair_cuts:
+                    required_tags = []
+                    for asset in cut.get("assetRefs") or []:
+                        number = number_by_asset_id.get(str(asset.get("id") or ""))
+                        if number is not None:
+                            tag = f"<Picture {number}>"
+                            if tag not in required_tags:
+                                required_tags.append(tag)
+                    cut["requiredPictureTags"] = required_tags
             payload = {
                 "videoModel": video_model,
                 "segmentId": sid,
                 "validationErrors": errors,
                 "currentFinalPrompt": segment.get("h3Prompt", ""),
-                "cuts": segment.get("cuts", []),
+                "cuts": repair_cuts,
                 "soundscape": segment.get("soundscape", ""),
                 "music": segment.get("music", ""),
             }
