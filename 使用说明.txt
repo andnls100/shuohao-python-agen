@@ -228,8 +228,8 @@ R2V 参考媒体顺序：
 
 可以直接在终端执行。
 
-分镜时长（每个镜头 4–8 秒，默认）：
-- 默认 minCutSeconds=4、maxCutSeconds=8（每段 9–15 秒不变）。
+分镜时长（每个镜头 4–10 秒，默认）：
+- 默认 maxSegmentSeconds=30、minCutSeconds=4、maxCutSeconds=10。
 - 临时改范围，不改代码：设置环境变量 AGENT_STORYBOARD_PARAMS，例如
   Windows PowerShell:  $env:AGENT_STORYBOARD_PARAMS='{"minCutSeconds":2,"maxCutSeconds":10}'
 - 改完时长规则后需重新切分镜：python run_agent.py run --stages storyboard --eps 1 --force
