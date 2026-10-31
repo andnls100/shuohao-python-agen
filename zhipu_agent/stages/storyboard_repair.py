@@ -1,6 +1,7 @@
 """Cheap, deterministic storyboard repairs that avoid regenerating whole episodes."""
 from __future__ import annotations
 
+import copy
 import math
 import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -102,7 +103,7 @@ def repair_minor_cut_durations(doc: Dict[str, Any], lang: str = "en",
     """Snap tiny upper-bound overruns (e.g. 5.1s) to 5.0s, then resync H3 timing."""
     repaired: List[str] = []
     try:
-        upper = float((doc.get("params") or {}).get("maxCutSeconds", 8))
+        upper = float((doc.get("params") or {}).get("maxCutSeconds", 10))
     except (TypeError, ValueError):
         upper = 10.0
     for segment in _segments(doc):
@@ -320,7 +321,7 @@ def repair_short_cuts(doc: Dict[str, Any], lang: str = "en") -> List[str]:
     params = doc.get("params") or {}
     try:
         lower = float(params.get("minCutSeconds", 4))
-        cap = float(params.get("maxSegmentSeconds", 20))
+        cap = float(params.get("maxSegmentSeconds", 30))
     except (TypeError, ValueError):
         return []
     repaired: List[str] = []
@@ -729,3 +730,81 @@ def replace_h3_cut_text(segment: Dict[str, Any], index: int, text: str, lang: st
     replacement = text.strip()
     segment["h3Prompt"] = prompt[:start_match.start()] + replacement + "\n" + prompt[end:].lstrip("\n")
     return True
+
+
+def split_overlong_segments(doc: Dict[str, Any], max_segment_seconds: float = 30.0):
+    """Split overlong segments at cut boundaries without changing cuts or their durations.
+
+    Returns (fix_messages, prompt_jobs). Each prompt job is (new_segment, original_prompt).
+    Callers must regenerate a Ref2V prompt for every segment in prompt_jobs because a
+    segment prompt is scoped to that segment's references and dialogue.
+    """
+    try:
+        cap = float(max_segment_seconds)
+    except (TypeError, ValueError):
+        raise ValueError("max_segment_seconds 必须是正数")
+    if cap <= 0:
+        raise ValueError("max_segment_seconds 必须是正数")
+
+    fixes: List[str] = []
+    prompt_jobs = []
+    for episode in doc.get("episodes", []) or []:
+        source_segments = episode.get("segments", [])
+        if not isinstance(source_segments, list):
+            continue
+        output_segments = []
+        for segment in source_segments:
+            if not isinstance(segment, dict):
+                output_segments.append(segment)
+                continue
+            cuts = segment.get("cuts")
+            if not isinstance(cuts, list) or not cuts:
+                output_segments.append(segment)
+                continue
+            durations = []
+            valid = True
+            for cut in cuts:
+                try:
+                    seconds = float(cut.get("seconds"))
+                except (TypeError, ValueError, AttributeError):
+                    valid = False
+                    break
+                if seconds <= 0 or seconds > cap:
+                    valid = False
+                    break
+                durations.append(seconds)
+            if not valid or sum(durations) <= cap + 1e-9:
+                output_segments.append(segment)
+                continue
+
+            groups = []
+            current = []
+            current_seconds = 0.0
+            for cut, seconds in zip(cuts, durations):
+                if current and current_seconds + seconds > cap + 1e-9:
+                    groups.append(current)
+                    current = []
+                    current_seconds = 0.0
+                current.append(cut)
+                current_seconds += seconds
+            if current:
+                groups.append(current)
+
+            original_prompt = str(segment.get("h3Prompt") or "")
+            original_id = str(segment.get("id") or "?")
+            for part_index, group in enumerate(groups, start=1):
+                part = copy.deepcopy(segment)
+                part["cuts"] = copy.deepcopy(group)
+                part["h3Prompt"] = ""
+                part.pop("videoPrompt", None)
+                part.pop("videoPromptSourceHash", None)
+                part.pop("refOrder", None)
+                output_segments.append(part)
+                prompt_jobs.append((part, original_prompt))
+            fixes.append(
+                f"{original_id}: {sum(durations):.1f}s 超过 {cap:.1f}s，"
+                f"按镜头边界拆为 {len(groups)} 段（保留 {len(cuts)} 个镜头及原时长）"
+            )
+        episode["segments"] = output_segments
+
+    return fixes, prompt_jobs
