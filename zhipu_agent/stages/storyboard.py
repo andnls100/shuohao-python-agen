@@ -325,6 +325,18 @@ def _generate_segment_ref2v_prompt(ctx: Context, segment: Dict[str, Any],
     if video_model == "comfyui_h3":
         order = build_ref_order(segment)
         segment["refOrder"] = order
+        number_by_asset_id = {
+            str(entry.get("id") or ""): int(entry["no"]) for entry in order
+        }
+        for item in claimed:
+            required_tags = []
+            for asset in item["cut"].get("assetRefs") or []:
+                number = number_by_asset_id.get(str(asset.get("id") or ""))
+                if number is not None:
+                    tag = f"<Picture {number}>"
+                    if tag not in required_tags:
+                        required_tags.append(tag)
+            item["requiredPictureTags"] = required_tags
         reference_images = [
             {"number": e["no"], "kind": e["kind"], "cardId": e.get("tag"), "name": e.get("name")}
             for e in order
@@ -358,7 +370,12 @@ def _generate_segment_ref2v_prompt(ctx: Context, segment: Dict[str, Any],
         "line character-for-character, exactly once, in original order, using the format required by the model skill. "
         "Do not invent, omit, shorten, merge, or reorder actions, dialogue, characters, props, sounds, or events. "
         "Use the supplied segment-level blocking, soundscape, music and reference table. The original prompt is context "
-        "only; the supplied cuts and source script beats are authoritative. Keep within the skill length limit.\n\n"
+        "only; the supplied cuts and source script beats are authoritative. Keep within the skill length limit. "
+        "For H3, every shot paragraph in detailed_description MUST include every exact requiredPictureTags entry "
+        "listed for that cut, attached to the matching visible subject, environment or prop; tags only in "
+        "subject_definitions or retention_analysis do not satisfy this requirement. Include every source dialogue "
+        "line exactly once and in order, each in its own <d>...</d> block. Compare the final shot paragraphs and "
+        "dialogue blocks against the supplied per-cut checklist before returning.\n\n"
         "## Selected model skill\n" + skill_text
     )
     if video_model == "comfyui_h3":
