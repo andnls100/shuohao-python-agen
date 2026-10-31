@@ -88,11 +88,11 @@ node {baseDir}/scripts/novel-storyboard.mjs seed <script.json> --eps 1-3 --aspec
 - `{baseDir}/references/storyboard-pass.md` 和 `{baseDir}/references/schema.md`（读它们，照着做）
 - 该集的 seedScenes 底稿 + 场景卡（art.json 的锚点与光照提示词）+ 角色卡（cast.json 的形象要点）
 
-流程：**先按剧情单元分段**（不跨场，段长严格遵守 `params.maxSegmentSeconds`），**段内切分镜**（每切严格遵守 `params.minCutSeconds`–`params.maxCutSeconds`）（对话正反打、关键动作插入特写、进场三件套——切镜语法都在 storyboard-pass.md），每切写一条分镜图提示词（中文，直呼角色名）、一段镜头正文 `shot`（中文，通用身份）和六个构图字段；每段写 `blocking`、`soundscape`，有配乐再写 `music`。全部分镜图与下游生成图必须保持顶层 `aspectRatio` 指定的同一画幅。
+流程：**先逐场切完全部镜头，再由程序分段**。模型按 sceneIndex 一场一份 scenePlan 输出完整有序 cuts，不输出 segments 或视频提示词；程序按每场每 3 镜头一段分组，末组允许 1–2 镜头，绝不跨场。每段总时长必须 ≤ `params.maxSegmentSeconds`；超限必须在镜头规划阶段解决，禁止事后拆段、删镜头或删节拍。每切写分镜图提示词（中文，直呼角色名）、镜头正文 `shot`（中文，通用身份）和六个构图字段；每段写 `blocking`、`soundscape`，有配乐再写 `music`。全部分镜图与下游生成图必须保持顶层 `aspectRatio` 指定的同一画幅。
 
 **每段的镜头正文照 `{baseDir}/references/shot-writing.md` 写**（协议无关：一切一个运镜、动作要做得完、台词逐字、声音分层、不写画风）。发给哪个视频服务，就再套哪份协议语法：MiniMax H3 uses `skills/h3-prompt-writing/SKILL.md`，Seedance 见 the Seedance protocol instructions。
 
-**每段写一条最终 Ref2V 提示词**，保存在兼容字段 `h3Prompt`，并复制到下游字段 `videoPrompt`。分镜阶段按 `videoModel` 直接加载对应的外部 Skill：`comfyui_h3` 使用 `skills/h3-prompt-writing/SKILL.md`；`comfyui_wan` 使用 `skills/wan-3-0-ref2v-prompt-writing/SKILL.md`。不再加载本目录的旧 H3 提示词规范，不生成 I2V/T2V 中间格式，也不额外调用模型改写。最终提示词的参考图标签、对白格式和结构完全遵循选定 Ref2V Skill。
+程序完成每场三镜头分组、资产绑定和连续性编号后，**为每段独立生成一条最终 Ref2V 提示词**，保存在兼容字段 `h3Prompt`，并复制到下游字段 `videoPrompt`。按 `videoModel` 使用对应外部 Skill：H3 或 Wan Ref2V。提示词只覆盖本段 cuts，参考图标签、对白格式和结构遵循选定 Skill。
 
 **Seedance 提示词不用写**：`render` 报告的提示词面板和 `export --protocol seedance` 都会从上面这些字段现拼。视觉风格由调用方提交时附加，全局约束用 `--constraints <文件>` 给。
 
