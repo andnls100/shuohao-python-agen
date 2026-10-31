@@ -152,7 +152,7 @@ For compatible endpoints, set per-entry options in `models.json`:
 }
 ```
 
-Only configure `reasoning_effort` when that provider/model supports the parameter; supported values depend on the provider (commonly `none`, `low`, `medium`, `high`). Streaming usage is requested by default, with a fallback for endpoints that reject `stream_options`; set `stream_usage: false` to disable it explicitly. By default, the agent does not send `max_tokens` or `max_completion_tokens`; output length is governed by the provider/model's native limit. Storyboard-generation calls explicitly request `max_tokens=524288` (512 Ki tokens); the provider may enforce a lower model/API limit. Legacy `max_tokens` entries in `models.json` and `ZHIPU_MAX_TOKENS` are ignored.
+Only configure `reasoning_effort` when that provider/model supports the parameter; supported values depend on the provider (commonly `none`, `low`, `medium`, `high`). Streaming usage is requested by default, with a fallback for endpoints that reject `stream_options`; set `stream_usage: false` to disable it explicitly. All text and vision model calls request `max_tokens=524288` (512 Ki tokens) by default, including character analysis, prompt optimization, and storyboard generation. The provider/model may enforce a lower output limit or reject this parameter; the effective maximum is always bounded by the provider/model.
 
 ## Common stages
 
