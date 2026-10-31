@@ -269,6 +269,138 @@ def _apply_ref_order(ctx: Context, segment: Dict[str, Any]) -> None:
                 f"对不上本段参考图（{', '.join(e['tag'] for e in order) or '本段没有绑定素材'}），交给校验修复")
 
 
+
+def _renumber_split_episode(episode: Dict[str, Any]) -> None:
+    """Renumber segments and refresh inherited frame pointers after splitting."""
+    ep = int(episode.get("ep") or 0)
+    previous = None
+    for index, segment in enumerate(episode.get("segments", []), start=1):
+        if not isinstance(segment, dict):
+            continue
+        segment["id"] = f"E{ep:02d}-{index:02d}"
+        cuts = segment.get("cuts") or []
+        for cut_index, cut in enumerate(cuts):
+            if not isinstance(cut, dict):
+                continue
+            continuity = cut.get("continuity")
+            if not isinstance(continuity, dict) or continuity.get("mode") != "inherit":
+                continue
+            if cut_index > 0:
+                continuity["referenceFrame"] = f"{segment['id']}/f{cut_index}.png"
+            elif (previous and previous.get("sceneIndex") == segment.get("sceneIndex")
+                  and segment.get("continuityMode") != "hard_cut"
+                  and previous.get("cuts")):
+                continuity["referenceFrame"] = f"{previous['id']}/f{len(previous['cuts'])}.png"
+        previous = segment
+
+
+def _regenerate_split_segment_prompt(ctx: Context, segment: Dict[str, Any],
+                                     source_prompt: str, script: Dict[str, Any],
+                                     video_model: str) -> None:
+    """Generate a fresh final Ref2V prompt scoped to one newly split segment."""
+    skill_root = Path(__file__).resolve().parents[2] / "skills"
+    skill_path = (skill_root / "h3-prompt-writing" / "SKILL.md"
+                  if video_model == "comfyui_h3"
+                  else skill_root / "wan-3-0-ref2v-prompt-writing" / "SKILL.md")
+    skill_text = skill_path.read_text(encoding="utf-8")
+    scene = _script_scene_for_segment(segment, script) or {}
+    flow = scene.get("flow", []) if isinstance(scene, dict) else []
+    claimed = []
+    for cut_index, cut in enumerate(segment.get("cuts", []), start=1):
+        bounds = cut.get("beats")
+        source_beats = []
+        if isinstance(bounds, list) and len(bounds) == 2:
+            try:
+                start, end = int(bounds[0]), int(bounds[1])
+                if 1 <= start <= end <= len(flow):
+                    source_beats = flow[start - 1:end]
+            except (TypeError, ValueError):
+                pass
+        claimed.append({"cutIndex": cut_index, "beats": bounds,
+                        "cut": cut, "sourceScriptBeats": source_beats})
+
+    if video_model == "comfyui_h3":
+        order = build_ref_order(segment)
+        segment["refOrder"] = order
+        reference_images = [
+            {"number": e["no"], "kind": e["kind"], "cardId": e.get("tag"), "name": e.get("name")}
+            for e in order
+        ]
+    else:
+        seen, reference_images = set(), []
+        for cut in segment.get("cuts", []):
+            for asset in cut.get("assetRefs") or []:
+                asset_id = str(asset.get("id") or "")
+                if asset_id and asset_id not in seen:
+                    seen.add(asset_id)
+                    reference_images.append({"number": len(reference_images) + 1,
+                                             "kind": asset.get("kind"),
+                                             "cardId": asset_id, "name": asset.get("name")})
+
+    payload = {
+        "videoModel": video_model, "segmentId": segment.get("id"),
+        "sceneIndex": segment.get("sceneIndex"),
+        "continuityMode": segment.get("continuityMode"),
+        "blocking": segment.get("blocking", ""),
+        "soundscape": segment.get("soundscape", ""),
+        "music": segment.get("music", ""),
+        "cutsAndClaimedDialogue": claimed,
+        "referenceImages": reference_images,
+        "originalPromptForStyleAndContinuityContextOnly": source_prompt,
+    }
+    system = (
+        "Create the final Ref2V prompt for ONLY this one newly split segment. Follow the selected model skill "
+        "exactly and return only the prompt. The supplied cuts are authoritative: cover every supplied cut exactly "
+        "once and in order; do not include any omitted cut from the original segment. Preserve every source dialogue "
+        "line character-for-character, exactly once, in original order, using the format required by the model skill. "
+        "Do not invent, omit, shorten, merge, or reorder actions, dialogue, characters, props, sounds, or events. "
+        "Use the supplied segment-level blocking, soundscape, music and reference table. The original prompt is context "
+        "only; the supplied cuts and source script beats are authoritative. Keep within the skill length limit.\n\n"
+        "## Selected model skill\n" + skill_text
+    )
+    if video_model == "comfyui_h3":
+        system += H3_REFERENCE_CONTRACT
+    fixed = ask_text(system, json.dumps(payload, ensure_ascii=False, indent=2), ctx.settings,
+                     purpose=f"storyboard-split-prompt:{segment.get('id')}", max_tokens=16000).strip()
+    if not fixed:
+        raise ValueError(f"{segment.get('id')} 拆段后的 Ref2V 提示词生成为空")
+    segment["h3Prompt"] = fixed
+    if video_model == "comfyui_h3":
+        _apply_ref_order(ctx, segment)
+        if len(segment["h3Prompt"]) > 7000:
+            raise ValueError(f"{segment.get('id')} 拆段后的 H3 Ref2VA 提示词超过 7000 字符")
+
+
+def _split_and_regenerate_overlong_segments(ctx: Context, doc: Dict[str, Any],
+                                            script: Dict[str, Any], video_model: str,
+                                            max_segment_seconds: float) -> List[str]:
+    """Split overlong segments at cut boundaries; regenerate prompts for every resulting part."""
+    original_episodes = copy.deepcopy(doc.get("episodes", []))
+    fixes, jobs = [], []
+    for episode in doc.get("episodes", []):
+        episode_fixes, episode_jobs = split_overlong_segments(
+            {"episodes": [episode]}, max_segment_seconds
+        )
+        fixes.extend(episode_fixes)
+        jobs.extend(episode_jobs)
+    if not jobs:
+        return fixes
+    try:
+        for episode in doc.get("episodes", []):
+            _renumber_split_episode(episode)
+        for segment, source_prompt in jobs:
+            _regenerate_split_segment_prompt(ctx, segment, source_prompt, script, video_model)
+        for fix in fixes:
+            ctx.log(f"[storyboard] 自动拆段：{fix}")
+        return fixes
+    except Exception as exc:
+        doc["episodes"] = original_episodes
+        ctx.log("[storyboard] ⚠ 拆段后的提示词重建失败；已回滚拆段，保留原分镜并交由质量门报告："
+                + str(exc)[:300])
+        return []
+
+
+
 def _blocking_lines(ctx: Context) -> List[str]:
     staging = ctx.artifact("staging")
     if not staging.is_file():
@@ -672,9 +804,13 @@ def run(
             timing_fixes = repair_minor_cut_durations(_doc, prompt_lang)
             fit_fixes = repair_dialogue_fit(_doc, script, prompt_lang)
             duration_fixes = balance_episode_durations(_doc, script)
+            split_fixes = _split_and_regenerate_overlong_segments(
+                ctx, _doc, script, video_model,
+                float((_doc.get("params") or {}).get("maxSegmentSeconds", 30)),
+            )
             for fix in [*basic_fixes, *timing_fixes, *fit_fixes, *duration_fixes]:
                 ctx.log(f"[storyboard] 自动修正：{fix}")
-            if basic_fixes or timing_fixes or fit_fixes or duration_fixes:
+            if basic_fixes or timing_fixes or fit_fixes or duration_fixes or split_fixes:
                 write_json(_p, _doc)
 
             result = ctx.run(sk, ["validate", _p, *_refs(ctx)], cwd=sb_dir)
