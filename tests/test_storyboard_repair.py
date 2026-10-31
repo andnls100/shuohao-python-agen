@@ -11,6 +11,7 @@ from zhipu_agent.stages.storyboard_repair import (
     segment_h3_violation_refs,
     replace_h3_cut_text,
     sync_segment_timing,
+    split_overlong_segments,
 )
 
 
@@ -307,6 +308,54 @@ class StoryboardRepairTest(unittest.TestCase):
         repair_short_cuts(doc, "zh")
         self.assertEqual(doc["episodes"][0]["segments"][0]["cuts"][2]["seconds"], 4)
         self.assertEqual(doc["episodes"][0]["segments"][2]["cuts"][0]["seconds"], 4)
+
+
+
+
+class SegmentDurationSplitTest(unittest.TestCase):
+    def test_overlong_segment_is_split_without_changing_cuts_or_durations(self):
+        cuts = [
+            {"seconds": 10.0, "beats": [1, 2]},
+            {"seconds": 10.0, "beats": [3, 4]},
+            {"seconds": 10.0, "beats": [5, 6]},
+            {"seconds": 8.0, "beats": [7, 8]},
+        ]
+        doc = {"episodes": [{"ep": 5, "segments": [{
+            "id": "E05-02", "sceneIndex": 2, "h3Prompt": "original prompt",
+            "cuts": cuts,
+        }]}]}
+        fixes, jobs = split_overlong_segments(doc, 30)
+        segments = doc["episodes"][0]["segments"]
+        self.assertEqual([len(s["cuts"]) for s in segments], [3, 1])
+        self.assertEqual([sum(c["seconds"] for c in s["cuts"]) for s in segments], [30, 8])
+        self.assertEqual(
+            [c["beats"] for s in segments for c in s["cuts"]],
+            [[1, 2], [3, 4], [5, 6], [7, 8]],
+        )
+        self.assertEqual(len(jobs), 2)
+        self.assertEqual([job[1] for job in jobs], ["original prompt", "original prompt"])
+        self.assertTrue(all(not s["h3Prompt"] for s in segments))
+        self.assertTrue(fixes)
+
+    def test_segment_at_cap_is_not_split(self):
+        doc = {"episodes": [{"ep": 1, "segments": [{
+            "id": "E01-01", "cuts": [{"seconds": 10}, {"seconds": 10}, {"seconds": 10}],
+            "h3Prompt": "keep",
+        }]}]}
+        fixes, jobs = split_overlong_segments(doc, 30)
+        self.assertEqual(fixes, [])
+        self.assertEqual(jobs, [])
+        self.assertEqual(len(doc["episodes"][0]["segments"]), 1)
+        self.assertEqual(doc["episodes"][0]["segments"][0]["h3Prompt"], "keep")
+
+    def test_single_cut_over_cap_is_not_falsely_rewritten(self):
+        doc = {"episodes": [{"ep": 1, "segments": [{
+            "id": "E01-01", "cuts": [{"seconds": 31}], "h3Prompt": "keep",
+        }]}]}
+        fixes, jobs = split_overlong_segments(doc, 30)
+        self.assertEqual(fixes, [])
+        self.assertEqual(jobs, [])
+        self.assertEqual(doc["episodes"][0]["segments"][0]["cuts"][0]["seconds"], 31)
 
 
 if __name__ == "__main__":
