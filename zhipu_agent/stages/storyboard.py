@@ -366,6 +366,12 @@ def _regenerate_split_segment_prompt(ctx: Context, segment: Dict[str, Any],
     )
     if video_model == "comfyui_h3":
         system += H3_REFERENCE_CONTRACT
+    else:
+        system += (
+            "\\n\\nWAN REFERENCE CONTRACT: the supplied referenceImages array is the reference inventory for "
+            "this segment. Use only the exact @ImageN indices listed there when referencing connected images; "
+            "never emit MiniMax <Picture> tags or invent image indices."
+        )
     fixed = ask_text(system, json.dumps(payload, ensure_ascii=False, indent=2), ctx.settings,
                      purpose=f"storyboard-split-prompt:{segment.get('id')}", max_tokens=16000).strip()
     if not fixed:
