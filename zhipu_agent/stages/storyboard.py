@@ -154,7 +154,7 @@ def _write_validation_report(ctx: Context, sb_dir: Path, errors: List[str]) -> N
 
 def _repair_existing_h3(ctx: Context, doc: Dict[str, Any], path: Path,
                         prompt_lang: str) -> Result:
-    """Repair deterministic fields, split overlong segments with scoped prompt regeneration, then validate."""
+    """Repair deterministic fields without changing segment boundaries, then validate."""
     sk = ctx.skill(SKILL)
     script = read_json(ctx.artifact("script"))
     fixes = repair_deterministic_storyboard(doc, prompt_lang, script)
@@ -297,10 +297,10 @@ def _renumber_split_episode(episode: Dict[str, Any]) -> None:
         previous = segment
 
 
-def _regenerate_split_segment_prompt(ctx: Context, segment: Dict[str, Any],
+def _generate_segment_ref2v_prompt(ctx: Context, segment: Dict[str, Any],
                                      source_prompt: str, script: Dict[str, Any],
                                      video_model: str) -> None:
-    """Generate a fresh final Ref2V prompt scoped to one newly split segment."""
+    """Generate a fresh final Ref2V prompt scoped to exactly one grouped segment."""
     skill_root = Path(__file__).resolve().parents[2] / "skills"
     skill_path = (skill_root / "h3-prompt-writing" / "SKILL.md"
                   if video_model == "comfyui_h3"
@@ -352,7 +352,7 @@ def _regenerate_split_segment_prompt(ctx: Context, segment: Dict[str, Any],
         "originalPromptForStyleAndContinuityContextOnly": source_prompt,
     }
     system = (
-        "Create the final Ref2V prompt for ONLY this one newly split segment. Follow the selected model skill "
+        "Create the final Ref2V prompt for ONLY this one segment. Follow the selected model skill "
         "exactly and return only the prompt. The supplied cuts are authoritative: cover every supplied cut exactly "
         "once and in order; do not include any omitted cut from the original segment. Preserve every source dialogue "
         "line character-for-character, exactly once, in original order, using the format required by the model skill. "
@@ -370,7 +370,7 @@ def _regenerate_split_segment_prompt(ctx: Context, segment: Dict[str, Any],
             "never emit MiniMax <Picture> tags or invent image indices."
         )
     fixed = ask_text(system, json.dumps(payload, ensure_ascii=False, indent=2), ctx.settings,
-                     purpose=f"storyboard-split-prompt:{segment.get('id')}", max_tokens=16000).strip()
+                     purpose=f"storyboard-segment-prompt:{segment.get('id')}", max_tokens=16000).strip()
     if not fixed:
         raise ValueError(f"{segment.get('id')} 拆段后的 Ref2V 提示词生成为空")
     segment["h3Prompt"] = fixed
@@ -625,14 +625,14 @@ def run(
                     "打戏按动作因果规划：发起动作 → 对手可见的防守/闪避/反制 → 接触或落空结果 → 双方位置与重心变化 → 下一动作承接。"
                     "不要只写“双方激烈打斗”；每个动作必须说明谁对谁做什么、方向/距离如何、对手如何回应、结果是什么，并确保动作能在对应镜头秒数内完成。"
                     "保持剧本已确定的胜负、伤势、武器、人物能力和剧情结果，不得擅自新增致命攻击、伤害或剧情转折。"
-                    "对被增强的打戏 segment 增加可选字段 fightPlan，结构为："
+                    "对被增强的场次 scenePlan 增加可选字段 fightPlan，结构为："
                     "{\"importance\":\"high\",\"actions\":["
                     "{\"actionId\":\"A001\",\"attacker\":\"角色ID或剧本身份\",\"defender\":\"角色ID或剧本身份\","
                     "\"attack\":\"具体动作\",\"response\":\"防守/闪避/反击\",\"result\":\"动作结果\","
                     "\"positionsBefore\":\"动作前双方相对位置\",\"positionsAfter\":\"动作后双方相对位置\","
                     "\"seconds\":2.0,\"cutIndexes\":[1]}]}。"
-                    "importance 只允许 high 或 medium；cutIndexes 从 1 开始，对应该 segment.cuts 的序号；动作计划覆盖关键攻防节拍，且时间安排与对应镜头相容。"
-                    "必须把动作计划落实到 cut.frame、cut.shot、cut.sfx、segment.blocking 和 h3Prompt，不能只写 fightPlan 而不改变镜头内容。"
+                    "importance 只允许 high 或 medium；cutIndexes 从 1 开始，对应该场 scenePlan.cuts 的序号；程序分组时会转换为 segment 内局部序号。动作计划覆盖关键攻防节拍，且时间安排与对应镜头相容。"
+                    "必须把动作计划落实到 cut.frame、cut.shot、cut.sfx、scenePlan.blocking 和后续生成的段级 Ref2V 提示词，不能只写 fightPlan 而不改变镜头内容。"
                     "每镜明确动作衔接、双方空间位置、攻防反应和动势承接；仍遵守时长、台词、画幅和所选 Ref2V Skill 的约束。\n"
                     + (
                         "模式=auto：判断打戏对剧情的作用。只有 high 重要程度（决定胜负、揭示主角实力、改变剧情走向或构成高潮）的打戏才写 fightPlan 并强化；普通推搡、短暂冲突、重点在对白/情绪的挥拳不强化，沿用普通分镜。"
@@ -820,7 +820,7 @@ def run(
                         )
                     cut["assetRefs"] = refs
             for segment in episode["segments"]:
-                _regenerate_split_segment_prompt(ctx, segment, "", script, video_model)
+                _generate_segment_ref2v_prompt(ctx, segment, "", script, video_model)
             _renumber_split_episode(episode)
             _doc["episodes"] = sorted(
                 [e for e in _doc["episodes"] if e["ep"] != ep] + [episode], key=lambda e: e["ep"])
