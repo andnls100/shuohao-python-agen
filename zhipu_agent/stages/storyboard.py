@@ -684,10 +684,34 @@ def run(
             if actual != expected:
                 raise ValueError(f"E{ep:02d} scenePlans 场次顺序/数量错误；期望 {expected}，实际 {actual}")
             max_segment = float(storyboard_params.get("maxSegmentSeconds", 30))
+            # Fit dialogue duration on complete scene cut lists BEFORE grouping.
+            # This prevents dialogue repair from pushing a fixed segment over 30 seconds.
+            timing_doc = {
+                "params": storyboard_params,
+                "episodes": [{
+                    "ep": ep,
+                    "segments": [
+                        {"sceneIndex": int(plan.get("sceneIndex") or 0), "cuts": plan["cuts"]}
+                        for plan in plans
+                        if isinstance(plan, dict) and isinstance(plan.get("cuts"), list)
+                    ],
+                }],
+            }
+            for fix in repair_dialogue_fit(timing_doc, script, prompt_lang):
+                ctx.log(f"[storyboard] 分组前对白时长校正：{fix}")
             for plan in plans:
                 if not isinstance(plan, dict) or not isinstance(plan.get("cuts"), list) or not plan["cuts"]:
                     raise ValueError(f"E{ep:02d} 场次必须包含非空 cuts")
                 scene_index, cuts = int(plan["sceneIndex"]), plan["cuts"]
+                min_cut = float(storyboard_params.get("minCutSeconds", 4))
+                max_cut = float(storyboard_params.get("maxCutSeconds", 10))
+                for cut_index, cut in enumerate(cuts, start=1):
+                    seconds = float(cut.get("seconds") or 0)
+                    if seconds < min_cut or seconds > max_cut:
+                        raise ValueError(
+                            f"E{ep:02d} 场次 {scene_index} 第 {cut_index} 切为 {seconds:.2f}s，"
+                            f"必须在 {min_cut:g}–{max_cut:g}s；请在镜头规划阶段解决对白时长"
+                        )
                 for offset in range(0, len(cuts), 3):
                     grouped = cuts[offset:offset + 3]
                     if any(not isinstance(cut, dict) for cut in grouped):
