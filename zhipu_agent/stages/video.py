@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from ..config import models_file_path
 from ..validator import Result
 from ..visual_style import visual_style_instruction
-from .base import Context, read_json, write_json
+from .base import Context, read_json, read_text_auto, write_json
 
 
 def artifact(ctx: Context) -> Path:
@@ -20,13 +20,30 @@ def _safe(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._") or "segment"
 
 
-def _prompt(segment: dict, protocol: str) -> str:
-    h3 = str(segment.get("h3Prompt") or "").strip()
+def _read_h3_prompt(ctx: Context, segment_id: str) -> str:
+    """Read the authoritative H3 prompt body from the exported segment prompt.md."""
+    path = ctx.out / "storyboard" / segment_id / "prompt.md"
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"找不到 H3 提示词文件：{path}；请先运行 storyboard 阶段导出投产包"
+        )
+    markdown = read_text_auto(path)
+    lines = markdown.splitlines()
+    separator = next((i for i, line in enumerate(lines) if line.strip() == "---"), None)
+    if separator is None:
+        raise ValueError(f"H3 提示词文件缺少正文分隔线（---）：{path}")
+    prompt = "\n".join(lines[separator + 1:]).strip()
+    if not prompt:
+        raise ValueError(f"H3 提示词文件正文为空：{path}")
+    return prompt
+
+
+def _prompt(segment: dict, protocol: str, h3_prompt: Optional[str] = None) -> str:
     if protocol == "h3":
-        final_prompt = str(segment.get("videoPrompt") or "").strip()
+        final_prompt = str(h3_prompt or "").strip()
         if final_prompt:
             return final_prompt
-        raise ValueError(f"分段 {segment.get('id', '?')} 缺少 videoPrompt；请重新运行 storyboard 阶段")
+        raise ValueError(f"分段 {segment.get('id', '?')} 缺少 prompt.md 正文")
     if protocol != "seedance":
         raise ValueError(f"不支持的视频提示词协议：{protocol}")
     parts = []
@@ -165,6 +182,8 @@ def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str
         if wanted and ep not in wanted: continue
         for seg_index, segment in enumerate(episode.get("segments", []), 1):
             sid = str(segment.get("id") or f"E{ep:02d}-{seg_index:02d}"); cuts = segment.get("cuts") or []
+            # H3 提示词只从导出的 prompt.md 读取；分镜 JSON 仍提供时长、连续性和参考图元数据。
+            h3_prompt = _read_h3_prompt(ctx, sid) if protocol == "h3" else None
             # H3：整段共用一份参考图顺序（refOrder），和提示词里的 <Picture N> 是同一套编号；旧分镜没有 refOrder，沿用逐镜头逻辑
             seg_refs = _segment_reference_assets(ctx, segment) if protocol == "h3" else None
             for cut_index, cut in enumerate(cuts, 1):
@@ -185,7 +204,7 @@ def _collect(ctx: Context, eps: Optional[list], protocol: str, visual_style: str
                            "reference_numbering": "refOrder" if seg_refs is not None else "legacy",
                            "reference_missing": ref_missing, "continuity": cut.get("continuity") or {},
                            "continuity_mode": str(segment.get("continuityMode") or ""),
-                           "prompt": _shot_prompt(segment, cut, cut_index, visual_style, visual_style_prompt) if protocol == "seedance" else _prompt(segment, protocol),
+                           "prompt": _shot_prompt(segment, cut, cut_index, visual_style, visual_style_prompt) if protocol == "seedance" else _prompt(segment, protocol, h3_prompt),
                            "state": "planned", "task_id": None, "video_url": None, "video_path": None, "last_frame_path": None, "error": None}
                 continuous, reason = _is_continuous(previous, current)
                 current["input_mode"] = "previous_last_frame" if continuous else "scene_or_assets"
