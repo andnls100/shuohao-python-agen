@@ -11,7 +11,7 @@
   "source": "渡口",
   "aspectRatio": "16:9",
   "promptLang": "zh",
-  "params": { "maxSegmentSeconds": 20, "minCutSeconds": 4, "maxCutSeconds": 8, "maxOnScreen": 6, "tolerance": 1.0 },
+  "params": { "maxSegmentSeconds": 30, "minCutSeconds": 4, "maxCutSeconds": 10, "maxOnScreen": 6, "tolerance": 1.0 },
   "episodes": [ { "ep": 1, "segments": [ ... ] } ]
 }
 ```
