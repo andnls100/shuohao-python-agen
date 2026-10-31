@@ -32,6 +32,7 @@ from .storyboard_repair import (
 
 SKILL = "novel-storyboard"
 BATCH = 3
+STORYBOARD_MAX_OUTPUT_TOKENS = 512 * 1024  # 512 Ki tokens
 PASSES = ["storyboard-pass.md", "shot-writing.md", "frame.md"]
 
 # MiniMax H3 Ref2VA 的参考图写法。模型写提示词时还不知道视频阶段最终上传哪几张图、按什么顺序，
@@ -537,6 +538,7 @@ def run(
             items.append(Item(
                 str(ep), system, prompt, tokens=ep_tokens(ep), cache=cache_path,
                 purpose=f"storyboard-generation:E{ep:02d}",
+                max_tokens=STORYBOARD_MAX_OUTPUT_TOKENS,
             ))
 
         def apply(key: str, data: Any, _doc=batch_doc, _path=batch_path) -> None:
