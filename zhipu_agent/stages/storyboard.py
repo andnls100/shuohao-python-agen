@@ -156,9 +156,14 @@ def _repair_existing_h3(ctx: Context, doc: Dict[str, Any], path: Path,
                         prompt_lang: str) -> Result:
     """Apply deterministic storyboard fixes and validate; never rewrite final Ref2V prompts."""
     sk = ctx.skill(SKILL)
-    fixes = repair_deterministic_storyboard(doc, prompt_lang, read_json(ctx.artifact("script")))
+    script = read_json(ctx.artifact("script"))
+    fixes = repair_deterministic_storyboard(doc, prompt_lang, script)
     fixes += repair_minor_cut_durations(doc, prompt_lang)
-    fixes += repair_dialogue_fit(doc, read_json(ctx.artifact("script")), prompt_lang)
+    fixes += repair_dialogue_fit(doc, script, prompt_lang)
+    fixes += _split_and_regenerate_overlong_segments(
+        ctx, doc, script, str(doc.get("videoModel") or "comfyui_h3"),
+        float((doc.get("params") or {}).get("maxSegmentSeconds", 30)),
+    )
     if fixes:
         for fix in fixes:
             ctx.log(f"[storyboard] 已有分镜自动修正：{fix}")
