@@ -29,7 +29,7 @@ Same stance as the other four skills in this repo: **a checklist the model grade
 | --- | --- |
 | **Full beat coverage** | every script beat claimed exactly once, in order, contiguous, cut-level |
 | Segment duration | 0 < Σcuts ≤ 30s (the single-generation cap; tune `params.maxSegmentSeconds`) |
-| **Cut duration** | every cut 2–5s — the ~3s rhythm is a **hard gate**, not advice |
+| **Cut duration** | every cut 4–10s — the ~3s rhythm is a **hard gate**, not advice |
 | Dialogue fits | dialogue seconds of claimed beats ≤ cut seconds, per cut |
 | Episode total | Σ segments within ±100% of the script's `targetSeconds` by default (`params.tolerance` can override) |
 | On-screen cap | ≤ 3 characters per cut, more requires a breakdown note |
