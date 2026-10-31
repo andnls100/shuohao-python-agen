@@ -157,9 +157,9 @@ eq(gateReport(FIXTURE, CTX).length, 18, '十八道门');
 // segment-cap
 {
   const doc = clone(FIXTURE);
-  doc.episodes[0].segments[0].cuts[0].seconds = 15; // 段总秒数 27
+  doc.episodes[0].segments[0].cuts[0].seconds = 20; // 段总秒数 32
   const g = gate(doc, 'segment-cap');
-  ok(!g.ok, '段超 15 秒被拦');
+  ok(!g.ok, '段超 30 秒被拦');
   ok(g.detail.includes('E01-01'), '点名到段');
 }
 // cut-length
@@ -542,9 +542,9 @@ const withRecipe = () => {
 // 纯函数 + CLI 负责 IO，所以这里不落盘也能验。
 {
   const gates = [
-    { id: 'cut-length', label: '每个分镜 2–5 秒', ok: false, detail: 'E01-01#1 9 秒' },
+    { id: 'cut-length', label: '每个分镜 4–10 秒', ok: false, detail: 'E01-01#1 11 秒' },
     { id: 'coverage', label: '节拍全覆盖', ok: true, detail: '' },
-    { id: 'segment-cap', label: '每段 ≤ 15 秒', ok: false, detail: 'E01-01 共 21 秒' },
+    { id: 'segment-cap', label: '每段 ≤ 30 秒', ok: false, detail: 'E01-01 共 21 秒' },
   ];
   const rows = gateLogEntries(gates, { doc: 'x.json', at: 'T0' });
   eq(rows.length, 3, '一次运行记一条 run + 每条失败一行');
