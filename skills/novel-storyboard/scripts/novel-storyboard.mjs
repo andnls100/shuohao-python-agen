@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 /*
  * AI 短剧的前提刻在骨子里，三层结构也由此而来：
  *
- *   段（segment）＝ 一次视频生成调用，上限就是模型单段时长（默认 15 秒）
+ *   段（segment）＝ 一次视频生成调用，上限就是模型单段时长（默认 30 秒）
  *   分镜（cut）  ＝ 段内的一次剪切，4–8 秒——短剧观众的注意力节奏
  *   分镜图       ＝ 每个分镜一张关键帧：第 1 个分镜的是主分镜图（钉在
  *                  0.00 秒），其余是子分镜图（各钉在自己的切点时刻）
@@ -24,9 +24,9 @@ import { fileURLToPath } from 'node:url';
  */
 
 export const DEFAULT_PARAMS = {
-  maxSegmentSeconds: 20, // 视频模型单段生成上限（秒）
+  maxSegmentSeconds: 30, // 视频模型单段生成上限（秒）
   minCutSeconds: 4,      // 单个分镜下限
-  maxCutSeconds: 8,       // 单个分镜上限——5 秒左右对齐视频模型的 5/10 秒档位
+  maxCutSeconds: 10,       // 单个分镜上限——5 秒左右对齐视频模型的 5/10 秒档位
   maxOnScreen: 6,        // 单个分镜同框人数上限，超了必须带拆解说明
   tolerance: 1.0,        // 每集总时长对剧本目标的容差 ±100%
   h3Gates: true,         // Legacy gate default for old fixtures; the Ref2V pipeline explicitly sets this false
