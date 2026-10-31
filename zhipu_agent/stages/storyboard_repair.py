@@ -138,7 +138,7 @@ def repair_dialogue_fit(doc: Dict[str, Any], script: Dict[str, Any], lang: str =
     """
     params = doc.get("params") or {}
     try:
-        upper = float(params.get("maxCutSeconds", 8))
+        upper = float(params.get("maxCutSeconds", 10))
     except (TypeError, ValueError):
         upper = 10.0
     try:
