@@ -232,6 +232,7 @@ def _repair_ref2v_prompts(ctx: Context, doc: Dict[str, Any], path: Path, result:
             fixed = ask_text(
                 ref_system if order else system, user, ctx.settings,
                 purpose=f"ref2v-prompt-repair:{sid}",
+                max_tokens=STORYBOARD_MAX_OUTPUT_TOKENS,
             ).strip()
             if not fixed:
                 raise ValueError(f"{sid} Ref2V 局部修复返回空提示词")
