@@ -691,7 +691,9 @@ def run(
                    if first_blocking else "")
                 + "## 输出\n只输出这一集的 JSON 对象：{\"ep\": N, \"scenePlans\": [...] }，不要 seedScenes、segments、h3Prompt 或 videoPrompt。"
                   "scenePlans 必须严格按 seedScenes 的 sceneIndex 一场一个，不能遗漏、重复、合并或调换；每个 scenePlan 的 cuts 是该场从第一拍到最后一拍的完整有序镜头清单。"
-                  "每个 cut 必须包含完整字段（beats、seconds、frame、shot、characters、props、构图字段、continuity 等）。每 3 镜头为一段，组内总时长必须不超过 maxSegmentSeconds。"
+                  "每个 cut 必须包含完整字段（beats、seconds、frame、shot、characters、props、构图字段、continuity 等）；seconds 必须为 4–10 秒，且足以完整容纳该切认领的全部对白和动作。"
+                  "不得依赖分组后的自动增时修复。对白时长不足时，必须在完整镜头规划中调整节奏与镜头分配，保留全部剧情和台词。"
+                  "每 3 镜头为一段（每场最后不足 3 镜头的余数单独成段），不得跨场，组内总时长必须不超过 maxSegmentSeconds。"
                   "每段最终 Ref2V 提示词由程序在分组和资产绑定完成后逐段独立生成。"
             )
             prompt += fight_instruction
