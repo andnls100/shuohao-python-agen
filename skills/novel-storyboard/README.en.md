@@ -13,7 +13,7 @@ segment = one video-generation call, ≤ 30s, never crosses scenes
  └─ H3 prompt = one per segment; multi-picture alignment + [Shot k] cut times audited verbatim
 ```
 
-- **A dialogue's shot–reverse-shot lives inside one segment, one generation** — wide, close on A, close on B are separate 2–5s cuts, each composition controlled by its own storyboard frame instead of gambling on prose
+- **A dialogue's shot–reverse-shot lives inside one segment, one generation** — wide, close on A, close on B are separate 4–10s cuts, each composition controlled by its own storyboard frame instead of gambling on prose
 - **Final video prompts use the selected Ref2V skill directly** — H3 uses its Ref2VA skill and Wan 3.0 uses its Ref2V skill; no intermediate I2V/T2V prompt or second LLM rewrite
 - **Frames are asset composition, not invention** — every frame carries a reference manifest: the scene / character / prop sheets it must be built from. **This skill does not generate the images**; the prompt and that manifest are the deliverable
 
@@ -28,7 +28,7 @@ Same stance as the other four skills in this repo: **a checklist the model grade
 | Gate | Rule |
 | --- | --- |
 | **Full beat coverage** | every script beat claimed exactly once, in order, contiguous, cut-level |
-| Segment duration | 0 < Σcuts ≤ 15s (the single-generation cap; tune `params.maxSegmentSeconds`) |
+| Segment duration | 0 < Σcuts ≤ 30s (the single-generation cap; tune `params.maxSegmentSeconds`) |
 | **Cut duration** | every cut 2–5s — the ~3s rhythm is a **hard gate**, not advice |
 | Dialogue fits | dialogue seconds of claimed beats ≤ cut seconds, per cut |
 | Episode total | Σ segments within ±100% of the script's `targetSeconds` by default (`params.tolerance` can override) |
