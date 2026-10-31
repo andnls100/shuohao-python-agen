@@ -6,8 +6,8 @@
 Storyboarding for AI short drama: turns novel-script's beat flow into a worklist you can hand straight to a video model. This is the first layer in the pipeline that talks directly to that model, and the premise is baked in: **shots are generated, so one more cut costs almost nothing** — and the short-drama attention span runs on ~3-second cuts. Hence a three-level structure:
 
 ```
-segment = one video-generation call, ≤ 15s, never crosses scenes
- ├─ cuts × 3–5 = intra-segment edits, 2–5s each (hard gate), each claiming script beats
+segment = one video-generation call, ≤ 30s, never crosses scenes
+ ├─ cuts × 3–5 = intra-segment edits, 4–10s each (hard gate), each claiming script beats
  ├─ frames    = one keyframe per cut: the master frame pinned at 0.00s,
  │              sub-frames pinned at their own cut marks
  └─ H3 prompt = one per segment; multi-picture alignment + [Shot k] cut times audited verbatim
