@@ -31,8 +31,8 @@ from .storyboard_repair import (
 )
 
 SKILL = "novel-storyboard"
-BATCH = 3
-STORYBOARD_MAX_OUTPUT_TOKENS = 512 * 1024  # 512 Ki tokens
+BATCH = 1
+STORYBOARD_MAX_OUTPUT_TOKENS = 262144  # 256 Ki tokens
 PASSES = ["storyboard-pass.md", "shot-writing.md", "frame.md"]
 
 # MiniMax H3 Ref2VA 的参考图写法。模型写提示词时还不知道视频阶段最终上传哪几张图、按什么顺序，
