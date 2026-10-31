@@ -1231,7 +1231,7 @@ const I18N = {
     fmtMin: (sec) => `${Math.floor(sec / 60)} 分 ${Math.round(sec % 60)} 秒`,
     unitSeg: '段',
     unitCut: '切',
-    colophon: '分镜由模型依据剧本切分：段 = 一次生成（≤20 秒），分镜 = 段内 4–10 秒的剪切，每个分镜一张关键帧图。对齐指令、切点时刻、台词、提示词纪律全部由脚本确定性对账。分镜图出图走 codex，环境与角色设定图当参考图。',
+    colophon: '分镜由模型依据剧本切分：段 = 一次生成（≤30 秒），分镜 = 段内 4–10 秒的剪切，每个分镜一张关键帧图。对齐指令、切点时刻、台词、提示词纪律全部由脚本确定性对账。分镜图出图走 codex，环境与角色设定图当参考图。',
   },
   en: {
     langCode: 'en',
@@ -1296,7 +1296,7 @@ const I18N = {
     fmtMin: (sec) => `${Math.floor(sec / 60)} min ${Math.round(sec % 60)} s`,
     unitSeg: 'seg',
     unitCut: 'cuts',
-    colophon: 'Cut by the model from the script: a segment = one generation call (≤20s), a cut = a 2–5s edit inside it, one keyframe per cut. Alignment lines, cut marks, dialogue and prompt discipline are all audited deterministically by the script. Frames are generated through codex with the scene and character sheets as references.',
+    colophon: 'Cut by the model from the script: a segment = one generation call (≤30s), a cut = a 4–10s edit inside it, one keyframe per cut. Alignment lines, cut marks, dialogue and prompt discipline are all audited deterministically by the script. Frames are generated through codex with the scene and character sheets as references.',
   },
 };
 
