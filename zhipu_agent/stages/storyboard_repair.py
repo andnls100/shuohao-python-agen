@@ -795,6 +795,10 @@ def split_overlong_segments(doc: Dict[str, Any], max_segment_seconds: float = 30
             for part_index, group in enumerate(groups, start=1):
                 part = copy.deepcopy(segment)
                 part["cuts"] = copy.deepcopy(group)
+                if part_index > 1:
+                    # Later pieces continue the same scene; the original segment's
+                    # initial hard_cut must not sever continuity at an artificial split.
+                    part["continuityMode"] = "continuous"
                 part["h3Prompt"] = ""
                 part.pop("videoPrompt", None)
                 part.pop("videoPromptSourceHash", None)
