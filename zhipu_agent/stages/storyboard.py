@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -27,7 +28,7 @@ from .base import (
 )
 from .storyboard_repair import (
     balance_episode_durations, repair_deterministic_storyboard,
-    repair_dialogue_fit, repair_minor_cut_durations,
+    repair_dialogue_fit, repair_minor_cut_durations, split_overlong_segments,
 )
 
 SKILL = "novel-storyboard"
@@ -53,6 +54,7 @@ H3_REFERENCE_CONTRACT = (
 
 
 _PARAMS_KEY = "AGENT_STORYBOARD_PARAMS"
+STORYBOARD_DEFAULT_PARAMS = {"maxSegmentSeconds": 30, "minCutSeconds": 4, "maxCutSeconds": 10, "maxOnScreen": 6, "tolerance": 1.0, "h3Gates": False, "nameGate": True, "nameAllow": []}
 
 
 def _params_raw() -> tuple:
@@ -340,6 +342,7 @@ def run(
     script = read_json(script_path)
     wanted = eps or [e["ep"] for e in script["episodes"]]
     _eff = _params_override(h3_gates)
+    storyboard_params = {**STORYBOARD_DEFAULT_PARAMS, **_eff, "h3Gates": False}
     ctx.log(f"[storyboard] 分镜参数来源：{_params_raw()[1]}")
     ctx.log(f"[storyboard] 分镜参数覆盖：{json.dumps(_eff, ensure_ascii=False) if _eff else '无（使用技能包默认）'}；Ref2V 专属旧式检查={'开' if h3_gates else '关闭'}")
     ctx.log(f"[storyboard] 打戏增强模式：{fight_enhancement}" + ("（已有分镜需 --force 才会按新模式重做）" if artifact(ctx).is_file() and not ctx.force else ""))
@@ -369,8 +372,7 @@ def run(
         main = read_json(path)
         main.setdefault("promptLang", prompt_lang)
     main["videoModel"] = video_model
-    if _params_override(h3_gates):
-        main["params"] = {**(main.get("params") or {}), **_params_override(h3_gates)}
+    main["params"] = {**(main.get("params") or {}), **storyboard_params}
     # Existing merged output can also contain stale IDs from older runs. Repair them
     # before deciding which episodes are complete, and persist the deterministic fix.
     normalized_existing = False
@@ -454,8 +456,7 @@ def run(
         seed_eps = {e["ep"]: e for e in seed["episodes"]}
         batch_doc: Dict[str, Any] = {"source": ctx.title, "aspectRatio": aspect,
                                      "promptLang": prompt_lang, "videoModel": video_model, "episodes": []}
-        if _params_override(h3_gates):
-            batch_doc["params"] = _params_override(h3_gates)
+        batch_doc["params"] = dict(storyboard_params)
         batch_path = work / "storyboard-batch.json"
         items: List[Item] = []
         for ep in group:
@@ -517,7 +518,7 @@ def run(
                     + "\n"
                 )
             prompt = (
-                f"## 任务\n给第 {ep} 集切分镜：先按剧情单元分段（每段 9–20 秒、不跨场），段内切 4–8 秒的分镜。\n\n"
+                f"## 任务\n给第 {ep} 集切分镜：先按剧情单元分段（每段不超过 {storyboard_params['maxSegmentSeconds']} 秒、不跨场），段内每切 {storyboard_params['minCutSeconds']}–{storyboard_params['maxCutSeconds']} 秒。长剧情必须增加镜头并按镜头边界拆成多个段；不得删减剧情、台词或动作，不得把多个段重新合并。\n\n"
                 + f"## 画幅与语言\naspectRatio = {aspect}；promptLang = {prompt_lang}（仅控制 frame、shot 等分镜字段语言；最终 Ref2V 视频提示词遵循所选 Skill，使用英文并保留对白原文）。\n\n"
                 + f"## 视觉风格（frame、shot 和最终 Ref2V 视频提示词必须统一遵守）\n{style_hint}\n保持同一风格贯穿所有镜头，不要在漫剧插画与真人摄影之间混用。\n\n"
                 + "## 多人同框说明\n单个分镜 characters 超过 3 人时，该分镜必须写非空 note：说明前景主体是谁、其余人物作为背景群像如何站位，以及哪些人物不单独特写。不超过 3 人可不写。\n\n"
