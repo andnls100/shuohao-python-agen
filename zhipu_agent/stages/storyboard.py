@@ -154,7 +154,7 @@ def _write_validation_report(ctx: Context, sb_dir: Path, errors: List[str]) -> N
 
 def _repair_existing_h3(ctx: Context, doc: Dict[str, Any], path: Path,
                         prompt_lang: str) -> Result:
-    """Apply deterministic storyboard fixes and validate; never rewrite final Ref2V prompts."""
+    """Repair deterministic fields, split overlong segments with scoped prompt regeneration, then validate."""
     sk = ctx.skill(SKILL)
     script = read_json(ctx.artifact("script"))
     fixes = repair_deterministic_storyboard(doc, prompt_lang, script)
