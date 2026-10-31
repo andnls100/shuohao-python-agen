@@ -769,7 +769,7 @@ def split_overlong_segments(doc: Dict[str, Any], max_segment_seconds: float = 30
                 except (TypeError, ValueError, AttributeError):
                     valid = False
                     break
-                if seconds <= 0 or seconds > cap:
+                if not math.isfinite(seconds) or seconds <= 0 or seconds > cap:
                     valid = False
                     break
                 durations.append(seconds)
@@ -799,6 +799,11 @@ def split_overlong_segments(doc: Dict[str, Any], max_segment_seconds: float = 30
                     # Later pieces continue the same scene; the original segment's
                     # initial hard_cut must not sever continuity at an artificial split.
                     part["continuityMode"] = "continuous"
+                    first_cut = group[0] if group else {}
+                    first_state = ((first_cut.get("continuity") or {}).get("stateBefore")
+                                   if isinstance(first_cut, dict) else None)
+                    if isinstance(first_state, str) and first_state.strip():
+                        part["blocking"] = first_state.strip()
                 part["h3Prompt"] = ""
                 part.pop("videoPrompt", None)
                 part.pop("videoPromptSourceHash", None)
