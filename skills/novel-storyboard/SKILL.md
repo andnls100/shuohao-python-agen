@@ -81,7 +81,7 @@ node {baseDir}/scripts/novel-storyboard.mjs seed <script.json> --eps 1-3 --aspec
 
 确定性展开：每场的节拍清单（编号、动作/台词、每拍秒数、说话人）进 `seedScenes`，这就是切镜时的工作底稿；同时把 `--aspect` 写进顶层 `aspectRatio`，省略时默认 `16:9`。**每拍几秒是算出来的，不要让模型重新估。** shots 留空，切镜才是模型的活。
 
-### Step 2 — 逐集分段切镜
+### Step 2 — 逐集先切镜、再分段
 
 每集一份任务，能并发就并发。每份任务拿到：
 
