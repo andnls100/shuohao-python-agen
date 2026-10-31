@@ -160,10 +160,7 @@ def _repair_existing_h3(ctx: Context, doc: Dict[str, Any], path: Path,
     fixes = repair_deterministic_storyboard(doc, prompt_lang, script)
     fixes += repair_minor_cut_durations(doc, prompt_lang)
     fixes += repair_dialogue_fit(doc, script, prompt_lang)
-    fixes += _split_and_regenerate_overlong_segments(
-        ctx, doc, script, str(doc.get("videoModel") or "comfyui_h3"),
-        float((doc.get("params") or {}).get("maxSegmentSeconds", 30)),
-    )
+    # Segment boundaries are fixed during initial shot grouping; never split during repair.
     if fixes:
         for fix in fixes:
             ctx.log(f"[storyboard] 已有分镜自动修正：{fix}")
@@ -386,30 +383,8 @@ def _regenerate_split_segment_prompt(ctx: Context, segment: Dict[str, Any],
 def _split_and_regenerate_overlong_segments(ctx: Context, doc: Dict[str, Any],
                                             script: Dict[str, Any], video_model: str,
                                             max_segment_seconds: float) -> List[str]:
-    """Split overlong segments at cut boundaries; regenerate prompts for every resulting part."""
-    original_episodes = copy.deepcopy(doc.get("episodes", []))
-    fixes, jobs = [], []
-    for episode in doc.get("episodes", []):
-        episode_fixes, episode_jobs = split_overlong_segments(
-            {"episodes": [episode]}, max_segment_seconds
-        )
-        fixes.extend(episode_fixes)
-        jobs.extend(episode_jobs)
-    if not jobs:
-        return fixes
-    try:
-        for episode in doc.get("episodes", []):
-            _renumber_split_episode(episode)
-        for segment, source_prompt in jobs:
-            _regenerate_split_segment_prompt(ctx, segment, source_prompt, script, video_model)
-        for fix in fixes:
-            ctx.log(f"[storyboard] 自动拆段：{fix}")
-        return fixes
-    except Exception as exc:
-        doc["episodes"] = original_episodes
-        ctx.log("[storyboard] ⚠ 拆段后的提示词重建失败；已回滚拆段，保留原分镜并交由质量门报告："
-                + str(exc)[:300])
-        return []
+    """Deprecated: segments must never be split after initial shot grouping."""
+    return []
 
 
 
@@ -454,7 +429,8 @@ def _read_cached_episode(cache: Path, ep: int) -> Optional[Dict[str, Any]]:
         data = data["episode"]
     if isinstance(data, list) and len(data) == 1:
         data = data[0]
-    if not isinstance(data, dict) or not isinstance(data.get("segments"), list) or not data["segments"]:
+    if (not isinstance(data, dict) or data.get("shotGroupingVersion") != 1
+            or not isinstance(data.get("segments"), list) or not data["segments"]):
         return None
     episode = {k: v for k, v in data.items() if k != "seedScenes"}
     _normalize_episode_segment_ids(episode, ep)
@@ -558,7 +534,15 @@ def run(
             main["promptLang"] = prompt_lang
             write_json(path, main)
 
-    done = {e["ep"] for e in main.get("episodes", []) if e.get("segments")}
+    stale_eps = {
+        int(e.get("ep")) for e in main.get("episodes", [])
+        if isinstance(e, dict) and e.get("segments") and e.get("shotGroupingVersion") != 1
+    }
+    if stale_eps:
+        main["episodes"] = [e for e in main.get("episodes", []) if int(e.get("ep", 0)) not in stale_eps]
+        write_json(path, main)
+        ctx.log(f"[storyboard] 丢弃旧分组缓存，按新规则重做：{', '.join(map(str, sorted(stale_eps)))}")
+    done = {e["ep"] for e in main.get("episodes", []) if e.get("segments") and e.get("shotGroupingVersion") == 1}
     todo = [e for e in wanted if e not in done]
     if not todo:
         ctx.log("所有集都已切好，跳过切镜")
@@ -572,15 +556,10 @@ def run(
         raise FileNotFoundError(f"缺少 Ref2V 提示词 Skill：{skill_path}")
     ref2v_skill = skill_path.read_text(encoding="utf-8")
     language_contract = (
-        "HARD OUTPUT CONTRACT: frame and shot are Simplified Chinese. "
-        "The h3Prompt field contains the FINAL video prompt written directly for the selected Ref2V model, "
-        "following the Ref2V skill included below; do not write I2V/T2V prompts or an intermediate prompt. "
-        "Write video prompt text in English, preserving supplied dialogue verbatim in its original language. "
-        "Preserve all supplied <Picture N> reference numbers for MiniMax H3 Ref2VA; for Wan 3.0 Ref2V use @ImageN "
-        "with the same numeric indices and no MiniMax-only markup. Do not invent references or story events."
+        "HARD OUTPUT CONTRACT: generate the complete shot list only. Do not write h3Prompt or videoPrompt. "
+        "frame and shot are Simplified Chinese. Preserve every story event, action and dialogue; do not omit or "
+        "compress beats. Plan each scene independently; the program groups the completed cuts afterward."
     )
-    if video_model == "comfyui_h3":
-        language_contract += H3_REFERENCE_CONTRACT
     language_contract += (
         "\n\nCUT FIELD CONTRACT: every cut.shot is always Simplified Chinese, regardless of promptLang; "
         "every cut.frame is Simplified Chinese. cut.characters must contain only the canonical character IDs "
@@ -590,9 +569,10 @@ def run(
     )
     system = build_system(
         sk, PASSES,
-        extra=(language_contract + "\n\n## Selected Ref2V skill (rules for h3Prompt field only)\n" + ref2v_skill
-               + "\n\n## Outer response contract\nThe selected skill output-format instructions apply only to the h3Prompt field. "
-               "Return the complete requested JSON object {\"ep\": N, \"segments\": [...]}; never return a standalone prompt outside JSON."),
+        extra=(language_contract +
+               "\n\n## Outer response contract\nReturn only {\"ep\": N, \"scenePlans\": [...]}. "
+               "Each scenePlan contains sceneIndex, scene-level blocking/continuityMode/soundscape/music and a complete ordered cuts array. "
+               "Do not return segments or video prompt text."),
     )
 
     for group in batches(todo, BATCH):
@@ -662,7 +642,7 @@ def run(
                     + "\n"
                 )
             prompt = (
-                f"## 任务\n给第 {ep} 集切分镜：先按剧情单元分段（每段不超过 {storyboard_params['maxSegmentSeconds']} 秒、不跨场），段内每切 {storyboard_params['minCutSeconds']}–{storyboard_params['maxCutSeconds']} 秒。长剧情必须增加镜头并按镜头边界拆成多个段；不得删减剧情、台词或动作，不得把多个段重新合并。\n\n"
+                f"## 任务\n给第 {ep} 集逐场完整切镜：先把每场所有镜头规划完整，之后由程序每 3 个镜头组成一段（每场最后余 1–2 个镜头单独成段）。禁止模型先分段。每镜 {storyboard_params['minCutSeconds']}–{storyboard_params['maxCutSeconds']} 秒；任意连续 3 镜总时长必须 ≤ {storyboard_params['maxSegmentSeconds']} 秒。若超限，必须在镜头规划阶段合理调整镜头时长或增加镜头，不能删镜头、删节拍、删台词，也不能事后拆段。场次之间绝不合并。\n\n"
                 + f"## 画幅与语言\naspectRatio = {aspect}；promptLang = {prompt_lang}（仅控制 frame、shot 等分镜字段语言；最终 Ref2V 视频提示词遵循所选 Skill，使用英文并保留对白原文）。\n\n"
                 + f"## 视觉风格（frame、shot 和最终 Ref2V 视频提示词必须统一遵守）\n{style_hint}\n保持同一风格贯穿所有镜头，不要在漫剧插画与真人摄影之间混用。\n\n"
                 + "## 多人同框说明\n单个分镜 characters 超过 3 人时，该分镜必须写非空 note：说明前景主体是谁、其余人物作为背景群像如何站位，以及哪些人物不单独特写。不超过 3 人可不写。\n\n"
@@ -675,8 +655,10 @@ def run(
                 + "## 资产绑定硬规则\n每个 cut.characters 只能填写角色卡中的准确角色名，cut.props 只能填写叙事道具卡中的准确名称；不得改名、缩写、合并或用代称。每切必须完整列出该画面实际可见或正在使用的角色与道具，空镜使用空数组。sceneIndex 必须指向实际场景卡。程序会根据这些字段生成唯一 assetRefs（角色→场景→道具），不要自行生成、复制或改写 assetRefs。资产绑定不得遗漏提示词中明确出现的角色、场景或道具，也不得把未出现在该切的资产加入绑定。\n\n"
                 + (f"## 每场第一段的开场走位句（blocking 请照抄对应那一场的这一句）\n" + "\n".join(first_blocking) + "\n\n"
                    if first_blocking else "")
-                + "## 输出\n只输出这一集的 JSON 对象：{\"ep\": N, \"segments\": [...]}，不要 seedScenes。"
-                  "视频提示词是最终 Ref2V 提示词，不得生成 I2V/T2V 中间格式；时长变化时同步检查提示词动作节奏，但不要添加旧式对齐行或镜头标记。"
+                + "## 输出\n只输出这一集的 JSON 对象：{\"ep\": N, \"scenePlans\": [...] }，不要 seedScenes、segments、h3Prompt 或 videoPrompt。"
+                  "scenePlans 必须严格按 seedScenes 的 sceneIndex 一场一个，不能遗漏、重复、合并或调换；每个 scenePlan 的 cuts 是该场从第一拍到最后一拍的完整有序镜头清单。"
+                  "每个 cut 必须包含完整字段（beats、seconds、frame、shot、characters、props、构图字段、continuity 等）。每 3 镜头为一段，组内总时长必须不超过 maxSegmentSeconds。"
+                  "每段最终 Ref2V 提示词由程序在分组和资产绑定完成后逐段独立生成。"
             )
             prompt += fight_instruction
             existing_cache = next((p for p in _episode_cache_candidates(work, ep) if p.is_file()), None)
@@ -692,11 +674,45 @@ def run(
                 data = data["episode"]
             if isinstance(data, list) and len(data) == 1:
                 data = data[0]
-            if not isinstance(data, dict) or not isinstance(data.get("segments"), list):
-                raise ValueError("一集应当是带 segments 数组的 JSON 对象")
+            if not isinstance(data, dict) or not isinstance(data.get("scenePlans"), list):
+                raise ValueError("一集应当是带 scenePlans 数组的 JSON 对象")
             ep = int(key)
-            episode = {k: v for k, v in data.items() if k != "seedScenes"}
-            episode["ep"] = ep
+            episode = {"ep": ep, "shotGroupingVersion": 1, "segments": []}
+            expected = [int(row.get("sceneIndex") or 0) for row in seed_ep.get("seedScenes", [])]
+            plans = data["scenePlans"]
+            actual = [int(row.get("sceneIndex") or 0) for row in plans if isinstance(row, dict)]
+            if actual != expected:
+                raise ValueError(f"E{ep:02d} scenePlans 场次顺序/数量错误；期望 {expected}，实际 {actual}")
+            max_segment = float(storyboard_params.get("maxSegmentSeconds", 30))
+            for plan in plans:
+                if not isinstance(plan, dict) or not isinstance(plan.get("cuts"), list) or not plan["cuts"]:
+                    raise ValueError(f"E{ep:02d} 场次必须包含非空 cuts")
+                scene_index, cuts = int(plan["sceneIndex"]), plan["cuts"]
+                for offset in range(0, len(cuts), 3):
+                    grouped = cuts[offset:offset + 3]
+                    if any(not isinstance(cut, dict) for cut in grouped):
+                        raise ValueError(f"E{ep:02d} 场次 {scene_index} 含非对象镜头")
+                    seconds = sum(float(cut.get("seconds") or 0) for cut in grouped)
+                    if seconds <= 0 or seconds > max_segment:
+                        raise ValueError(f"E{ep:02d} 场次 {scene_index} 第 {offset // 3 + 1} 组为 {seconds:.2f}s，必须 0 < 总时长 ≤ {max_segment:g}s；禁止事后拆段")
+                    segment = {"sceneIndex": scene_index, "cuts": grouped,
+                               "blocking": plan.get("blocking", ""),
+                               "continuityMode": plan.get("continuityMode", "continuous"),
+                               "soundscape": plan.get("soundscape", "")}
+                    for field in ("music", "note"):
+                        if plan.get(field): segment[field] = plan[field]
+                    if isinstance(plan.get("fightPlan"), dict):
+                        fight = copy.deepcopy(plan["fightPlan"])
+                        actions = []
+                        for action in fight.get("actions", []):
+                            indexes = action.get("cutIndexes") or []
+                            local = [i - offset for i in indexes if offset < i <= offset + len(grouped)]
+                            if local:
+                                action["cutIndexes"] = local
+                                actions.append(action)
+                        fight["actions"] = actions
+                        if actions: segment["fightPlan"] = fight
+                    episode["segments"].append(segment)
 
             # Bind every cut to deterministic, unique asset IDs. The model writes the
             # semantic names; the program resolves those names to canonical IDs so
@@ -803,8 +819,9 @@ def run(
                             f"移除该场不存在的道具引用：{', '.join(_removed_prop_ids)}"
                         )
                     cut["assetRefs"] = refs
-                if video_model == "comfyui_h3":
-                    _apply_ref_order(ctx, segment)
+            for segment in episode["segments"]:
+                _regenerate_split_segment_prompt(ctx, segment, "", script, video_model)
+            _renumber_split_episode(episode)
             _doc["episodes"] = sorted(
                 [e for e in _doc["episodes"] if e["ep"] != ep] + [episode], key=lambda e: e["ep"])
             write_json(_path, _doc)
@@ -816,10 +833,7 @@ def run(
             timing_fixes = repair_minor_cut_durations(_doc, prompt_lang)
             fit_fixes = repair_dialogue_fit(_doc, script, prompt_lang)
             duration_fixes = balance_episode_durations(_doc, script)
-            split_fixes = _split_and_regenerate_overlong_segments(
-                ctx, _doc, script, video_model,
-                float((_doc.get("params") or {}).get("maxSegmentSeconds", 30)),
-            )
+            split_fixes = []  # Never split/regroup shots after the scene-first grouping pass.
             for fix in [*basic_fixes, *timing_fixes, *fit_fixes, *duration_fixes]:
                 ctx.log(f"[storyboard] 自动修正：{fix}")
             if basic_fixes or timing_fixes or fit_fixes or duration_fixes or split_fixes:
