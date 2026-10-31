@@ -93,7 +93,7 @@ class Endpoint:
     api_key: str
     model: str
     temperature: Optional[float] = None
-    max_tokens: Optional[int] = None
+    max_tokens: Optional[int] = None  # 旧配置兼容字段；实际请求统一由 llm.py 限制为 512K
     timeout: Optional[float] = None
     stream: Optional[bool] = None
     json_mode: Optional[bool] = None
@@ -114,7 +114,7 @@ class Settings:
     base_url: str
     vision_model: str          # 可选：staging 认图需要能看图的模型
     temperature: float
-    max_tokens: Optional[int]  # None = 不传，使用平台默认
+    max_tokens: Optional[int]  # 旧配置兼容字段；实际请求统一使用 512K 上限
     timeout: float
     retries: int               # 每个平台上遇到网络类错误时重试几次，再换下一个平台
     concurrency: int           # 同时进行的模型调用数
