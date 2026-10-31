@@ -37,6 +37,7 @@ This pipeline sends MiniMax H3 Ref2VA one reference image per character, per sce
 - While writing, put the card id inside the tag: `<Picture C02>` for a character, `<Picture S01>` for the scene, `<Picture P03>` for a prop. Copy the id exactly from the cards. Never write a digit tag such as `<Picture 1>`: the program binds the assets first, then replaces each id with the final image number.
 - Define every character, the scene and every prop that appears in the segment once in `subject_definitions`, each with its own tag. One tag never stands for two subjects.
 - Reuse the same tags in `retention_analysis` and `detailed_description` wherever that subject, the environment or the prop is used. Only use ids that belong to this segment.
+- **Hard requirement for `detailed_description`:** reference the relevant `<Picture ID>` tags in the actual shot descriptions, not only in `subject_definitions` or `retention_analysis`. Every shot must visibly connect its on-screen characters, scene and props to the matching picture tags. Never leave `detailed_description` without at least one `<Picture ID>` reference.
 - Because the images are design sheets, describe what each one establishes (appearance, costume, environment layout, prop shape). Do not call any of them a keyframe, a first frame or a composition anchor.
 - Define each referenced subject and explain which source assets establish its appearance or role. Use a standalone `<Picture N>` definition when the image itself is used as a frame/keyframe/composition anchor.
 - In `retention_analysis`, state where each referenced item is used and whether it is preserved, partially preserved, transferred, or reused.
@@ -47,6 +48,7 @@ This pipeline sends MiniMax H3 Ref2VA one reference image per character, per sce
 - Do not reduce the description to a plot summary or a list of reference relationships.
 - Use the provided storyboard cuts and timing as authoritative. Do not add or reorder events, shots, characters, props, dialogue, or sound.
 - Preserve every `<d>...</d>` dialogue block character-for-character. Keep the original dialogue language inside the block.
+- **Dialogue completeness is mandatory:** use the storyboard `beats` and the source script as the checklist. Include every dialogue line claimed by the segment, exactly once and in original order, each inside its own `<d>...</d>` block. Do not paraphrase, shorten, merge, omit, duplicate, or reorder lines. Before returning, compare the dialogue blocks against the claimed beats line by line; if any line is missing or out of order, revise the prompt rather than silently dropping it.
 - Separate diegetic sound/ambience from non-diegetic music. Do not invent a music track when none is specified.
 - Keep the final prompt under 7,000 characters.
 
