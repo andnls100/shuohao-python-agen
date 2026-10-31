@@ -159,7 +159,7 @@ def _repair_existing_h3(ctx: Context, doc: Dict[str, Any], path: Path,
     script = read_json(ctx.artifact("script"))
     fixes = repair_deterministic_storyboard(doc, prompt_lang, script)
     fixes += repair_minor_cut_durations(doc, prompt_lang)
-    fixes += repair_dialogue_fit(doc, script, prompt_lang)
+    # Dialogue timing is normalized before grouping; never extend cuts after boundaries are fixed.
     # Segment boundaries are fixed during initial shot grouping; never split during repair.
     if fixes:
         for fix in fixes:
