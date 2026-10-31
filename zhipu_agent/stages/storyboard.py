@@ -55,7 +55,7 @@ H3_REFERENCE_CONTRACT = (
 
 
 _PARAMS_KEY = "AGENT_STORYBOARD_PARAMS"
-STORYBOARD_DEFAULT_PARAMS = {"maxSegmentSeconds": 30, "minCutSeconds": 4, "maxCutSeconds": 10, "maxOnScreen": 6, "tolerance": 1.0, "h3Gates": False, "nameGate": True, "nameAllow": []}
+STORYBOARD_DEFAULT_PARAMS = {"maxSegmentSeconds": 20, "minCutSeconds": 4, "maxCutSeconds": 10, "maxOnScreen": 6, "tolerance": 1.0, "h3Gates": False, "nameGate": True, "nameAllow": []}
 
 
 def _params_raw() -> tuple:
@@ -676,7 +676,7 @@ def run(
                     + "\n"
                 )
             prompt = (
-                f"## 任务\n给第 {ep} 集逐场完整切镜：先把每场所有镜头规划完整，之后由程序每 3 个镜头组成一段（每场最后余 1–2 个镜头单独成段）。禁止模型先分段。每镜 {storyboard_params['minCutSeconds']}–{storyboard_params['maxCutSeconds']} 秒；任意连续 3 镜总时长必须 ≤ {storyboard_params['maxSegmentSeconds']} 秒。若超限，必须在镜头规划阶段合理调整镜头时长或增加镜头，不能删镜头、删节拍、删台词，也不能事后拆段。场次之间绝不合并。\n\n"
+                f"## 任务\n给第 {ep} 集逐场完整切镜：先把每场所有镜头规划完整，再由程序按镜头时长贪心分段：从本场第一个镜头开始依次累加，下一镜加入后若总时长会超过 20 秒，就在当前镜头前结束本段并另起一段。禁止固定每段镜头数，禁止跨场合并。每镜 {storyboard_params['minCutSeconds']}–{storyboard_params['maxCutSeconds']} 秒；每段总时长必须 ≤ 20 秒。不得删镜头、删节拍、删台词或事后拆段。\n\n"
                 + f"## 画幅与语言\naspectRatio = {aspect}；promptLang = {prompt_lang}（仅控制 frame、shot 等分镜字段语言；最终 Ref2V 视频提示词遵循所选 Skill，使用英文并保留对白原文）。\n\n"
                 + f"## 视觉风格（frame、shot 和最终 Ref2V 视频提示词必须统一遵守）\n{style_hint}\n保持同一风格贯穿所有镜头，不要在漫剧插画与真人摄影之间混用。\n\n"
                 + "## 多人同框说明\n单个分镜 characters 超过 3 人时，该分镜必须写非空 note：说明前景主体是谁、其余人物作为背景群像如何站位，以及哪些人物不单独特写。不超过 3 人可不写。\n\n"
@@ -693,7 +693,7 @@ def run(
                   "scenePlans 必须严格按 seedScenes 的 sceneIndex 一场一个，不能遗漏、重复、合并或调换；每个 scenePlan 的 cuts 是该场从第一拍到最后一拍的完整有序镜头清单。"
                   "每个 cut 必须包含完整字段（beats、seconds、frame、shot、characters、props、构图字段、continuity 等）；seconds 必须为 4–10 秒，且足以完整容纳该切认领的全部对白和动作。"
                   "不得依赖分组后的自动增时修复。对白时长不足时，必须在完整镜头规划中调整节奏与镜头分配，保留全部剧情和台词。"
-                  "每 3 镜头为一段（每场最后不足 3 镜头的余数单独成段），不得跨场，组内总时长必须不超过 maxSegmentSeconds。"
+                  "程序按镜头时长依次累加分段：加入下一镜会使本段总时长超过 20 秒时，就结束当前段并另起一段；不得固定每段镜头数量，不得跨场，任何一段总时长不得超过 20 秒。"
                   "每段最终 Ref2V 提示词由程序在分组和资产绑定完成后逐段独立生成。"
             )
             prompt += fight_instruction
@@ -719,7 +719,8 @@ def run(
             actual = [int(row.get("sceneIndex") or 0) for row in plans if isinstance(row, dict)]
             if actual != expected:
                 raise ValueError(f"E{ep:02d} scenePlans 场次顺序/数量错误；期望 {expected}，实际 {actual}")
-            max_segment = float(storyboard_params.get("maxSegmentSeconds", 30))
+            # Hard cap for this workflow: a segment is one video-generation request of at most 20 seconds.
+            max_segment = min(20.0, float(storyboard_params.get("maxSegmentSeconds", 20)))
             # Fit dialogue duration on complete scene cut lists BEFORE grouping.
             # This prevents dialogue repair from pushing a fixed segment over 30 seconds.
             timing_doc = {
@@ -748,13 +749,29 @@ def run(
                             f"E{ep:02d} 场次 {scene_index} 第 {cut_index} 切为 {seconds:.2f}s，"
                             f"必须在 {min_cut:g}–{max_cut:g}s；请在镜头规划阶段解决对白时长"
                         )
-                for offset in range(0, len(cuts), 3):
-                    grouped = cuts[offset:offset + 3]
-                    if any(not isinstance(cut, dict) for cut in grouped):
+                # Greedy duration-based grouping. Keep adding consecutive cuts until the
+                # next cut would push the segment over the hard 20-second limit.
+                groups = []
+                group_start = 0
+                grouped = []
+                group_seconds = 0.0
+                for cut_index, cut in enumerate(cuts):
+                    if not isinstance(cut, dict):
                         raise ValueError(f"E{ep:02d} 场次 {scene_index} 含非对象镜头")
-                    seconds = sum(float(cut.get("seconds") or 0) for cut in grouped)
+                    cut_seconds = float(cut.get("seconds") or 0)
+                    if grouped and group_seconds + cut_seconds > max_segment:
+                        groups.append((group_start, grouped, group_seconds))
+                        group_start = cut_index
+                        grouped = []
+                        group_seconds = 0.0
+                    grouped.append(cut)
+                    group_seconds += cut_seconds
+                if grouped:
+                    groups.append((group_start, grouped, group_seconds))
+
+                for group_number, (offset, grouped, seconds) in enumerate(groups, start=1):
                     if seconds <= 0 or seconds > max_segment:
-                        raise ValueError(f"E{ep:02d} 场次 {scene_index} 第 {offset // 3 + 1} 组为 {seconds:.2f}s，必须 0 < 总时长 ≤ {max_segment:g}s；禁止事后拆段")
+                        raise ValueError(f"E{ep:02d} 场次 {scene_index} 第 {group_number} 组为 {seconds:.2f}s，必须 0 < 总时长 ≤ {max_segment:g}s；禁止事后拆段")
                     segment = {"sceneIndex": scene_index, "cuts": grouped,
                                "blocking": plan.get("blocking", ""),
                                "continuityMode": plan.get("continuityMode", "continuous"),
