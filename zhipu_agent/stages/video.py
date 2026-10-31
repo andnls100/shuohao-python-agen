@@ -46,6 +46,7 @@ def _prompt(segment: dict, protocol: str, h3_prompt: Optional[str] = None) -> st
         raise ValueError(f"分段 {segment.get('id', '?')} 缺少 prompt.md 正文")
     if protocol != "seedance":
         raise ValueError(f"不支持的视频提示词协议：{protocol}")
+    h3 = str(segment.get("h3Prompt") or "").strip()
     parts = []
     if segment.get("blocking"):
         parts.append("【人物关系与构图逻辑】\n" + str(segment["blocking"]))
