@@ -318,10 +318,10 @@ class SegmentDurationSplitTest(unittest.TestCase):
             {"seconds": 10.0, "beats": [1, 2]},
             {"seconds": 10.0, "beats": [3, 4]},
             {"seconds": 10.0, "beats": [5, 6]},
-            {"seconds": 8.0, "beats": [7, 8]},
+            {"seconds": 8.0, "beats": [7, 8], "continuity": {"mode": "inherit", "stateBefore": "人物已走到门边，面向室内"}},
         ]
         doc = {"episodes": [{"ep": 5, "segments": [{
-            "id": "E05-02", "sceneIndex": 2, "continuityMode": "hard_cut", "h3Prompt": "original prompt",
+            "id": "E05-02", "sceneIndex": 2, "continuityMode": "hard_cut", "blocking": "original blocking", "h3Prompt": "original prompt",
             "cuts": cuts,
         }]}]}
         fixes, jobs = split_overlong_segments(doc, 30)
@@ -335,6 +335,7 @@ class SegmentDurationSplitTest(unittest.TestCase):
         self.assertEqual(len(jobs), 2)
         self.assertEqual(segments[0]["continuityMode"], "hard_cut")
         self.assertEqual(segments[1]["continuityMode"], "continuous")
+        self.assertEqual(segments[1]["blocking"], "人物已走到门边，面向室内")
         self.assertEqual([job[1] for job in jobs], ["original prompt", "original prompt"])
         self.assertTrue(all(not s["h3Prompt"] for s in segments))
         self.assertTrue(fixes)
