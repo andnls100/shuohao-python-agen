@@ -229,8 +229,10 @@ def _call_endpoint(
         "temperature": temperature if temperature is not None
         else (ep.temperature if ep.temperature is not None else s.temperature),
     }
-    # Deliberately omit max_tokens/max_completion_tokens: let the provider/model
-    # apply its native output limit instead of imposing an application-side cap.
+    # Only send an output cap when the caller explicitly requests one.
+    # Most stages leave this unset and use the provider/model native limit.
+    if max_tokens is not None:
+        params["max_tokens"] = max_tokens
     effort = reasoning_effort if reasoning_effort is not None else (
         ep.reasoning_effort if ep.reasoning_effort is not None else s.reasoning_effort
     )
